@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">字由输入法</string>
+    <string name="settings_title">字由输入法 设置</string>
+    <string name="ime_description">基于Rime引擎的简洁中文输入法</string>
+</resources>
