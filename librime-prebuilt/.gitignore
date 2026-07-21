@@ -1,5 +1,4 @@
 # librime-prebuilt 构建输出
 /build/
-/librime/
 /boost/
 /boost-*.tar.xz
