@@ -50,6 +50,15 @@ object AssetDeployer {
         return getDeployedVersion(context) > 0
     }
 
+    /**
+     * 是否需要（重新）部署：应用版本与已部署版本不一致时返回 true。
+     * 首次安装（已部署版本为 0）或版本升级（新增/修改方案）均返回 true，
+     * 供调用方据此决定是否让 Rime 执行完整维护（fullCheck）以编译新方案。
+     */
+    fun needsDeploy(context: Context): Boolean {
+        return getAppVersionCode(context) != getDeployedVersion(context)
+    }
+
     private fun performDeploy(context: Context, versionCode: Long): Boolean {
         return try {
             val targetDir = File(getSharedDataDir(context))

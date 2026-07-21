@@ -38,7 +38,7 @@ class CommitProto {
 
   CommitProto() = default;
 
-  explicit CommitProto(const RimeCommit* commit) : text(commit->text) {}
+  explicit CommitProto(const RimeCommit* commit) : text(commit->text ? commit->text : "") {}
 };
 
 class CandidateProto {
@@ -49,7 +49,8 @@ class CandidateProto {
 
   CandidateProto() = default;
   explicit CandidateProto(const RimeCandidate& c)
-      : text(c.text), comment(c.comment ? c.comment : "") {}
+      : text(c.text ? c.text : ""),
+        comment(c.comment ? c.comment : "") {}
 };
 
 class CompositionProto {
@@ -93,11 +94,13 @@ class ContextProto {
     if (context->composition.length > 0) {
       auto& c = context->composition;
       auto t = c.preedit;
-      composition.length = distance(t, t + c.length);
-      composition.cursorPos = distance(t, t + c.cursor_pos);
-      composition.selStart = distance(t, t + c.sel_start);
-      composition.selEnd = distance(t, t + c.sel_end);
-      composition.preedit = t;
+      if (t) {
+        composition.length = distance(t, t + c.length);
+        composition.cursorPos = distance(t, t + c.cursor_pos);
+        composition.selStart = distance(t, t + c.sel_start);
+        composition.selEnd = distance(t, t + c.sel_end);
+        composition.preedit = t;
+      }
       if (context->commit_text_preview) {
         composition.commitTextPreview = context->commit_text_preview;
       }
@@ -113,9 +116,9 @@ class ContextProto {
       destCandidates.reserve(m.num_candidates);
       for (int i = 0; i < m.num_candidates; ++i) {
         std::string label;
-        if (i < m.page_size && RIME_PROVIDED(context, select_labels)) {
-          label = context->select_labels[i];
-        } else if (i < selectKeysSize) {
+        if (i < m.page_size && RIME_PROVIDED(context, select_labels) && context->select_labels) {
+          label = context->select_labels[i] ? context->select_labels[i] : "";
+        } else if (i < selectKeysSize && m.select_keys) {
           label = std::string(1, m.select_keys[i]);
         } else {
           label = std::to_string((i + 1) % 10);
@@ -123,7 +126,7 @@ class ContextProto {
         menu.selectLabels.emplace_back(label);
         const auto& candidate = m.candidates[i];
         destCandidates.emplace_back();
-        destCandidates.back().text = candidate.text;
+        destCandidates.back().text = candidate.text ? candidate.text : "";
         if (candidate.comment) {
           destCandidates.back().comment = candidate.comment;
         }
@@ -149,7 +152,7 @@ class StatusProto {
   StatusProto() = default;
 
   explicit StatusProto(const RimeStatus* status)
-      : schemaId(status->schema_id),
+      : schemaId(status->schema_id ? status->schema_id : ""),
         schemaName(status->schema_name ? status->schema_name : ""),
         isDisabled(status->is_disabled),
         isComposing(status->is_composing),

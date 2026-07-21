@@ -1,5 +1,6 @@
 *.iml
 .gradle
+.kotlin/
 /local.properties
 /.idea
 .DS_Store
@@ -9,3 +10,8 @@
 .cxx
 /libs/*.a
 /libs/**/*.a
+
+# librime-prebuilt 构建产物
+librime-prebuilt/superbuild/
+librime-prebuilt/boost/
+librime-prebuilt/boost-*.tar.xz

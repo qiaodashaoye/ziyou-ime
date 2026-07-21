@@ -24,7 +24,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SIMPLERIME_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ZIYOU_IME_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # ---------------------------------------------------------------------------
 # 参数与默认值
@@ -44,7 +44,7 @@ WITH_OCTAGRAM="${WITH_OCTAGRAM:-OFF}"
 WITH_PREDICT="${WITH_PREDICT:-OFF}"
 
 BUILD_ROOT="${SCRIPT_DIR}/build"
-INSTALL_DIR="${SIMPLERIME_DIR}/libs"
+INSTALL_DIR="${ZIYOU_IME_DIR}/libs"
 
 # ---------------------------------------------------------------------------
 # 探测 NDK
@@ -56,10 +56,10 @@ find_ndk() {
   if [ -n "${ANDROID_NDK:-}" ] && [ -d "${ANDROID_NDK}" ]; then
     echo "${ANDROID_NDK}"; return
   fi
-  # 从 simplerime/local.properties 读取 sdk.dir，再找 ndk/<version>
+  # 从 ziyou-ime/local.properties 读取 sdk.dir，再找 ndk/<version>
   local sdk_dir=""
-  if [ -f "${SIMPLERIME_DIR}/local.properties" ]; then
-    sdk_dir="$(grep -E '^\s*sdk\.dir=' "${SIMPLERIME_DIR}/local.properties" | sed 's/^[^=]*=//' | tr -d '\r')"
+  if [ -f "${ZIYOU_IME_DIR}/local.properties" ]; then
+    sdk_dir="$(grep -E '^\s*sdk\.dir=' "${ZIYOU_IME_DIR}/local.properties" | sed 's/^[^=]*=//' | tr -d '\r')"
     # local.properties 会转义冒号（macOS 路径无冒号，通常无碍）
     sdk_dir="${sdk_dir//\\:/:}"
   fi
@@ -83,11 +83,49 @@ find_ndk() {
 NDK_DIR="$(find_ndk)"
 if [ -z "${NDK_DIR}" ] || [ ! -f "${NDK_DIR}/build/cmake/android.toolchain.cmake" ]; then
   echo "错误: 未找到 Android NDK。" >&2
-  echo "请设置 ANDROID_NDK_HOME 指向 NDK 根目录，或在 simplerime/local.properties 配置 sdk.dir。" >&2
+  echo "请设置 ANDROID_NDK_HOME 指向 NDK 根目录，或在 ziyou-ime/local.properties 配置 sdk.dir。" >&2
   exit 1
 fi
 TOOLCHAIN="${NDK_DIR}/build/cmake/android.toolchain.cmake"
 echo ">> 使用 NDK: ${NDK_DIR}"
+
+# ---------------------------------------------------------------------------
+# 探测 CMake（优先使用 Android SDK 自带的 cmake）
+# ---------------------------------------------------------------------------
+find_cmake() {
+  # 检查 cmake 是否在 PATH 中
+  if command -v cmake &>/dev/null; then
+    echo "cmake"; return
+  fi
+  # 从 Android SDK 查找 cmake
+  local sdk_dir=""
+  if [ -f "${ZIYOU_IME_DIR}/local.properties" ]; then
+    sdk_dir="$(grep -E '^\s*sdk\.dir=' "${ZIYOU_IME_DIR}/local.properties" | sed 's/^[^=]*=//' | tr -d '\r')"
+    sdk_dir="${sdk_dir//\\:/:}"
+  fi
+  if [ -z "${sdk_dir}" ] && [ -n "${ANDROID_SDK_ROOT:-}" ]; then
+    sdk_dir="${ANDROID_SDK_ROOT}"
+  fi
+  if [ -z "${sdk_dir}" ] && [ -n "${ANDROID_HOME:-}" ]; then
+    sdk_dir="${ANDROID_HOME}"
+  fi
+  if [ -n "${sdk_dir}" ] && [ -d "${sdk_dir}/cmake" ]; then
+    local cmake_bin
+    cmake_bin="$(ls -1d "${sdk_dir}/cmake/"*/bin/cmake 2>/dev/null | sort -V | tail -n 1)"
+    if [ -n "${cmake_bin}" ] && [ -x "${cmake_bin}" ]; then
+      echo "${cmake_bin}"; return
+    fi
+  fi
+  echo ""; 
+}
+
+CMAKE_BIN="$(find_cmake)"
+if [ -z "${CMAKE_BIN}" ]; then
+  echo "错误: 未找到 cmake。" >&2
+  echo "请安装 cmake 或确保 Android SDK cmake 组件已安装。" >&2
+  exit 1
+fi
+echo ">> 使用 CMake: ${CMAKE_BIN}"
 
 # ---------------------------------------------------------------------------
 # 准备 librime 源码
@@ -131,12 +169,14 @@ for ABI in "${ABIS[@]}"; do
   BUILD_DIR="${BUILD_ROOT}/${ABI}"
   mkdir -p "${BUILD_DIR}"
 
-  cmake -S "${SCRIPT_DIR}" -B "${BUILD_DIR}" -G "Unix Makefiles" \
+  # 指向 superbuild/ 子目录（已重命名以防止 Android Studio 自动检测）
+  "${CMAKE_BIN}" -S "${SCRIPT_DIR}/superbuild" -B "${BUILD_DIR}" -G "Unix Makefiles" \
     -DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN}" \
     -DANDROID_ABI="${ABI}" \
     -DANDROID_PLATFORM="android-${ANDROID_PLATFORM}" \
     -DANDROID_STL="c++_static" \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="${BUILD_DIR}/install" \
     -DLIBRIME_SOURCE_DIR="${LIBRIME_SOURCE_DIR}" \
     -DPREBUILT_INSTALL_DIR="${INSTALL_DIR}" \
     -DWITH_LUA="${WITH_LUA}" \
@@ -144,10 +184,10 @@ for ABI in "${ABIS[@]}"; do
     -DWITH_PREDICT="${WITH_PREDICT}"
 
   # 触发合并静态库（bundling_target 为 ALL 目标）
-  cmake --build "${BUILD_DIR}" --parallel "${JOBS}"
+  "${CMAKE_BIN}" --build "${BUILD_DIR}" --parallel "${JOBS}"
 
   # 安装合并库 + 头文件到 ../libs
-  cmake --install "${BUILD_DIR}"
+  "${CMAKE_BIN}" --install "${BUILD_DIR}"
 
   echo ">> ${ABI} 完成: ${INSTALL_DIR}/${ABI}/librime.a"
 done

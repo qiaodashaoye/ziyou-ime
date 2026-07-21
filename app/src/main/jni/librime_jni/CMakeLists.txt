@@ -14,9 +14,14 @@ option(WITH_OCTAGRAM "Enable Octagram module" OFF)
 option(WITH_PREDICT "Enable Predict module" OFF)
 option(WITH_OPENCC "Enable OpenCC module" OFF)
 
-# librime 头文件路径（根据实际预编译路径调整）
-set(RIME_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/../../../../libs/include")
-set(RIME_LIB_DIR "${CMAKE_SOURCE_DIR}/../../../../libs/${ANDROID_ABI}")
+# librime 头文件和静态库路径
+# 使用绝对路径指向 ziyou-ime/libs/ 目录
+get_filename_component(ZIYOU_IME_ROOT "${CMAKE_SOURCE_DIR}/../../../../../" ABSOLUTE)
+set(RIME_INCLUDE_DIR "${ZIYOU_IME_ROOT}/libs/include")
+set(RIME_LIB_DIR "${ZIYOU_IME_ROOT}/libs/${ANDROID_ABI}")
+
+message(STATUS "RIME_INCLUDE_DIR = ${RIME_INCLUDE_DIR}")
+message(STATUS "RIME_LIB_DIR = ${RIME_LIB_DIR}")
 
 # 包含目录
 include_directories(
@@ -47,13 +52,23 @@ endif()
 # 构建共享库
 add_library(rime_jni SHARED ${RIME_JNI_SOURCES})
 
-# 链接librime静态库（如果存在）
-find_library(RIME_LIB rime PATHS ${RIME_LIB_DIR} NO_DEFAULT_PATH)
-if(RIME_LIB)
-    target_link_libraries(rime_jni ${RIME_LIB})
+# 链接器优化：死代码消除 + 16KB 页面对齐（Android 15+ 要求）
+target_link_options(rime_jni PRIVATE
+    "LINKER:--gc-sections"
+    "LINKER:--exclude-libs,ALL"
+    "LINKER:-z,max-page-size=16384"
+)
+
+# 链接librime静态库
+set(RIME_LIB_FILE "${RIME_LIB_DIR}/librime.a")
+if(EXISTS "${RIME_LIB_FILE}")
+    message(STATUS "Found librime: ${RIME_LIB_FILE}")
+    target_link_libraries(rime_jni "${RIME_LIB_FILE}")
 else()
-    # 如果没有预编译库，尝试从系统路径查找
-    message(WARNING "librime not found at ${RIME_LIB_DIR}, using stub mode")
+    message(FATAL_ERROR
+        "librime.a not found at: ${RIME_LIB_FILE}\n"
+        "Please build librime for ${ANDROID_ABI} and place it in libs/${ANDROID_ABI}/librime.a\n"
+        "See librime-prebuilt/README.md for build instructions.")
 endif()
 
 # 链接系统库

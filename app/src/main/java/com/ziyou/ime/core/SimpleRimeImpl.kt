@@ -19,6 +19,10 @@ class SimpleRimeImpl(
 
     override suspend fun startup(sharedDir: String, userDir: String, version: String, fullCheck: Boolean) {
         dispatcher.dispatch {
+            if (!RimeNative.isLoaded) {
+                Log.e(TAG, "rime_jni 库未加载，无法启动Rime引擎")
+                throw IllegalStateException("rime_jni 库未加载，无法启动Rime引擎")
+            }
             Log.i(TAG, "启动Rime引擎: shared=$sharedDir, user=$userDir, version=$version")
             RimeNative.startupRime(sharedDir, userDir, version, fullCheck)
             Log.i(TAG, "Rime引擎启动完成")

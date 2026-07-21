@@ -80,6 +80,8 @@ object KeyCode {
     const val KEYCODE_SWITCH_LANGUAGE = -100
     /** 用于内部标识符号键盘切换 */
     const val KEYCODE_SYMBOL = -101
+    /** 用于内部标识键盘布局切换（全键盘 / 九宫格等） */
+    const val KEYCODE_SWITCH_KEYBOARD = -102
 
     /**
      * 将Android KeyEvent的keyCode转换为Rime keysym

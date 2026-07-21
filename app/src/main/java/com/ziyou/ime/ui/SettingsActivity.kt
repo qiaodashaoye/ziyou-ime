@@ -10,9 +10,13 @@ import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.config.ThemeManager
-import com.ziyou.ime.core.RimeNative
+import com.ziyou.ime.daemon.RimeSession
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 字由输入法 设置页面
@@ -40,13 +44,37 @@ class SettingsActivity : AppCompatActivity() {
         setContentView(buildSettingsView())
         title = "字由输入法 设置"
 
-        // 更新显示状态
-        refreshDisplay()
+        // 通过 RimeSession 统一初始化引擎（异步，避免主线程阻塞和双重初始化）
+        ensureRimeStarted()
     }
 
     override fun onResume() {
         super.onResume()
-        refreshDisplay()
+        if (RimeSession.initialized) {
+            refreshDisplay()
+        }
+    }
+
+    /**
+     * 通过 RimeSession 统一初始化 Rime 引擎
+     * 避免直接调用 RimeNative（线程不安全）并防止与 IMS 服务双重初始化
+     */
+    private fun ensureRimeStarted() {
+        lifecycleScope.launch {
+            try {
+                if (!RimeSession.initialized) {
+                    Log.i(TAG, "SettingsActivity: 开始初始化 RimeSession")
+                    RimeSession.initialize(applicationContext, fullCheck = false)
+                    Log.i(TAG, "SettingsActivity: RimeSession 初始化完成")
+                }
+                // 初始化完成后刷新显示
+                withContext(Dispatchers.Main) {
+                    refreshDisplay()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "启动Rime引擎失败: ${e.message}", e)
+            }
+        }
     }
 
     /**
@@ -142,28 +170,40 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun showSchemaSelector() {
-        val schemas = RimeNative.getRimeSchemaList()
-        if (schemas.isNullOrEmpty()) {
-            showToast("无法获取方案列表，请确保Rime引擎已启动")
-            return
-        }
+        lifecycleScope.launch {
+            try {
+                val schemas = RimeSession.api.getSchemaList()
+                if (schemas.isEmpty()) {
+                    showToast("无法获取方案列表，请确保Rime引擎已启动")
+                    return@launch
+                }
 
-        val schemaNames = schemas.map { it.name }.toTypedArray()
-        val currentSchema = RimeNative.getCurrentRimeSchema()
-        val currentIndex = schemas.indexOfFirst { it.schemaId == currentSchema }
+                val currentSchema = RimeSession.api.getCurrentSchema()
+                val currentIndex = schemas.indexOfFirst { it.schemaId == currentSchema }
+                val schemaNames = schemas.map { it.name }.toTypedArray()
 
-        AlertDialog.Builder(this)
-            .setTitle("选择输入方案")
-            .setSingleChoiceItems(schemaNames, currentIndex) { dialog, which ->
-                val selectedSchema = schemas[which]
-                RimeNative.selectRimeSchema(selectedSchema.schemaId)
-                schemaValueText.text = selectedSchema.name
-                Log.i(TAG, "切换方案: ${selectedSchema.schemaId}")
-                showToast("已切换到: ${selectedSchema.name}")
-                dialog.dismiss()
+                withContext(Dispatchers.Main) {
+                    AlertDialog.Builder(this@SettingsActivity)
+                        .setTitle("选择输入方案")
+                        .setSingleChoiceItems(schemaNames, currentIndex) { dialog, which ->
+                            val selectedSchema = schemas[which]
+                            lifecycleScope.launch {
+                                RimeSession.api.selectSchema(selectedSchema.schemaId)
+                                withContext(Dispatchers.Main) {
+                                    schemaValueText.text = selectedSchema.name
+                                    showToast("已切换到: ${selectedSchema.name}")
+                                }
+                            }
+                            dialog.dismiss()
+                        }
+                        .setNegativeButton("取消", null)
+                        .show()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "获取方案列表异常: ${e.message}", e)
+                showToast("获取方案列表失败")
             }
-            .setNegativeButton("取消", null)
-            .show()
+        }
     }
 
     private fun showThemeSelector() {
@@ -188,13 +228,22 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun syncUserData() {
         showToast("开始同步用户词典...")
-        val success = RimeNative.syncRimeUserData()
-        if (success) {
-            showToast("用户词典同步完成")
-            Log.i(TAG, "用户词典同步成功")
-        } else {
-            showToast("同步失败，请确保Rime引擎已启动")
-            Log.w(TAG, "用户词典同步失败")
+        lifecycleScope.launch {
+            try {
+                val success = RimeSession.api.syncUserData()
+                withContext(Dispatchers.Main) {
+                    if (success) {
+                        showToast("用户词典同步完成")
+                    } else {
+                        showToast("同步失败，请确保Rime引擎已启动")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "同步用户词典异常: ${e.message}", e)
+                withContext(Dispatchers.Main) {
+                    showToast("同步失败")
+                }
+            }
         }
     }
 
@@ -218,11 +267,19 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun refreshDisplay() {
-        if (::schemaValueText.isInitialized) {
-            val currentSchema = RimeNative.getCurrentRimeSchema()
-            val schemas = RimeNative.getRimeSchemaList()
-            val schemaName = schemas?.firstOrNull { it.schemaId == currentSchema }?.name
-            schemaValueText.text = schemaName ?: "未知方案"
+        if (::schemaValueText.isInitialized && RimeSession.initialized) {
+            lifecycleScope.launch {
+                try {
+                    val currentSchema = RimeSession.api.getCurrentSchema()
+                    val schemas = RimeSession.api.getSchemaList()
+                    val schemaName = schemas.firstOrNull { it.schemaId == currentSchema }?.name
+                    withContext(Dispatchers.Main) {
+                        schemaValueText.text = schemaName ?: "未知方案"
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "刷新方案显示失败: ${e.message}")
+                }
+            }
         }
 
         if (::themeValueText.isInitialized) {

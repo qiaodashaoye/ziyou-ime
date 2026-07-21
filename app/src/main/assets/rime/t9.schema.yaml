@@ -1,0 +1,94 @@
+# Rime schema
+# encoding: utf-8
+#
+# 九宫格（T9）拼音方案 —— 智能九键（单击数字键，引擎消歧）
+#
+# 复用 luna_pinyin 词库。核心原理（参考 rime-ice / 薄荷九宫格）：
+#   speller/algebra 通过 derive 把每个拼音字母额外派生出「数字键」写法，
+#   2=abc 3=def 4=ghi 5=jkl 6=mno 7=pqrs 8=tuv 9=wxyz，
+#   于是输入 486 可命中 guo/gun/huo/hun 等所有映射到 486 的音节，由引擎消歧。
+#   spelling_hints 让候选携带其真实拼音（作为 comment），供客户端「拼音候选区」展示。
+#   ' （撇号，客户端由「分词」键发送）用于手动分词。
+
+schema:
+  schema_id: t9
+  name: 中文九键
+  version: "2.0"
+  author:
+    - 字由输入法
+  description: |
+    智能九宫格（T9）拼音方案，复用朙月拼音词库。
+    单击数字键 2-9 输入，由引擎在所有可能拼音组合中匹配候选。
+
+switches:
+  - name: ascii_mode
+    reset: 0
+    states: [ 中文, ABC ]
+  - name: ascii_punct
+    reset: 0
+    states: [ 中文标点, 西文标点 ]
+
+engine:
+  processors:
+    - ascii_composer
+    - recognizer
+    - key_binder
+    - speller
+    - punctuator
+    - selector
+    - navigator
+    - express_editor
+  segmentors:
+    - ascii_segmentor
+    - matcher
+    - abc_segmentor
+    - punct_segmentor
+    - fallback_segmentor
+  translators:
+    - punct_translator
+    - script_translator
+  filters:
+    - uniquifier
+
+speller:
+  # 数字键与字母共同构成编码字母表；空格与撇号用于分词
+  alphabet: 'zyxwvutsrqponmlkjihgfedcba9876543210'
+  delimiter: " '"
+  algebra:
+    - erase/^xx$/
+    # 超级简拼（首字母），zh/ch/sh 视为整体
+    - abbrev/^([a-z]).+$/$1/
+    - abbrev/^([zcs]h).+$/$1/
+    # 常见容错
+    - derive/^([nl])ve$/$1ue/
+    - derive/^([jqxy])u/$1v/
+    - derive/un$/uen/
+    - derive/ui$/uei/
+    - derive/iu$/iou/
+    # 九宫格数字映射（保留字母写法，额外派生数字写法）
+    - derive/[abc]/2/
+    - derive/[def]/3/
+    - derive/[ghi]/4/
+    - derive/[jkl]/5/
+    - derive/[mno]/6/
+    - derive/[pqrs]/7/
+    - derive/[tuv]/8/
+    - derive/[wxyz]/9/
+
+translator:
+  dictionary: luna_pinyin
+  enable_user_dict: true
+  enable_sentence: true
+  # 让候选携带真实拼音读音（作为 comment），供客户端拼音候选区展示
+  spelling_hints: 32
+  preedit_format:
+    - xform/([nljqxy])v/$1ü/
+
+punctuator:
+  import_preset: default
+
+key_binder:
+  import_preset: default
+
+recognizer:
+  import_preset: default

@@ -2,11 +2,13 @@ package com.ziyou.ime.daemon
 
 import android.content.Context
 import android.util.Log
+import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.core.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
 /**
@@ -44,6 +46,9 @@ object RimeSession {
     private var sessionScope: CoroutineScope? = null
     private var isInitialized = false
 
+    /** Rime引擎启动超时时间（毫秒） */
+    private const val STARTUP_TIMEOUT_MS = 120_000L
+
     /** 获取RimeApi实例（需要先调用initialize） */
     val api: RimeApi
         get() = rimeApi ?: throw IllegalStateException("RimeSession 未初始化，请先调用 initialize()")
@@ -69,6 +74,12 @@ object RimeSession {
 
         Log.i(TAG, "开始初始化 RimeSession")
 
+        // 第一步：部署资源文件（首次安装/升级时从 assets 复制到内部存储）
+        // 这里运行在协程线程上，不会阻塞主线程
+        Log.i(TAG, "部署 Rime 资源文件...")
+        AssetDeployer.deployIfNeeded(context)
+        Log.i(TAG, "资源文件部署完成")
+
         // 准备目录
         val sharedDir = getSharedDataDir(context)
         val userDir = getUserDataDir(context)
@@ -89,16 +100,26 @@ object RimeSession {
             "1.0.0"
         }
 
-        // 启动引擎
-        newApi.startup(
-            sharedDir = sharedDir.absolutePath,
-            userDir = userDir.absolutePath,
-            version = versionName,
-            fullCheck = fullCheck
-        )
+        // 启动引擎（带超时保护，避免 start_maintenance 阻塞过久）
+        Log.i(TAG, "启动 Rime 引擎（超时=${STARTUP_TIMEOUT_MS}ms）...")
+        val started = withTimeoutOrNull(STARTUP_TIMEOUT_MS) {
+            newApi.startup(
+                sharedDir = sharedDir.absolutePath,
+                userDir = userDir.absolutePath,
+                version = versionName,
+                fullCheck = fullCheck
+            )
+            true
+        }
 
-        isInitialized = true
-        Log.i(TAG, "RimeSession 初始化完成")
+        if (started == true) {
+            isInitialized = true
+            Log.i(TAG, "RimeSession 初始化完成")
+        } else {
+            Log.e(TAG, "Rime 引擎启动超时（${STARTUP_TIMEOUT_MS}ms），请检查词典文件或降低 fullCheck")
+            // 即使超时也标记为已初始化，允许后续操作（引擎可能仍在后台维护）
+            isInitialized = true
+        }
     }
 
     /**

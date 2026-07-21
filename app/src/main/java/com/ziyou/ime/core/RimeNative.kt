@@ -10,12 +10,32 @@ import android.util.Log
 object RimeNative {
     private const val TAG = "RimeNative"
 
+    /** 标记 native 库是否成功加载 */
+    @JvmStatic
+    var isLoaded: Boolean = false
+        private set
+
     init {
         try {
             System.loadLibrary("rime_jni")
+            isLoaded = true
             Log.i(TAG, "rime_jni 库加载成功")
         } catch (e: UnsatisfiedLinkError) {
-            Log.e(TAG, "rime_jni 库加载失败: ${e.message}")
+            isLoaded = false
+            Log.e(TAG, "rime_jni 库加载失败: ${e.message}", e)
+        }
+    }
+
+    /**
+     * 检查 native 库是否已加载，未加载则抛出异常
+     * 应在调用任何 native 方法前调用
+     */
+    private fun ensureLoaded() {
+        if (!isLoaded) {
+            throw IllegalStateException(
+                "rime_jni 库未加载，无法调用 native 方法。" +
+                "可能原因：ABI 不匹配（仅支持 arm64-v8a）或 .so 文件缺失"
+            )
         }
     }
 

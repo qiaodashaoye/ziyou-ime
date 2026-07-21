@@ -6,6 +6,7 @@
 
 #include <rime_api.h>
 
+#include <android/log.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -43,7 +44,7 @@ static void declare_librime_module_dependencies() {
 // Rime引擎单例封装，管理会话生命周期和所有核心操作
 class Rime {
  public:
-  Rime() : rime(rime_get_api()) {}
+  Rime() : rime(rime_get_api()), initialized_(false) {}
   Rime(Rime const &) = delete;
   void operator=(Rime const &) = delete;
 
@@ -52,9 +53,17 @@ class Rime {
     return instance;
   }
 
+  bool isInitialized() const { return initialized_ && rime; }
+
   void startup(bool fullCheck,
                const RimeNotificationHandler &notificationHandler) {
     if (!rime) return;
+    // 防止重复初始化，避免内存泄漏和崩溃
+    if (initialized_) {
+      __android_log_print(ANDROID_LOG_WARN, "RimeJNI",
+                          "Rime already initialized, skipping startup");
+      return;
+    }
     const char *userDir = getenv("RIME_USER_DATA_DIR");
     const char *sharedDir = getenv("RIME_SHARED_DATA_DIR");
     const char *versionName = getenv("RIME_DISTRIBUTION_VERSION");
@@ -72,6 +81,9 @@ class Rime {
     rime->initialize(&traits);
     rime->set_notification_handler(notificationHandler, GlobalRef->jvm);
     rime->start_maintenance(fullCheck);
+    initialized_ = true;
+    __android_log_print(ANDROID_LOG_INFO, "RimeJNI",
+                        "Rime engine started successfully");
   }
 
   bool processKey(int keycode, int mask) {
@@ -124,6 +136,7 @@ class Rime {
   }
 
   std::string currentSchemaId() {
+    if (!isInitialized()) return "";
     char result[MAX_BUFFER_LENGTH];
     return rime->get_current_schema(session(), result, MAX_BUFFER_LENGTH)
                ? result
@@ -132,6 +145,7 @@ class Rime {
 
   std::vector<SchemaItem> schemaList() {
     std::vector<SchemaItem> result;
+    if (!isInitialized()) return result;
     RimeSchemaList list{};
     if (rime->get_schema_list(&list)) {
       result = SchemaItem::fromCList(list);
@@ -185,13 +199,20 @@ class Rime {
     auto list = getCandidates(0, limit);
     // 使用-1表示当前候选词数量不确定
     auto size = list.size() < limit ? list.size() : -1;
-    auto highlighted = rime_get_highlighted_candidate_index(session());
+    // 从 RimeContext 获取高亮候选词索引
+    int highlighted = 0;
+    RIME_STRUCT(RimeContext, ctx)
+    if (rime->get_context(session(), &ctx)) {
+      highlighted = ctx.menu.highlighted_candidate_index;
+      rime->free_context(&ctx);
+    }
     return std::make_tuple(size, highlighted, std::move(list));
   }
 
   void exit() {
     session_.reset();
     rime->finalize();
+    initialized_ = false;
   }
 
   bool sync() {
@@ -201,6 +222,7 @@ class Rime {
 
  private:
   RimeApi *rime;
+  bool initialized_;
   std::shared_ptr<SessionHolder> session_;
 
   RimeSessionId session(bool requestNewSession = true) {
@@ -244,6 +266,7 @@ Java_com_ziyou_ime_core_RimeNative_startupRime(
   auto notificationHandler = [](void *context_object, RimeSessionId session_id,
                                 const char *message_type,
                                 const char *message_value) {
+    if (!message_type || !message_value) return;
     auto env = GlobalRef->AttachEnv();
     int type = 0;  // unknown
     if (strcmp(message_type, "schema") == 0) {
@@ -258,6 +281,11 @@ Java_com_ziyou_ime_core_RimeNative_startupRime(
     env->SetObjectArrayElement(vararg, 0, JString(env, message_value));
     env->CallStaticVoidMethod(GlobalRef->Rime, GlobalRef->HandleRimeMessage,
                               type, *vararg);
+    // 检查并清除 JNI 异常，避免崩溃
+    if (env->ExceptionCheck()) {
+      env->ExceptionDescribe();
+      env->ExceptionClear();
+    }
   };
 
   Rime::Instance().startup(full_check, notificationHandler);

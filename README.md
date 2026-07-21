@@ -44,7 +44,7 @@
 
 ```bash
 git clone <repository-url>
-cd simplerime
+cd ziyou-ime
 ```
 
 ### 2. 准备 librime 预编译库
@@ -200,7 +200,7 @@ schema_list:
 ## 项目结构
 
 ```
-simplerime/
+ziyou-ime/
 ├── app/src/main/
 │   ├── assets/rime/               # Rime配置文件（7个，来自librime/data/minimal/）
 │   ├── java/com/ziyou/ime/

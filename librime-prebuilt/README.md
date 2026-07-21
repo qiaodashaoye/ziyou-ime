@@ -1,8 +1,8 @@
 # librime 预编译库模块（librime-prebuilt）
 
-本模块负责为**字由输入法（simplerime）**从源码交叉编译 [librime](https://github.com/rime/librime) 及其全部依赖，并合并成**单个** Android 静态库 `librime.a`（按 ABI 分目录），供 app 的 JNI 层直接链接。
+本模块负责为**字由输入法（ziyou-ime）**从源码交叉编译 [librime](https://github.com/rime/librime) 及其全部依赖，并合并成**单个** Android 静态库 `librime.a`（按 ABI 分目录），供 app 的 JNI 层直接链接。
 
-它用于**取代**此前从 Trime 项目获取预编译库的做法 —— 在 Trime 被删除后，simplerime 可以完全独立地生成所需的 librime 预编译库。
+它用于**取代**此前从 Trime 项目获取预编译库的做法 —— 在 Trime 被删除后，ziyou-ime 可以完全独立地生成所需的 librime 预编译库。
 
 ---
 
@@ -20,13 +20,13 @@ Trime app 构建
 
 其关键点是：`rime-static` 与各依赖处于**同一个 CMake 构建树**，CMake 自动解析传递依赖，无需真正落地成 `.a` 文件。
 
-simplerime 的定位不同：它的 JNI 层（`app/src/main/jni/librime_jni/CMakeLists.txt`）期望链接一个**已存在的**静态库：
+ziyou-ime 的定位不同：它的 JNI 层（`app/src/main/jni/librime_jni/CMakeLists.txt`）期望链接一个**已存在的**静态库：
 
 ```cmake
 find_library(RIME_LIB rime PATHS ${RIME_LIB_DIR} NO_DEFAULT_PATH)  # libs/<abi>/librime.a
 ```
 
-因此本模块的职责就是：把 Trime 那套「从源码编译」的机制**独立出来**，并在最后**把 librime + 所有依赖合并成一个 `librime.a`**，产出到 `simplerime/libs/`。
+因此本模块的职责就是：把 Trime 那套「从源码编译」的机制**独立出来**，并在最后**把 librime + 所有依赖合并成一个 `librime.a`**，产出到 `ziyou-ime/libs/`。
 
 本模块的 CMake 依赖配置（`cmake/*.cmake` 中的 Find shim、`Boost.cmake`、`OpenccWorkarounds.cmake`）均**移植自 Trime 的成熟实现**，行为一致。
 
@@ -53,10 +53,10 @@ librime-prebuilt/
 └── librime/                    # librime 源码（子模块或脚本自动 clone；已被 .gitignore）
 ```
 
-**产出目录**（位于 simplerime 根，正是 app 的 JNI 层期望的布局）：
+**产出目录**（位于 ziyou-ime 根，正是 app 的 JNI 层期望的布局）：
 
 ```
-simplerime/libs/
+ziyou-ime/libs/
 ├── include/
 │   └── rime_api.h              # 及其它 librime 公共头文件
 ├── arm64-v8a/
@@ -89,7 +89,7 @@ simplerime/libs/
 
 **方式 A（推荐）—— 作为 git 子模块固定版本**
 
-在 simplerime 仓库根目录执行：
+在 ziyou-ime 仓库根目录执行：
 
 ```bash
 git submodule add https://github.com/rime/librime.git librime-prebuilt/librime
@@ -105,14 +105,14 @@ cd ../..
 无需手动操作，直接进入步骤 2。`build.sh` 检测到 `librime-prebuilt/librime` 不存在时，会自动执行
 `git clone --recursive`（版本由环境变量 `LIBRIME_VERSION` 指定，默认 `master`）。
 
-> **版本兼容性**：simplerime 的 JNI 层仅使用 `rime_api.h` 暴露的 C 接口（`RimeTraits` / `RimeContext` / `process_key` 等），这些 API 长期稳定，librime **1.8.0 及以上**均兼容。为保证可复现，建议用方式 A 固定到一个具体 commit（可参考 Trime 曾使用的 librime commit 作为已验证基线）。
+> **版本兼容性**：ziyou-ime 的 JNI 层仅使用 `rime_api.h` 暴露的 C 接口（`RimeTraits` / `RimeContext` / `process_key` 等），这些 API 长期稳定，librime **1.8.0 及以上**均兼容。为保证可复现，建议用方式 A 固定到一个具体 commit（可参考 Trime 曾使用的 librime commit 作为已验证基线）。
 
 ### 步骤 2：配置 NDK 路径
 
 脚本会按以下顺序自动探测 NDK，任选一种即可：
 
 1. 环境变量 `ANDROID_NDK_HOME`（或 `ANDROID_NDK`）；
-2. `simplerime/local.properties` 中的 `sdk.dir`，再取 `sdk.dir/ndk/<最高版本>`；
+2. `ziyou-ime/local.properties` 中的 `sdk.dir`，再取 `sdk.dir/ndk/<最高版本>`；
 3. 环境变量 `ANDROID_SDK_ROOT` / `ANDROID_HOME` 下的 `ndk/`。
 
 如需手动指定：
@@ -145,7 +145,7 @@ ls ../libs/include/                     # 应包含 rime_api.h 等头文件
 
 ### 步骤 5：编译并运行 App
 
-回到 simplerime 根目录，正常编译即可（app 的 JNI 层会自动从 `libs/<abi>/` 找到 `librime.a`）：
+回到 ziyou-ime 根目录，正常编译即可（app 的 JNI 层会自动从 `libs/<abi>/` 找到 `librime.a`）：
 
 ```bash
 cd ..
@@ -156,7 +156,7 @@ cd ..
 
 ## 5. 可选插件（Lua / Octagram / Predict）
 
-simplerime 的 JNI 层通过 CMake 开关 `WITH_LUA` / `WITH_OCTAGRAM` / `WITH_PREDICT` 决定是否声明模块依赖。若要启用，需要**同时**：
+ziyou-ime 的 JNI 层通过 CMake 开关 `WITH_LUA` / `WITH_OCTAGRAM` / `WITH_PREDICT` 决定是否声明模块依赖。若要启用，需要**同时**：
 
 1. **在本模块中把对应插件编译进 `librime.a`**。将插件源码放到 `plugins/` 下，例如：
 
@@ -174,7 +174,7 @@ simplerime 的 JNI 层通过 CMake 开关 `WITH_LUA` / `WITH_OCTAGRAM` / `WITH_P
    # 或组合：WITH_LUA=ON WITH_OCTAGRAM=ON ./build.sh
    ```
 
-2. **在 app 的构建中打开同名开关**（见 `simplerime/app/build.gradle.kts`）：
+2. **在 app 的构建中打开同名开关**（见 `ziyou-ime/app/build.gradle.kts`）：
 
    ```kotlin
    externalNativeBuild {
@@ -224,7 +224,7 @@ simplerime 的 JNI 层通过 CMake 开关 `WITH_LUA` / `WITH_OCTAGRAM` / `WITH_P
 本模块的合并步骤依赖 `/bin/sh` 与 `llvm-ar -M`，仅支持 macOS / Linux 主机。Windows 用户建议使用 WSL2。
 
 **Q：想改回「引用现成 .a」而不自己编？**
-把任意来源的 `librime.a` 与 `rime_api.h` 按第 2 节的产出目录结构放入 `simplerime/libs/` 即可，App 侧无需改动。
+把任意来源的 `librime.a` 与 `rime_api.h` 按第 2 节的产出目录结构放入 `ziyou-ime/libs/` 即可，App 侧无需改动。
 
 ---
 

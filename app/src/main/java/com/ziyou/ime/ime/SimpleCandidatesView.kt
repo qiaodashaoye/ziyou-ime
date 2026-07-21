@@ -10,6 +10,7 @@ import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
+import com.ziyou.ime.config.KeyboardTheme
 import com.ziyou.ime.core.CandidateProto
 import com.ziyou.ime.core.ContextProto
 
@@ -53,6 +54,9 @@ class SimpleCandidatesView @JvmOverloads constructor(
     private var candidates: Array<CandidateProto> = emptyArray()
     private var highlightIndex: Int = -1
     private var preeditText: String? = null
+
+    /** 编码区显式显示文本（如九宫格拼音候选），非空时覆盖 Rime 原始 preedit */
+    private var previewText: String? = null
 
     // 绘制相关的画笔
     private val candidatePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -146,6 +150,39 @@ class SimpleCandidatesView @JvmOverloads constructor(
     }
 
     /**
+     * 应用主题，与键盘视图保持视觉一致（由 Service 层调用）
+     */
+    fun applyTheme(theme: KeyboardTheme) {
+        bgPaint.color = theme.candidateBackground
+        candidatePaint.color = theme.candidateTextColor
+        highlightedCandidatePaint.color = theme.candidateBackground
+        highlightBgPaint.color = theme.candidateHighlightColor
+        preeditPaint.color = theme.preeditTextColor
+        dividerPaint.color = theme.borderColor
+        invalidate()
+    }
+
+    /**
+     * 设置编码区显示文本（预览/拼音候选）。
+     * 非空时作为编码区的显示内容，覆盖 Rime 原始 preedit：
+     * - 九宫格：Service 依据候选 spelling_hints 传入可能的拼音组合（如 "guo gun hun huo"）
+     * - null 时回退到 Rime 原始 preedit（全键盘拼音）
+     */
+    fun setComposingPreview(preview: String?) {
+        val normalized = preview?.takeIf { it.isNotEmpty() }
+        if (previewText == normalized) return
+        previewText = normalized
+        recalculateLayout()
+        invalidate()
+    }
+
+    /** 实际展示的编码区文本：若有显式显示文本（如九宫格拼音候选）则优先，否则用 Rime preedit */
+    private fun displayPreedit(): String? {
+        previewText?.let { return it }
+        return preeditText?.takeIf { it.isNotEmpty() }
+    }
+
+    /**
      * 更新候选词数据
      * @param context Rime输入上下文
      */
@@ -172,9 +209,10 @@ class SimpleCandidatesView @JvmOverloads constructor(
         val paddingH = dp2px(CANDIDATE_PADDING_H_DP.toFloat())
         var x = paddingH
 
-        // 如果有preedit，先预留preedit区域
-        if (!preeditText.isNullOrEmpty()) {
-            val preeditWidth = preeditPaint.measureText(preeditText) + paddingH * 2
+        // 如果有preedit（含多击预览），先预留preedit区域
+        val preedit = displayPreedit()
+        if (!preedit.isNullOrEmpty()) {
+            val preeditWidth = preeditPaint.measureText(preedit) + paddingH * 2
             x = preeditWidth
         }
 
@@ -205,7 +243,8 @@ class SimpleCandidatesView @JvmOverloads constructor(
         // 绘制背景
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
 
-        if (candidates.isEmpty() && preeditText.isNullOrEmpty()) return
+        val preedit = displayPreedit()
+        if (candidates.isEmpty() && preedit.isNullOrEmpty()) return
 
         canvas.save()
         canvas.translate(-scrollOffset, 0f)
@@ -213,12 +252,12 @@ class SimpleCandidatesView @JvmOverloads constructor(
         val paddingH = dp2px(CANDIDATE_PADDING_H_DP.toFloat())
         val textBaseline = height / 2f + candidatePaint.textSize / 3f
 
-        // 绘制preedit编码区
+        // 绘制preedit编码区（Rime preedit + 多击预览）
         var startX = 0f
-        if (!preeditText.isNullOrEmpty()) {
+        if (!preedit.isNullOrEmpty()) {
             val preeditBaseline = height / 2f + preeditPaint.textSize / 3f
-            canvas.drawText(preeditText!!, paddingH, preeditBaseline, preeditPaint)
-            startX = preeditPaint.measureText(preeditText) + paddingH * 2
+            canvas.drawText(preedit, paddingH, preeditBaseline, preeditPaint)
+            startX = preeditPaint.measureText(preedit) + paddingH * 2
             // 绘制分隔线
             canvas.drawLine(startX, 4f, startX, height - 4f, dividerPaint)
         }
