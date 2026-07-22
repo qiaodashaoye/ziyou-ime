@@ -34,6 +34,9 @@ interface RimeApi {
     /** 清除当前编码 */
     suspend fun clearComposition()
 
+    /** 替换编码中指定位置的键序列（用于九宫格拼音消歧） */
+    suspend fun replaceKey(caretPos: Int, length: Int, replacement: String): Boolean
+
     // ===== 状态查询 =====
 
     /** 获取已提交的文本（调用后自动清除） */

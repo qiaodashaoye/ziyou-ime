@@ -1,5 +1,6 @@
 package com.ziyou.ime.ime
 
+import android.content.Intent
 import android.inputmethodservice.InputMethodService
 import android.util.Log
 import android.view.KeyEvent
@@ -12,6 +13,10 @@ import com.ziyou.ime.config.ThemeManager
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.core.RimeMessage
 import com.ziyou.ime.daemon.RimeSession
+import com.ziyou.ime.data.KeyRecordStack
+import com.ziyou.ime.data.SideSymbolRepository
+import com.ziyou.ime.ui.SettingsActivity
+import com.ziyou.ime.util.T9PinYinUtils
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 
@@ -57,6 +62,12 @@ class SimpleRimeInputMethodService : InputMethodService() {
 
     /** 候选词视图引用 */
     private var candidatesView: SimpleCandidatesView? = null
+
+    /** 九宫格左侧拼音侧栏引用（仅九宫格布局下存在） */
+    private var pinyinSideBar: PinyinSideBarView? = null
+
+    /** 九宫格输入状态追踪栈（拼音消歧与智能回退） */
+    private val keyRecordStack = KeyRecordStack()
 
     // ===== 生命周期 =====
 
@@ -113,6 +124,8 @@ class SimpleRimeInputMethodService : InputMethodService() {
             onCandidateClick = { index -> handleCandidateClick(index) }
             // 翻页回调
             onPageChange = { forward -> handlePageChange(forward) }
+            // 拼音候选点击回调
+            onPinyinSelect = { pinyin -> handlePinyinSelect(pinyin) }
             // 应用当前主题，与键盘保持一致
             applyTheme(ThemeManager.getCurrentTheme(this@SimpleRimeInputMethodService))
         }
@@ -146,16 +159,17 @@ class SimpleRimeInputMethodService : InputMethodService() {
 
     /**
      * 安装指定类型的键盘到容器，并完成回调绑定、主题与状态同步。
+     *
+     * 九宫格布局额外在键盘左侧挂载 [PinyinSideBarView] 拼音侧栏，
+     * 通过横向 [LinearLayout] 以 `侧栏 : 键盘 ≈ 18 : 82` 的权重排布
+     * （参考 yuyansdk CandidatesContainer 的 `skbWidth * 0.18`）。
      */
     private fun installKeyboard(type: KeyboardType) {
         val container = keyboardContainer ?: return
+        val theme = ThemeManager.getCurrentTheme(this)
         val view = createKeyboardView(type).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT
-            )
             // 应用当前主题
-            applyTheme(ThemeManager.getCurrentTheme(this@SimpleRimeInputMethodService))
+            applyTheme(theme)
             // 按键回调
             onKeyPress = { keyCode, mask -> handleSoftKeyPress(keyCode, mask) }
             // 键盘切换回调
@@ -164,7 +178,40 @@ class SimpleRimeInputMethodService : InputMethodService() {
             onComposingPreview = { preview -> candidatesView?.setComposingPreview(preview) }
         }
         container.removeAllViews()
-        container.addView(view)
+        pinyinSideBar = null
+
+        if (type == KeyboardType.NINE_GRID) {
+            // 左侧拼音侧栏
+            val sideBar = PinyinSideBarView(this).apply {
+                applyTheme(theme)
+                setSideSymbols(SideSymbolRepository.getPinyinSideSymbols(this@SimpleRimeInputMethodService))
+                // 点击左侧拼音 → 复用现有拼音消歧逻辑
+                onPinyinSelect = { pinyin -> handlePinyinSelect(pinyin) }
+                // 点击侧栏符号 → 直接上屏
+                onSymbolInput = { value -> handleSideSymbolInput(value) }
+                // 点击「＋」→ 进入侧栏符号自定义管理
+                onAddSymbol = { openSideSymbolSettings() }
+            }
+            // 横向容器：[侧栏][键盘]
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+            row.addView(sideBar, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.8f))
+            view.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 8.2f)
+            row.addView(view)
+            container.addView(row)
+            pinyinSideBar = sideBar
+        } else {
+            view.layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            )
+            container.addView(view)
+        }
         keyboardView = view
         currentKeyboardType = type
     }
@@ -174,6 +221,7 @@ class SimpleRimeInputMethodService : InputMethodService() {
      */
     private fun switchKeyboard(type: KeyboardType) {
         if (type == currentKeyboardType && keyboardView != null) return
+        keyRecordStack.clear()
         installKeyboard(type)
         saveKeyboardType(type)
         // 清除切换前残留的预览
@@ -218,8 +266,17 @@ class SimpleRimeInputMethodService : InputMethodService() {
         withContext(Dispatchers.Main) {
             keyboardView?.isChineseMode = !isAscii
             candidatesView?.updateCandidates(context)
-            candidatesView?.setComposingPreview(pinyinHints)
+            // 九宫格拼音已移至左侧侧栏，候选栏不再展示拼音 pill
+            candidatesView?.setPinyinCandidates(null)
+            candidatesView?.setComposingPreview(pinyinHints?.joinToString("  "))
             keyboardView?.updateComposition(context?.composition)
+            // 刷新左侧拼音侧栏（拼音候选 + 自定义符号）
+            if (type == KeyboardType.NINE_GRID) {
+                pinyinSideBar?.setSideSymbols(
+                    SideSymbolRepository.getPinyinSideSymbols(this@SimpleRimeInputMethodService)
+                )
+                pinyinSideBar?.setPinyinCandidates(pinyinHints)
+            }
         }
     }
 
@@ -332,6 +389,30 @@ class SimpleRimeInputMethodService : InputMethodService() {
 
             // 普通按键：发送给Rime引擎
             else -> {
+                // 九宫格模式下的智能退格
+                if (keyCode == KeyCode.XK_BackSpace && currentKeyboardType == KeyboardType.NINE_GRID && !keyRecordStack.isEmpty()) {
+                    val restoreResult = keyRecordStack.popAndRestore()
+                    if (restoreResult != null) {
+                        // 撤销拼音选择：将已选拼音替换回原 T9 键
+                        serviceScope.launch {
+                            RimeSession.api.replaceKey(
+                                restoreResult.posInInput,
+                                restoreResult.length,
+                                restoreResult.t9Keys
+                            )
+                            updateUI()
+                        }
+                        return  // 不发送普通 BackSpace
+                    }
+                    // restoreResult 为 null 表示弹出的是普通 T9Key/Apostrophe，继续执行正常退格
+                }
+                // 九宫格模式下追踪 T9 按键
+                if (currentKeyboardType == KeyboardType.NINE_GRID) {
+                    when {
+                        keyCode in '2'.code..'9'.code -> keyRecordStack.pushT9Key(keyCode.toChar())
+                        keyCode == '\''.code -> keyRecordStack.pushApostrophe()
+                    }
+                }
                 serviceScope.launch {
                     processRimeKey(keyCode, mask)
                 }
@@ -357,6 +438,7 @@ class SimpleRimeInputMethodService : InputMethodService() {
                     // 将文本提交到当前编辑器
                     currentInputConnection?.commitText(text, 1)
                     Log.d(TAG, "commitText: $text")
+                    keyRecordStack.clear()
                 }
                 // 更新候选词和编码区UI
                 updateUI()
@@ -392,6 +474,7 @@ class SimpleRimeInputMethodService : InputMethodService() {
                     commit?.text?.let { text ->
                         currentInputConnection?.commitText(text, 1)
                         Log.d(TAG, "候选词提交: $text")
+                        keyRecordStack.clear()
                     }
                     // 更新UI
                     updateUI()
@@ -435,10 +518,14 @@ class SimpleRimeInputMethodService : InputMethodService() {
             withContext(Dispatchers.Main) {
                 // 更新候选词视图
                 candidatesView?.updateCandidates(context)
-                // 拼音候选区：九宫格下展示可能的拼音组合，全键盘为 null（回退到原始 preedit）
-                candidatesView?.setComposingPreview(pinyinHints)
+                // 九宫格拼音已移至左侧侧栏，候选栏不再展示拼音 pill
+                candidatesView?.setPinyinCandidates(null)
+                // 编码区预览：九宫格下展示可能的拼音组合，全键盘为 null（回退到原始 preedit）
+                candidatesView?.setComposingPreview(pinyinHints?.joinToString("  "))
                 // 更新键盘编码区
                 keyboardView?.updateComposition(context?.composition)
+                // 左侧拼音侧栏：有候选拼音则展示拼音，否则展示自定义符号
+                pinyinSideBar?.setPinyinCandidates(pinyinHints)
             }
         } catch (e: Exception) {
             Log.e(TAG, "updateUI异常: ${e.message}", e)
@@ -446,21 +533,68 @@ class SimpleRimeInputMethodService : InputMethodService() {
     }
 
     /**
-     * 从 Rime 候选的 spelling_hints（拼音 comment）提取去重拼音序列，
-     * 供九宫格拼音候选区展示（如输入 486 → "guo gun hun huo"）。
-     * 仅在九宫格键盘且正在组码时返回非空；其余情况返回 null。
+     * 处理用户在拼音候选区点击选择拼音
+     * 将 Rime 编码中对应的 T9 键序列替换为所选拼音
      */
-    private fun buildPinyinHints(context: ContextProto?): String? {
+    private fun handlePinyinSelect(pinyin: String) {
+        serviceScope.launch {
+            val pinyinKey = keyRecordStack.pushPinyinSelectAction(pinyin) ?: return@launch
+            // 用选定拼音替换编码中对应的 T9 键序列（末尾加分词符）
+            val replacement = pinyin + "'"
+            RimeSession.api.replaceKey(pinyinKey.posInInput, pinyinKey.t9KeysLength, replacement)
+            updateUI()
+        }
+    }
+
+    /**
+     * 处理左侧侧栏符号点击（无候选拼音时展示的自定义符号）。
+     * 侧栏符号仅在无活跃编码时可见，因此直接上屏其内容即可。
+     * —— 等价 yuyansdk 中 `inputView.responseKeyEvent(SoftKey(label = symbol))`。
+     */
+    private fun handleSideSymbolInput(value: String) {
+        if (value.isEmpty()) return
+        currentInputConnection?.commitText(value, 1)
+    }
+
+    /**
+     * 打开侧栏符号自定义管理页面。
+     * —— 等价 yuyansdk 中 `AppUtil.launchSettingsToPrefix(context, arguments)`。
+     */
+    private fun openSideSymbolSettings() {
+        val intent = Intent(this, SettingsActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(SettingsActivity.EXTRA_OPEN_SIDE_SYMBOLS, true)
+        }
+        startActivity(intent)
+    }
+
+    /**
+     * 生成九宫格拼音候选列表。
+     * 优先使用 T9PinYinUtils 从 T9 编码直接生成拼音（更精确），
+     * 回退到从候选 comment 提取。
+     */
+    private fun buildPinyinHints(context: ContextProto?): List<String>? {
         if (currentKeyboardType != KeyboardType.NINE_GRID) return null
-        val candidates = context?.menu?.candidates ?: return null
+        if (context == null) return null
+        // 优先：从 Rime 原始输入串提取「首个未消歧的数字段」，用本地 T9 表还原候选拼音。
+        // 输入串以数字（2-9）与已锁定拼音 + 分词符（'）混排，如 "guo'486"。
+        val digitSegment = context.input
+            .split('\'', ' ')
+            .firstOrNull { seg -> seg.isNotEmpty() && seg.all { it in '2'..'9' } }
+        if (digitSegment != null) {
+            val pinyins = T9PinYinUtils.t9KeyToPinyin(digitSegment).filter { it.isNotBlank() }
+            if (pinyins.isNotEmpty()) return pinyins.take(8)
+        }
+        // 回退：从候选词 comment（spelling_hints）提取真实拼音
+        val candidates = context.menu?.candidates ?: return null
         if (candidates.isEmpty()) return null
         val hints = LinkedHashSet<String>()
         for (candidate in candidates) {
             val py = candidate.comment.trim()
             if (py.isNotEmpty()) hints.add(py)
-            if (hints.size >= 6) break
+            if (hints.size >= 8) break
         }
-        return if (hints.isEmpty()) null else hints.joinToString("  ")
+        return hints.toList().takeIf { it.isNotEmpty() }
     }
 
     // ===== Rime消息处理 =====
@@ -505,6 +639,7 @@ class SimpleRimeInputMethodService : InputMethodService() {
         keyboardView = null
         keyboardContainer = null
         candidatesView = null
+        pinyinSideBar = null
         super.onDestroy()
     }
 }

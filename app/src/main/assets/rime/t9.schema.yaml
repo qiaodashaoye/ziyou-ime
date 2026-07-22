@@ -8,17 +8,18 @@
 #   2=abc 3=def 4=ghi 5=jkl 6=mno 7=pqrs 8=tuv 9=wxyz，
 #   于是输入 486 可命中 guo/gun/huo/hun 等所有映射到 486 的音节，由引擎消歧。
 #   spelling_hints 让候选携带其真实拼音（作为 comment），供客户端「拼音候选区」展示。
-#   ' （撇号，客户端由「分词」键发送）用于手动分词。
+#   ' （撇号）用于手动分词（由键盘「分词」键发送）。
 
 schema:
   schema_id: t9
   name: 中文九键
-  version: "2.0"
+  version: "2.1"
   author:
     - 字由输入法
   description: |
     智能九宫格（T9）拼音方案，复用朙月拼音词库。
     单击数字键 2-9 输入，由引擎在所有可能拼音组合中匹配候选。
+    配合九宫格键盘左侧标点键（，。！？）快速输入标点。
 
 switches:
   - name: ascii_mode
@@ -65,7 +66,9 @@ speller:
     - derive/un$/uen/
     - derive/ui$/uei/
     - derive/iu$/iou/
-    # 九宫格数字映射（保留字母写法，额外派生数字写法）
+    # ── 九宫格数字映射（保留字母写法，额外派生数字写法）──
+    # 每个字母既保留原始字母编码，又新增对应数字编码，
+    # 引擎同时匹配字母拼音和数字编码，从而实现智能消歧。
     - derive/[abc]/2/
     - derive/[def]/3/
     - derive/[ghi]/4/
@@ -87,8 +90,14 @@ translator:
 punctuator:
   import_preset: default
 
+# 覆写按键绑定：九宫格键盘有专用标点键和退格键，
+# 不需要 comma/period 翻页，确保标点键始终输出标点。
 key_binder:
   import_preset: default
+  bindings:
+    # 覆盖默认设置中的逗号/句号翻页行为，使其始终作为标点输入
+    - { when: has_menu, accept: comma, send: comma }
+    - { when: has_menu, accept: period, send: period }
 
 recognizer:
   import_preset: default

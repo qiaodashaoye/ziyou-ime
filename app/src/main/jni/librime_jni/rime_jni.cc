@@ -94,6 +94,18 @@ class Rime {
 
   void clearComposition() { rime->clear_composition(session()); }
 
+  bool replaceKey(int caretPos, int length, const char* replacement) {
+    auto s = session();
+    auto input = rime->get_input(s);
+    if (!input) return false;
+    std::string str(input);
+    if (caretPos < 0 || caretPos + length > (int)str.size()) return false;
+    str.replace(caretPos, length, replacement);
+    rime->set_input(s, str.c_str());
+    rime->set_caret_pos(s, caretPos + strlen(replacement));
+    return true;
+  }
+
   std::unique_ptr<CommitProto> commit() {
     RIME_STRUCT(RimeCommit, data)
     if (rime->get_commit(session(), &data)) {
@@ -328,6 +340,14 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_ziyou_ime_core_RimeNative_clearRimeComposition(
     JNIEnv *env, jclass /* thiz */) {
   Rime::Instance().clearComposition();
+}
+
+// 替换编码中指定位置的键序列（用于九宫格拼音消歧）
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_ziyou_ime_core_RimeNative_replaceRimeKey(
+    JNIEnv *env, jclass /* clazz */, jint caretPos, jint length, jstring key) {
+  auto keyStr = CString(env, key);
+  return Rime::Instance().replaceKey(caretPos, length, keyStr);
 }
 
 // ==================== 输出获取 ====================

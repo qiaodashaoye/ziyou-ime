@@ -14,6 +14,8 @@ import androidx.lifecycle.lifecycleScope
 import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.config.ThemeManager
 import com.ziyou.ime.daemon.RimeSession
+import com.ziyou.ime.data.SideSymbol
+import com.ziyou.ime.data.SideSymbolRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -33,6 +35,9 @@ class SettingsActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "SettingsActivity"
+
+        /** Intent 额外项：打开时直接弹出九宫格拼音侧栏符号管理（由输入法侧栏「＋」触发） */
+        const val EXTRA_OPEN_SIDE_SYMBOLS = "open_side_symbols"
     }
 
     // UI组件引用
@@ -46,6 +51,11 @@ class SettingsActivity : AppCompatActivity() {
 
         // 通过 RimeSession 统一初始化引擎（异步，避免主线程阻塞和双重初始化）
         ensureRimeStarted()
+
+        // 由输入法侧栏「＋」拉起时，直接弹出侧栏符号管理
+        if (intent?.getBooleanExtra(EXTRA_OPEN_SIDE_SYMBOLS, false) == true) {
+            window.decorView.post { showSideSymbolManager() }
+        }
     }
 
     override fun onResume() {
@@ -125,6 +135,15 @@ class SettingsActivity : AppCompatActivity() {
         )
         themeItem.setOnClickListener { showThemeSelector() }
         rootLayout.addView(themeItem)
+        rootLayout.addView(createDivider())
+
+        // ===== 九宫格 =====
+        rootLayout.addView(createSectionHeader("九宫格"))
+        rootLayout.addView(createSettingItem(
+            title = "拼音侧栏符号",
+            summary = "自定义九宫格左侧拼音栏无候选时的常用符号 / 短语",
+            onClick = { showSideSymbolManager() }
+        ))
         rootLayout.addView(createDivider())
 
         // ===== 数据同步 =====
@@ -223,6 +242,69 @@ class SettingsActivity : AppCompatActivity() {
                 dialog.dismiss()
             }
             .setNegativeButton("取消", null)
+            .show()
+    }
+
+    // ===== 九宫格拼音侧栏符号管理 =====
+
+    /**
+     * 侧栏符号管理入口：列出已有符号（点击删除），并提供添加 / 恢复默认。
+     * 对应 yuyansdk 中的侧边符号设置页。
+     */
+    private fun showSideSymbolManager() {
+        val symbols = SideSymbolRepository.getPinyinSideSymbols(this)
+        val labels = symbols.map { "${it.display}    →    ${it.value}" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("拼音侧栏符号")
+            .setItems(labels) { _, which -> confirmDeleteSideSymbol(symbols[which]) }
+            .setPositiveButton("添加") { _, _ -> showAddSideSymbolDialog() }
+            .setNeutralButton("恢复默认") { _, _ ->
+                SideSymbolRepository.resetToDefault(this)
+                showToast("已恢复默认侧栏符号")
+            }
+            .setNegativeButton("关闭", null)
+            .show()
+    }
+
+    /** 添加侧栏符号：输入显示文字 + 上屏内容 */
+    private fun showAddSideSymbolDialog() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        val displayInput = EditText(this).apply { hint = "显示文字（如 ， 或 邮箱）" }
+        val valueInput = EditText(this).apply { hint = "上屏内容（留空则与显示文字相同）" }
+        container.addView(displayInput)
+        container.addView(valueInput)
+        AlertDialog.Builder(this)
+            .setTitle("添加侧栏符号")
+            .setView(container)
+            .setPositiveButton("保存") { _, _ ->
+                val display = displayInput.text.toString().trim()
+                if (display.isEmpty()) {
+                    showToast("显示文字不能为空")
+                    return@setPositiveButton
+                }
+                val value = valueInput.text.toString().ifEmpty { display }
+                SideSymbolRepository.addPinyinSideSymbol(this, SideSymbol(display, value))
+                showToast("已添加")
+                showSideSymbolManager()
+            }
+            .setNegativeButton("取消") { _, _ -> showSideSymbolManager() }
+            .show()
+    }
+
+    /** 删除确认 */
+    private fun confirmDeleteSideSymbol(symbol: SideSymbol) {
+        AlertDialog.Builder(this)
+            .setTitle("删除符号")
+            .setMessage("确定删除「${symbol.display}」？")
+            .setPositiveButton("删除") { _, _ ->
+                SideSymbolRepository.removePinyinSideSymbol(this, symbol.display)
+                showToast("已删除")
+                showSideSymbolManager()
+            }
+            .setNegativeButton("取消") { _, _ -> showSideSymbolManager() }
             .show()
     }
 

@@ -63,6 +63,10 @@ object RimeNative {
     @JvmStatic
     external fun clearRimeComposition()
 
+    /** 替换编码中指定位置的键序列（用于九宫格拼音消歧） */
+    @JvmStatic
+    external fun replaceRimeKey(caretPos: Int, length: Int, key: String): Boolean
+
     // ===== 状态获取 =====
 
     /** 获取已提交的文本 */

@@ -56,6 +56,12 @@ class SimpleRimeImpl(
         }
     }
 
+    override suspend fun replaceKey(caretPos: Int, length: Int, replacement: String): Boolean {
+        return dispatcher.dispatch {
+            RimeNative.replaceRimeKey(caretPos, length, replacement)
+        }
+    }
+
     // ===== 状态查询 =====
 
     override suspend fun getCommit(): CommitProto? {

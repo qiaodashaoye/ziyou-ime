@@ -138,6 +138,9 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
     protected var keyRadius = 0f
     protected var keyboardPadding = 0f
 
+    /** 按键高度倍率（默认 1.0）。子类可覆写以调整按键高度，如九宫格 5 行布局可适当加大。 */
+    protected open val keyHeightMultiplier: Float = 1.0f
+
     init {
         keyHeight = dp2px(KEY_HEIGHT_DP.toFloat())
         keyGap = dp2px(KEY_GAP_DP.toFloat())
@@ -176,7 +179,8 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val width = MeasureSpec.getSize(widthMeasureSpec)
         val rowCount = rows.size
-        val totalHeight = (rowCount * keyHeight +
+        val scaledKeyHeight = keyHeight * keyHeightMultiplier
+        val totalHeight = (rowCount * scaledKeyHeight +
                 (rowCount - 1).coerceAtLeast(0) * keyGap +
                 keyboardPadding * 2).toInt()
         setMeasuredDimension(width, totalHeight)
@@ -200,12 +204,12 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
             val unitWidth = (availableWidth - totalGapWidth) / totalWeight
 
             var x = keyboardPadding + rowIndent(rowIndex, unitWidth)
-            val y = keyboardPadding + rowIndex * (keyHeight + keyGap)
+            val y = keyboardPadding + rowIndex * (keyHeight * keyHeightMultiplier + keyGap)
 
             for (colIndex in row.indices) {
                 val key = row[colIndex]
                 val keyWidth = unitWidth * key.width
-                val rect = RectF(x, y, x + keyWidth, y + keyHeight)
+                val rect = RectF(x, y, x + keyWidth, y + keyHeight * keyHeightMultiplier)
                 keyRects.add(KeyRect(key, rect, rowIndex, colIndex))
                 x += keyWidth + keyGap
             }
@@ -341,8 +345,8 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
 
     // ===== 对外状态同步 =====
 
-    /** 更新编码区显示 */
-    fun updateComposition(composition: CompositionProto?) {
+    /** 更新编码区显示（子类可覆写以格式化 preedit） */
+    open fun updateComposition(composition: CompositionProto?) {
         compositionText = composition?.preedit
         invalidate()
     }

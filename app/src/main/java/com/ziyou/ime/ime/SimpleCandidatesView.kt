@@ -50,6 +50,9 @@ class SimpleCandidatesView @JvmOverloads constructor(
     /** 翻页回调：true=下一页, false=上一页 */
     var onPageChange: ((forward: Boolean) -> Unit)? = null
 
+    /** 拼音候选点击回调 */
+    var onPinyinSelect: ((String) -> Unit)? = null
+
     // 候选词数据
     private var candidates: Array<CandidateProto> = emptyArray()
     private var highlightIndex: Int = -1
@@ -57,6 +60,25 @@ class SimpleCandidatesView @JvmOverloads constructor(
 
     /** 编码区显式显示文本（如九宫格拼音候选），非空时覆盖 Rime 原始 preedit */
     private var previewText: String? = null
+
+    /** 拼音候选列表（九宫格模式下显示） */
+    private var pinyinCandidates: List<String> = emptyList()
+
+    /** 拼音候选的点击区域 */
+    private val pinyinRects = mutableListOf<RectF>()
+
+    /** 拼音候选画笔 */
+    private val pinyinPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp2px(11f)
+        color = Color.parseColor("#1A73E8")  // Material Blue
+        typeface = Typeface.DEFAULT
+    }
+
+    /** 拼音候选背景画笔 */
+    private val pinyinBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#E8F0FE")  // Light blue background
+        style = Paint.Style.FILL
+    }
 
     // 绘制相关的画笔
     private val candidatePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -105,6 +127,13 @@ class SimpleCandidatesView @JvmOverloads constructor(
         override fun onSingleTapUp(e: MotionEvent): Boolean {
             val x = e.x + scrollOffset
             val y = e.y
+            // 优先检查拼音候选点击
+            for (i in pinyinRects.indices) {
+                if (pinyinRects[i].contains(x, y)) {
+                    onPinyinSelect?.invoke(pinyinCandidates[i])
+                    return true
+                }
+            }
             // 查找点击的候选词
             for (i in candidateRects.indices) {
                 if (candidateRects[i].contains(x, y)) {
@@ -159,6 +188,25 @@ class SimpleCandidatesView @JvmOverloads constructor(
         highlightBgPaint.color = theme.candidateHighlightColor
         preeditPaint.color = theme.preeditTextColor
         dividerPaint.color = theme.borderColor
+        // 拼音候选主题适配
+        pinyinPaint.color = theme.candidateHighlightColor
+        pinyinBgPaint.color = Color.argb(30,
+            Color.red(theme.candidateHighlightColor),
+            Color.green(theme.candidateHighlightColor),
+            Color.blue(theme.candidateHighlightColor)
+        )
+        invalidate()
+    }
+
+    /**
+     * 设置拼音候选列表（九宫格模式下的结构化拼音数据）
+     * 以 pill 形式在编码区和候选词之间展示可点击的拼音选项
+     */
+    fun setPinyinCandidates(pinyins: List<String>?) {
+        val newList = pinyins ?: emptyList()
+        if (pinyinCandidates == newList) return
+        pinyinCandidates = newList
+        recalculateLayout()
         invalidate()
     }
 
@@ -178,6 +226,11 @@ class SimpleCandidatesView @JvmOverloads constructor(
 
     /** 实际展示的编码区文本：若有显式显示文本（如九宫格拼音候选）则优先，否则用 Rime preedit */
     private fun displayPreedit(): String? {
+        // 当拼音以 pill 形式展示时，编码区只显示 Rime 原始 preedit
+        if (pinyinCandidates.isNotEmpty()) {
+            return preeditText?.takeIf { it.isNotEmpty() }
+        }
+        // 无交互式拼音时，使用 previewText（九宫格拼音文本）覆盖
         previewText?.let { return it }
         return preeditText?.takeIf { it.isNotEmpty() }
     }
@@ -206,6 +259,7 @@ class SimpleCandidatesView @JvmOverloads constructor(
      */
     private fun recalculateLayout() {
         candidateRects.clear()
+        pinyinRects.clear()
         val paddingH = dp2px(CANDIDATE_PADDING_H_DP.toFloat())
         var x = paddingH
 
@@ -214,6 +268,20 @@ class SimpleCandidatesView @JvmOverloads constructor(
         if (!preedit.isNullOrEmpty()) {
             val preeditWidth = preeditPaint.measureText(preedit) + paddingH * 2
             x = preeditWidth
+        }
+
+        // 拼音候选位置计算（pill 样式，紧跟 preedit 之后）
+        if (pinyinCandidates.isNotEmpty()) {
+            val pinyinPaddingH = dp2px(6f)
+            val pinyinGap = dp2px(4f)
+            for (pinyin in pinyinCandidates) {
+                val textWidth = pinyinPaint.measureText(pinyin)
+                val pillWidth = textWidth + pinyinPaddingH * 2
+                pinyinRects.add(RectF(x, 2f, x + pillWidth, height.toFloat() - 2f))
+                x += pillWidth + pinyinGap
+            }
+            // 拼音区后添加分隔线间距
+            x += dp2px(4f)
         }
 
         for (candidate in candidates) {
@@ -244,7 +312,7 @@ class SimpleCandidatesView @JvmOverloads constructor(
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
 
         val preedit = displayPreedit()
-        if (candidates.isEmpty() && preedit.isNullOrEmpty()) return
+        if (candidates.isEmpty() && preedit.isNullOrEmpty() && pinyinCandidates.isEmpty()) return
 
         canvas.save()
         canvas.translate(-scrollOffset, 0f)
@@ -260,6 +328,18 @@ class SimpleCandidatesView @JvmOverloads constructor(
             startX = preeditPaint.measureText(preedit) + paddingH * 2
             // 绘制分隔线
             canvas.drawLine(startX, 4f, startX, height - 4f, dividerPaint)
+        }
+
+        // 绘制拼音候选 pills
+        for (i in pinyinCandidates.indices) {
+            if (i >= pinyinRects.size) break
+            val rect = pinyinRects[i]
+            // 绘制 pill 背景（圆角矩形）
+            canvas.drawRoundRect(rect, dp2px(10f), dp2px(10f), pinyinBgPaint)
+            // 绘制拼音文字（居中）
+            val pinyinTextX = rect.left + dp2px(6f)
+            val pinyinTextBaseline = rect.centerY() + pinyinPaint.textSize / 3f
+            canvas.drawText(pinyinCandidates[i], pinyinTextX, pinyinTextBaseline, pinyinPaint)
         }
 
         // 绘制候选词
@@ -305,8 +385,9 @@ class SimpleCandidatesView @JvmOverloads constructor(
      * 计算所有候选词的总宽度
      */
     private fun calculateTotalWidth(): Float {
-        return if (candidateRects.isEmpty()) 0f
-        else candidateRects.last().right
+        if (candidateRects.isNotEmpty()) return candidateRects.last().right
+        if (pinyinRects.isNotEmpty()) return pinyinRects.last().right
+        return 0f
     }
 
     // ===== 单位转换工具 =====
