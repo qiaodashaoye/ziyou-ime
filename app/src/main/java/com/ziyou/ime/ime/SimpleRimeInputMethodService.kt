@@ -124,8 +124,6 @@ class SimpleRimeInputMethodService : InputMethodService() {
             onCandidateClick = { index -> handleCandidateClick(index) }
             // 翻页回调
             onPageChange = { forward -> handlePageChange(forward) }
-            // 拼音候选点击回调
-            onPinyinSelect = { pinyin -> handlePinyinSelect(pinyin) }
             // 应用当前主题，与键盘保持一致
             applyTheme(ThemeManager.getCurrentTheme(this@SimpleRimeInputMethodService))
         }
@@ -266,9 +264,8 @@ class SimpleRimeInputMethodService : InputMethodService() {
         withContext(Dispatchers.Main) {
             keyboardView?.isChineseMode = !isAscii
             candidatesView?.updateCandidates(context)
-            // 九宫格拼音已移至左侧侧栏，候选栏不再展示拼音 pill
-            candidatesView?.setPinyinCandidates(null)
-            candidatesView?.setComposingPreview(pinyinHints?.joinToString("  "))
+            // 顶部编码区仅显示「当前拼音」单串预览；拼音候选选择在左侧侧栏进行
+            candidatesView?.setComposingPreview(buildPinyinPreview(context, pinyinHints))
             keyboardView?.updateComposition(context?.composition)
             // 刷新左侧拼音侧栏（拼音候选 + 自定义符号）
             if (type == KeyboardType.NINE_GRID) {
@@ -518,10 +515,8 @@ class SimpleRimeInputMethodService : InputMethodService() {
             withContext(Dispatchers.Main) {
                 // 更新候选词视图
                 candidatesView?.updateCandidates(context)
-                // 九宫格拼音已移至左侧侧栏，候选栏不再展示拼音 pill
-                candidatesView?.setPinyinCandidates(null)
-                // 编码区预览：九宫格下展示可能的拼音组合，全键盘为 null（回退到原始 preedit）
-                candidatesView?.setComposingPreview(pinyinHints?.joinToString("  "))
+                // 顶部编码区仅显示「当前拼音」单串预览（九宫格），全键盘为 null（回退到 Rime preedit）
+                candidatesView?.setComposingPreview(buildPinyinPreview(context, pinyinHints))
                 // 更新键盘编码区
                 keyboardView?.updateComposition(context?.composition)
                 // 左侧拼音侧栏：有候选拼音则展示拼音，否则展示自定义符号
@@ -595,6 +590,24 @@ class SimpleRimeInputMethodService : InputMethodService() {
             if (hints.size >= 8) break
         }
         return hints.toList().takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * 生成顶部编码区的「当前拼音」单串预览（与主流九宫格一致：顶部只展示当前解释的拼音）。
+     *
+     * 取高亮候选的拼音读音（spelling_hints comment）作为当前解释；无候选时回退到首个拼音提示。
+     * 非九宫格返回 null，由候选视图沿用 Rime 原始 preedit。
+     */
+    private fun buildPinyinPreview(context: ContextProto?, hints: List<String>?): String? {
+        if (currentKeyboardType != KeyboardType.NINE_GRID) return null
+        val menu = context?.menu
+        val candidates = menu?.candidates
+        val highlighted = menu?.highlightedCandidateIndex ?: -1
+        if (candidates != null && highlighted in candidates.indices) {
+            val comment = candidates[highlighted].comment.trim()
+            if (comment.isNotEmpty()) return comment
+        }
+        return hints?.firstOrNull()
     }
 
     // ===== Rime消息处理 =====
