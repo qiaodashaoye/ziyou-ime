@@ -3,154 +3,160 @@ package com.ziyou.ime.data
 import com.ziyou.ime.util.T9PinYinUtils
 
 /**
- * 九宫格输入状态机，追踪 T9 按键历史，支持拼音选择与智能回退。
- * 纯数据结构，不依赖 Android Framework，非线程安全。
+ * 九宫格输入状态机，追踪 T9 按键与已锁定拼音，支持拼音消歧与智能回退。
+ *
+ * 设计要点（修复多音节位置错乱的核心）：
+ * **列表顺序 == Rime 编码串的逻辑顺序**。
+ * - 键入数字：[T9Key] 追加到列表尾部（Rime 也把数字追加到编码串尾部）。
+ * - 选定拼音：用 [InputKey.PinyinKey] **原地替换**首个 T9Key 段（而非追加到末尾），
+ *   因此已锁定拼音始终排在剩余数字之前，字符偏移可按列表顺序直接累加得到。
+ * - 智能退格：解锁列表尾部的拼音，原地还原为数字段。
+ *
+ * 纯数据结构，不依赖 Android Framework，非线程安全（仅在主线程访问）。
  */
 class KeyRecordStack {
 
-    private val keyRecords = ArrayList<InputKey>(20)
+    private val records = ArrayList<InputKey>(20)
 
-    fun isEmpty(): Boolean = keyRecords.isEmpty()
+    fun isEmpty(): Boolean = records.isEmpty()
 
-    fun clear() = keyRecords.clear()
+    fun clear() = records.clear()
 
     /**
-     * 将 T9 按键推入栈（'2'-'9'）
+     * 将 T9 按键推入栈（'2'-'9'）。
+     * 对应 Rime 把该数字追加到编码串尾部。
      */
     fun pushT9Key(keyChar: Char) {
-        keyRecords.add(InputKey.T9Key(keyChar))
+        records.add(InputKey.T9Key(keyChar))
     }
 
     /**
-     * 将分词键（撇号）推入栈
+     * 将分词键（撇号）推入栈。
      */
     fun pushApostrophe() {
-        keyRecords.add(InputKey.Apostrophe)
+        records.add(InputKey.Apostrophe)
     }
 
     /**
-     * 拼音选择操作：
-     * 1. 使用 T9PinYinUtils.pinyin2Key 获取该拼音对应的 T9 键序列
-     * 2. 在栈中从头查找连续未消费的 T9Key 序列（匹配该 T9 键序列长度）
-     * 3. 将这些 T9Key 标记为 consumed
-     * 4. 计算 posInInput（在整个编码字符串中的位置）
-     * 5. 创建 PinyinKey 并推入栈
-     * 6. 返回该 PinyinKey（调用方用于 Rime.replaceKey）
+     * 选定拼音：锁定「首个未确定音节」对应的 T9 数字段。
+     *
+     * 步骤：
+     * 1. 用 [T9PinYinUtils.pinyin2Key] 取拼音对应的 T9 键序列。
+     * 2. 定位列表中首个 [InputKey.T9Key]（即首个未确定音节起点），
+     *    并校验其后连续 T9Key 的前缀与该键序列一致。
+     * 3. 计算该段在编码串中的字符偏移。
+     * 4. 用 [InputKey.PinyinKey] 原地替换匹配的 T9Key 段（保持逻辑顺序）。
+     * 5. 返回替换指令，供调用方 `Rime.replaceKey`。
+     *
+     * @return 替换指令；无法匹配返回 null（调用方应忽略本次选择）。
      */
-    fun pushPinyinSelectAction(pinyin: String): InputKey.PinyinKey? {
+    fun pushPinyinSelectAction(pinyin: String): ReplaceCommand? {
         val t9Sequence = T9PinYinUtils.pinyin2Key(pinyin)
         if (t9Sequence.isEmpty()) return null
 
-        val t9Chars = t9Sequence.toCharArray()
-        val seqLen = t9Chars.size
+        // 首个 T9Key 即首个未确定音节的起点（已锁定拼音永远排在前面）
+        val start = records.indexOfFirst { it is InputKey.T9Key }
+        if (start < 0) return null
 
-        // 在栈中从头查找连续未消费的 T9Key 序列
-        val startIndex = findUnconsumedT9Sequence(t9Chars)
-        if (startIndex < 0) return null
-
-        // 将匹配的 T9Key 标记为 consumed
-        for (i in 0 until seqLen) {
-            (keyRecords[startIndex + i] as InputKey.T9Key).consumed = true
+        // 校验该数字段前缀与拼音的 T9 序列逐位一致，且长度足够
+        if (start + t9Sequence.length > records.size) return null
+        for (i in t9Sequence.indices) {
+            val record = records[start + i]
+            if (record !is InputKey.T9Key || record.key != t9Sequence[i]) return null
         }
 
-        // 计算 posInInput：此 PinyinKey 之前所有元素在编码中占用的字符数
-        val posInInput = calculatePosInInput(startIndex)
+        val caretPos = charOffsetBefore(start)
 
-        val pinyinKey = InputKey.PinyinKey(
-            pinyin = pinyin,
-            posInInput = posInInput,
-            t9KeysLength = seqLen
+        // 用 PinyinKey 原地替换匹配的 T9Key 段
+        repeat(t9Sequence.length) { records.removeAt(start) }
+        records.add(start, InputKey.PinyinKey(pinyin))
+
+        return ReplaceCommand(
+            caretPos = caretPos,
+            length = t9Sequence.length,
+            replacement = pinyin + DELIMITER
         )
-        keyRecords.add(pinyinKey)
-        return pinyinKey
     }
 
     /**
-     * 撤销最近操作：
-     * - 栈顶是 PinyinKey：弹出，恢复对应 T9Key 为未消费状态，返回 RestoreResult
-     * - 栈顶是 T9Key：弹出，返回 null（调用方发送普通 BackSpace）
-     * - 栈顶是 Apostrophe：弹出，返回 null
+     * 智能回退：
+     * - 栈尾是 [InputKey.PinyinKey]：解锁为原 T9 数字段，原地还原并返回替换指令。
+     * - 栈尾是 [InputKey.T9Key]：弹出，返回 null（调用方发送普通退格删除末位数字）。
+     * - 栈尾是 [InputKey.Apostrophe]：弹出，返回 null。
      */
-    fun popAndRestore(): RestoreResult? {
-        if (keyRecords.isEmpty()) return null
+    fun popAndRestore(): ReplaceCommand? {
+        if (records.isEmpty()) return null
 
-        return when (val top = keyRecords.removeLast()) {
+        val lastIndex = records.size - 1
+        return when (val top = records[lastIndex]) {
             is InputKey.PinyinKey -> {
-                // 恢复对应的被消费 T9Key 为未消费状态
                 val t9Sequence = T9PinYinUtils.pinyin2Key(top.pinyin)
-                var restored = 0
-                val targetCount = top.t9KeysLength
-
-                // 从头遍历找到对应位置的 consumed T9Key 并恢复
-                for (record in keyRecords) {
-                    if (restored >= targetCount) break
-                    if (record is InputKey.T9Key && record.consumed) {
-                        record.consumed = false
-                        restored++
-                    }
+                val caretPos = charOffsetBefore(lastIndex)
+                // 原地还原：拼音 → 对应 T9Key 段
+                records.removeAt(lastIndex)
+                t9Sequence.forEachIndexed { i, c ->
+                    records.add(lastIndex + i, InputKey.T9Key(c))
                 }
-
-                RestoreResult(
-                    posInInput = top.posInInput,
-                    length = top.pinyin.length + 1,  // 拼音 + 分词符
-                    t9Keys = t9Sequence
+                ReplaceCommand(
+                    caretPos = caretPos,
+                    length = top.pinyin.length + DELIMITER.length,  // 拼音 + 分词符
+                    replacement = t9Sequence
                 )
             }
-            is InputKey.T9Key -> null
-            is InputKey.Apostrophe -> null
-        }
-    }
-
-    /**
-     * 在栈中从头查找连续未消费的 T9Key 序列，返回起始索引；找不到返回 -1
-     */
-    private fun findUnconsumedT9Sequence(t9Chars: CharArray): Int {
-        val seqLen = t9Chars.size
-        if (keyRecords.size < seqLen) return -1
-
-        for (start in 0..keyRecords.size - seqLen) {
-            val matched = (0 until seqLen).all { j ->
-                val record = keyRecords[start + j]
-                record is InputKey.T9Key && !record.consumed && record.key == t9Chars[j]
+            is InputKey.T9Key -> {
+                records.removeAt(lastIndex)
+                null
             }
-            if (matched) return start
+            is InputKey.Apostrophe -> {
+                records.removeAt(lastIndex)
+                null
+            }
         }
-        return -1
     }
 
     /**
-     * 计算在编码字符串中指定位置之前的所有元素占用字符数
+     * 计算 [index] 之前所有元素在编码串中占用的字符数。
+     * 已锁定拼音占 `拼音长度 + 分词符`，数字键 / 分词符各占 1。
      */
-    private fun calculatePosInInput(upToIndex: Int): Int {
+    private fun charOffsetBefore(index: Int): Int {
         var pos = 0
-        for (i in 0 until upToIndex) {
-            pos += when (val element = keyRecords[i]) {
-                is InputKey.T9Key -> if (!element.consumed) 1 else 0
+        for (i in 0 until index) {
+            pos += when (val element = records[i]) {
+                is InputKey.T9Key -> 1
                 is InputKey.Apostrophe -> 1
-                is InputKey.PinyinKey -> element.pinyin.length + 1  // 拼音 + 分词符
+                is InputKey.PinyinKey -> element.pinyin.length + DELIMITER.length
             }
         }
         return pos
     }
+
+    companion object {
+        /** Rime 编码分词符（与 t9.schema.yaml 的 delimiter 一致） */
+        private const val DELIMITER = "'"
+    }
 }
 
 /**
- * 回退操作的结果，用于调用方向 Rime 发送替换指令
+ * 编码替换指令，供调用方向 Rime 发送 `replaceKey`。
+ *
+ * @param caretPos    在 Rime 编码串中的起始字符位置
+ * @param length      要替换的字符长度
+ * @param replacement 替换后的字符串
  */
-data class RestoreResult(
-    val posInInput: Int,    // 在编码中的位置
-    val length: Int,        // 要替换的长度（拼音+分词符）
-    val t9Keys: String      // 要恢复的 T9 键序列
+data class ReplaceCommand(
+    val caretPos: Int,
+    val length: Int,
+    val replacement: String
 )
 
 /**
- * 输入键的密封类层级，仅保留 T9 相关路径
+ * 输入键的密封类层级，仅保留 T9 相关路径。
  */
 sealed class InputKey {
     /**
      * T9 按键（'2'-'9'）
      */
-    data class T9Key(val key: Char, var consumed: Boolean = false) : InputKey()
+    data class T9Key(val key: Char) : InputKey()
 
     /**
      * 分词键（撇号）
@@ -158,11 +164,7 @@ sealed class InputKey {
     data object Apostrophe : InputKey()
 
     /**
-     * 已选拼音，记录在编码中的位置和原 T9 键长度
+     * 已锁定拼音（首个未确定音节被用户选定后固定下来）
      */
-    data class PinyinKey(
-        val pinyin: String,
-        val posInInput: Int,
-        val t9KeysLength: Int
-    ) : InputKey()
+    data class PinyinKey(val pinyin: String) : InputKey()
 }

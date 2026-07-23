@@ -500,20 +500,20 @@ class SimpleRimeInputMethodService : InputMethodService() {
             else -> {
                 // 九宫格模式下的智能退格
                 if (keyCode == KeyCode.XK_BackSpace && currentKeyboardType == KeyboardType.NINE_GRID && !keyRecordStack.isEmpty()) {
-                    val restoreResult = keyRecordStack.popAndRestore()
-                    if (restoreResult != null) {
-                        // 撤销拼音选择：将已选拼音替换回原 T9 键
+                    val restoreCommand = keyRecordStack.popAndRestore()
+                    if (restoreCommand != null) {
+                        // 撤销拼音选择：将已锁定拼音替换回原 T9 键
                         serviceScope.launch {
                             RimeSession.api.replaceKey(
-                                restoreResult.posInInput,
-                                restoreResult.length,
-                                restoreResult.t9Keys
+                                restoreCommand.caretPos,
+                                restoreCommand.length,
+                                restoreCommand.replacement
                             )
                             updateUI()
                         }
                         return  // 不发送普通 BackSpace
                     }
-                    // restoreResult 为 null 表示弹出的是普通 T9Key/Apostrophe，继续执行正常退格
+                    // restoreCommand 为 null 表示弹出的是普通 T9Key/Apostrophe，继续执行正常退格
                 }
                 // 九宫格模式下追踪 T9 按键
                 if (currentKeyboardType == KeyboardType.NINE_GRID) {
@@ -653,11 +653,16 @@ class SimpleRimeInputMethodService : InputMethodService() {
      * 将 Rime 编码中对应的 T9 键序列替换为所选拼音
      */
     private fun handlePinyinSelect(pinyin: String) {
+        // 锁定「首个未确定音节」对应的 T9 数字段，得到编码替换指令。
+        // 在主线程同步更新状态机，保证与退格等其他栈操作的时序一致。
+        val command = keyRecordStack.pushPinyinSelectAction(pinyin) ?: return
         serviceScope.launch {
-            val pinyinKey = keyRecordStack.pushPinyinSelectAction(pinyin) ?: return@launch
-            // 用选定拼音替换编码中对应的 T9 键序列（末尾加分词符）
-            val replacement = pinyin + "'"
-            RimeSession.api.replaceKey(pinyinKey.posInInput, pinyinKey.t9KeysLength, replacement)
+            // 用选定拼音替换编码中对应的 T9 键序列（含末尾分词符），锁定该音节
+            RimeSession.api.replaceKey(command.caretPos, command.length, command.replacement)
+            // replaceKey 会把光标停在已锁定拼音之后（编码串中部），而 Rime 仅组织光标
+            // 之前的片段，导致候选只剩「已锁定音节」的单字。将光标移到编码串末尾，令 Rime
+            // 组织「已锁定拼音 + 后续未确定音节」的完整组合候选（如 guo'486 → 组词候选）。
+            RimeSession.api.processKey(KeyCode.XK_End, 0)
             updateUI()
         }
     }
