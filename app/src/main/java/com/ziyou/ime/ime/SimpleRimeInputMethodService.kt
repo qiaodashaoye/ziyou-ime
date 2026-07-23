@@ -5,6 +5,7 @@ import android.inputmethodservice.InputMethodService
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewTreeObserver
 import android.view.inputmethod.EditorInfo
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -63,8 +64,21 @@ class SimpleRimeInputMethodService : InputMethodService() {
     /** 候选词视图引用 */
     private var candidatesView: SimpleCandidatesView? = null
 
+    /** 编码区视图引用（固定在候选词列表上方） */
+    private var preeditOverlay: PreeditOverlayView? = null
+
     /** 九宫格左侧拼音侧栏引用（仅九宫格布局下存在） */
     private var pinyinSideBar: PinyinSideBarView? = null
+
+    /** 九宫格底栏引用（仅九宫格布局下存在，用于同步 isChineseMode） */
+    private var nineGridBottomBar: NineGridBottomBarView? = null
+
+    /**
+     * 九宫格“中→英”专用标志。
+     * 当为 true 时，applyEngineForKeyboard 强制设置 ascii_mode=true，
+     * handleSoftKeyPress 跳过 KEYCODE_SWITCH_LANGUAGE 的异步 toggle，避免竞态。
+     */
+    private var pendingEnglishMode = false
 
     /** 九宫格输入状态追踪栈（拼音消歧与智能回退） */
     private val keyRecordStack = KeyRecordStack()
@@ -100,10 +114,16 @@ class SimpleRimeInputMethodService : InputMethodService() {
 
     /**
      * 创建输入视图（包含候选词栏和键盘）
-     * 使用纯代码动态创建，不依赖XML布局资源
+     *
+     * 候选词区域使用垂直 LinearLayout，编码区 [PreeditOverlayView] 固定在顶部，
+     * 候选词列表 [SimpleCandidatesView] 在下方独立滚动，实现编码区与候选词的职责分离。
+     * 不使用 onCreateCandidatesView()——该 API 的系统级显隐控制不可靠，
+     * 将候选词放在 onCreateInputView() 内可确保始终可见。
      */
     override fun onCreateInputView(): View {
         Log.d(TAG, "onCreateInputView")
+
+        val theme = ThemeManager.getCurrentTheme(this)
 
         // 创建根容器：垂直LinearLayout
         val rootLayout = LinearLayout(this).apply {
@@ -114,20 +134,36 @@ class SimpleRimeInputMethodService : InputMethodService() {
             )
         }
 
-        // 创建候选词视图（顶部）
+        // 候选词容器：垂直 LinearLayout，编码区固定在顶部，候选词列表在下方独立滚动
+        val candidatesContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        preeditOverlay = PreeditOverlayView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            applyTheme(theme)
+        }
+        candidatesContainer.addView(preeditOverlay)
+
         candidatesView = SimpleCandidatesView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
-            // 候选词点击回调
             onCandidateClick = { index -> handleCandidateClick(index) }
-            // 翻页回调
             onPageChange = { forward -> handlePageChange(forward) }
-            // 应用当前主题，与键盘保持一致
-            applyTheme(ThemeManager.getCurrentTheme(this@SimpleRimeInputMethodService))
+            applyTheme(theme)
         }
-        rootLayout.addView(candidatesView)
+        candidatesContainer.addView(candidatesView)
+
+        rootLayout.addView(candidatesContainer)
 
         // 键盘容器（底部）：承载可切换的键盘视图
         keyboardContainer = FrameLayout(this).apply {
@@ -172,37 +208,76 @@ class SimpleRimeInputMethodService : InputMethodService() {
             onKeyPress = { keyCode, mask -> handleSoftKeyPress(keyCode, mask) }
             // 键盘切换回调
             onSwitchKeyboard = { target -> switchKeyboard(target) }
-            // 编码预览（如九宫格多击未提交字母）实时反馈到候选栏拼音区
-            onComposingPreview = { preview -> candidatesView?.setComposingPreview(preview) }
+            // 九宫格“中→英”专用回调：强制英文 + 切到 26 键
+            onSwitchToQwertyEnglish = { switchToQwertyEnglish() }
+            // 编码预览（如九宫格多击未提交字母）实时反馈到编码区悬浮层
+            onComposingPreview = { preview -> preeditOverlay?.setText(preview) }
         }
         container.removeAllViews()
         pinyinSideBar = null
+        nineGridBottomBar = null
 
         if (type == KeyboardType.NINE_GRID) {
-            // 左侧拼音侧栏
+            // 九宫格主网格只显示前三行（1-9 数字键 + 右侧功能列）
+            val grid = view as NineGridKeyboardView
+            grid.setGridRowCount(3)
+
+            // 左侧拼音侧栏（高度与三行网格匹配，底部与数字键行对齐）
             val sideBar = PinyinSideBarView(this).apply {
                 applyTheme(theme)
                 setSideSymbols(SideSymbolRepository.getPinyinSideSymbols(this@SimpleRimeInputMethodService))
-                // 点击左侧拼音 → 复用现有拼音消歧逻辑
                 onPinyinSelect = { pinyin -> handlePinyinSelect(pinyin) }
-                // 点击侧栏符号 → 直接上屏
                 onSymbolInput = { value -> handleSideSymbolInput(value) }
-                // 点击「＋」→ 进入侧栏符号自定义管理
                 onAddSymbol = { openSideSymbolSettings() }
             }
-            // 横向容器：[侧栏][键盘]
-            val row = LinearLayout(this).apply {
+            // 横向容器：[侧栏][三行网格]
+            val topRow = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
+            }
+            topRow.addView(sideBar, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.8f))
+            grid.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 8.2f)
+            topRow.addView(grid)
+
+            // 底栏视图：全宽横跨屏幕，延伸至屏幕最左侧边缘
+            val bottomBar = NineGridBottomBarView(this).apply {
+                applyTheme(theme)
+                onKeyPress = { keyCode, mask -> handleSoftKeyPress(keyCode, mask) }
+                onSwitchKeyboard = { target -> switchKeyboard(target) }
+                onSwitchToQwertyEnglish = { switchToQwertyEnglish() }
+                isChineseMode = view.isChineseMode
+            }
+            nineGridBottomBar = bottomBar
+
+            // 纵向容器：[上方：侧栏+三行网格][下方：全宽底栏]
+            val verticalContainer = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
                 layoutParams = FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.WRAP_CONTENT
                 )
             }
-            row.addView(sideBar, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.8f))
-            view.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 8.2f)
-            row.addView(view)
-            container.addView(row)
+            verticalContainer.addView(topRow, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+            verticalContainer.addView(bottomBar, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+            container.addView(verticalContainer)
             pinyinSideBar = sideBar
+
+            // 布局完成后同步底栏按键宽度与上方网格保持一致
+            grid.viewTreeObserver.addOnGlobalLayoutListener(object :
+                ViewTreeObserver.OnGlobalLayoutListener {
+                override fun onGlobalLayout() {
+                    grid.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                    grid.gridUnitWidth?.let { unitWidth ->
+                        bottomBar.forcedUnitWidth = unitWidth
+                        bottomBar.requestLayout()
+                    }
+                }
+            })
         } else {
             view.layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -215,6 +290,15 @@ class SimpleRimeInputMethodService : InputMethodService() {
     }
 
     /**
+     * 九宫格“中→英”专用切换：强制 ascii_mode=true 并切到 QWERTY。
+     * 不走 handleSoftKeyPress 异步路径，避免与 applyEngineForKeyboard 竞态。
+     */
+    private fun switchToQwertyEnglish() {
+        pendingEnglishMode = true
+        switchKeyboard(KeyboardType.QWERTY)
+    }
+
+    /**
      * 切换键盘布局，重建视图并同步方案 / 中英文模式 / 编码区。
      */
     private fun switchKeyboard(type: KeyboardType) {
@@ -223,7 +307,7 @@ class SimpleRimeInputMethodService : InputMethodService() {
         installKeyboard(type)
         saveKeyboardType(type)
         // 清除切换前残留的预览
-        candidatesView?.setComposingPreview(null)
+        preeditOverlay?.setText(null)
         serviceScope.launch {
             try {
                 applyEngineForKeyboard(type)
@@ -256,6 +340,11 @@ class SimpleRimeInputMethodService : InputMethodService() {
                     RimeSession.api.selectSchema(schemeBeforeT9 ?: DEFAULT_SCHEMA_ID)
                     schemeBeforeT9 = null
                 }
+                // 九宫格“中→英”触发：强制英文模式，避免与 handleSoftKeyPress 竞态
+                if (pendingEnglishMode) {
+                    RimeSession.api.setOption("ascii_mode", true)
+                    pendingEnglishMode = false
+                }
             }
         }
         val isAscii = RimeSession.api.getOption("ascii_mode")
@@ -264,8 +353,10 @@ class SimpleRimeInputMethodService : InputMethodService() {
         withContext(Dispatchers.Main) {
             keyboardView?.isChineseMode = !isAscii
             candidatesView?.updateCandidates(context)
-            // 顶部编码区仅显示「当前拼音」单串预览；拼音候选选择在左侧侧栏进行
-            candidatesView?.setComposingPreview(buildPinyinPreview(context, pinyinHints))
+            // 编码区悬浮层：九宫格显示拼音预览，全键盘回退到 Rime 原始 preedit
+            preeditOverlay?.setText(
+                buildPinyinPreview(context, pinyinHints) ?: context?.composition?.preedit
+            )
             keyboardView?.updateComposition(context?.composition)
             // 刷新左侧拼音侧栏（拼音候选 + 自定义符号）
             if (type == KeyboardType.NINE_GRID) {
@@ -316,9 +407,9 @@ class SimpleRimeInputMethodService : InputMethodService() {
         super.onFinishInputView(finishingInput)
         Log.d(TAG, "onFinishInputView")
 
-        // 丢弃未提交的多击预览并清空拼音区预览
+        // 丢弃未提交的多击预览并清空编码区
         keyboardView?.resetInputState()
-        candidatesView?.setComposingPreview(null)
+        preeditOverlay?.setText(null)
 
         serviceScope.launch {
             try {
@@ -366,15 +457,36 @@ class SimpleRimeInputMethodService : InputMethodService() {
         when (keyCode) {
             // 中英文切换：设置Rime选项
             KeyCode.KEYCODE_SWITCH_LANGUAGE -> {
+                // 九宫格“中→英”已通过 switchToQwertyEnglish 处理，跳过异步 toggle
+                if (pendingEnglishMode) {
+                    pendingEnglishMode = false
+                    return
+                }
                 serviceScope.launch {
                     try {
                         val currentAscii = RimeSession.api.getOption("ascii_mode")
                         RimeSession.api.setOption("ascii_mode", !currentAscii)
                         // 键盘视图已在View内部切换了显示，这里同步
                         keyboardView?.isChineseMode = currentAscii // 反转
+                        nineGridBottomBar?.isChineseMode = currentAscii
                         Log.d(TAG, "切换中英文: ascii_mode=${!currentAscii}")
                     } catch (e: Exception) {
                         Log.e(TAG, "切换中英文异常: ${e.message}", e)
+                    }
+                }
+            }
+
+            // 中文/数字模式切换：中文时发送数字 0–9 直接上屏，英文时正常输入
+            KeyCode.KEYCODE_SWITCH_NUMBER_MODE -> {
+                serviceScope.launch {
+                    try {
+                        val currentAscii = RimeSession.api.getOption("ascii_mode")
+                        RimeSession.api.setOption("ascii_mode", !currentAscii)
+                        keyboardView?.isChineseMode = currentAscii // 反转
+                        nineGridBottomBar?.isChineseMode = currentAscii
+                        Log.d(TAG, "切换中数模式: ascii_mode=${!currentAscii}")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "切换中数模式异常: ${e.message}", e)
                     }
                 }
             }
@@ -441,11 +553,18 @@ class SimpleRimeInputMethodService : InputMethodService() {
                 updateUI()
             } else {
                 // Rime未消费，某些键可能需要直接输出
-                // 如果是可打印字符且Rime未处理，直接提交
-                if (keyCode in 0x20..0x7E && mask == 0) {
-                    val char = keyCode.toChar().toString()
-                    currentInputConnection?.commitText(char, 1)
-                    Log.d(TAG, "直接提交字符: $char")
+                when {
+                    // 退格键：Rime无编码可删时，直接删除编辑器中的字符
+                    keyCode == KeyCode.XK_BackSpace -> {
+                        currentInputConnection?.deleteSurroundingText(1, 0)
+                        Log.d(TAG, "直接删除: deleteSurroundingText(1, 0)")
+                    }
+                    // 可打印字符且Rime未处理，直接提交
+                    keyCode in 0x20..0x7E && mask == 0 -> {
+                        val char = keyCode.toChar().toString()
+                        currentInputConnection?.commitText(char, 1)
+                        Log.d(TAG, "直接提交字符: $char")
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -515,8 +634,10 @@ class SimpleRimeInputMethodService : InputMethodService() {
             withContext(Dispatchers.Main) {
                 // 更新候选词视图
                 candidatesView?.updateCandidates(context)
-                // 顶部编码区仅显示「当前拼音」单串预览（九宫格），全键盘为 null（回退到 Rime preedit）
-                candidatesView?.setComposingPreview(buildPinyinPreview(context, pinyinHints))
+                // 编码区悬浮层：九宫格显示拼音预览，全键盘回退到 Rime 原始 preedit
+                preeditOverlay?.setText(
+                    buildPinyinPreview(context, pinyinHints) ?: context?.composition?.preedit
+                )
                 // 更新键盘编码区
                 keyboardView?.updateComposition(context?.composition)
                 // 左侧拼音侧栏：有候选拼音则展示拼音，否则展示自定义符号
@@ -652,7 +773,9 @@ class SimpleRimeInputMethodService : InputMethodService() {
         keyboardView = null
         keyboardContainer = null
         candidatesView = null
+        preeditOverlay = null
         pinyinSideBar = null
+        nineGridBottomBar = null
         super.onDestroy()
     }
 }

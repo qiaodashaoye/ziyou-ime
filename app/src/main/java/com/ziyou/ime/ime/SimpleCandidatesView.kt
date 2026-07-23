@@ -20,8 +20,10 @@ import com.ziyou.ime.core.ContextProto
  * 水平滚动显示候选词列表，支持：
  * - 横向排列候选词
  * - 点击选择候选词
- * - 顶部显示编码区（preedit）
  * - 支持左右滑动翻页
+ *
+ * 注意：编码区（preedit）已分离为独立的 [PreeditOverlayView]，
+ * 通过垂直 LinearLayout 堆叠在候选词区域上方。
  */
 class SimpleCandidatesView @JvmOverloads constructor(
     context: Context,
@@ -34,8 +36,6 @@ class SimpleCandidatesView @JvmOverloads constructor(
         private const val VIEW_HEIGHT_DP = 40
         /** 候选词字体大小（sp） */
         private const val CANDIDATE_TEXT_SIZE_SP = 16f
-        /** 编码区字体大小（sp） */
-        private const val PREEDIT_TEXT_SIZE_SP = 12f
         /** 候选词水平内边距（dp） */
         private const val CANDIDATE_PADDING_H_DP = 12
         /** 高亮圆角半径（dp） */
@@ -53,10 +53,6 @@ class SimpleCandidatesView @JvmOverloads constructor(
     // 候选词数据
     private var candidates: Array<CandidateProto> = emptyArray()
     private var highlightIndex: Int = -1
-    private var preeditText: String? = null
-
-    /** 编码区显式显示文本（九宫格下为当前拼音串），非空时覆盖 Rime 原始 preedit */
-    private var previewText: String? = null
 
     // 绘制相关的画笔
     private val candidatePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -69,12 +65,6 @@ class SimpleCandidatesView @JvmOverloads constructor(
         textSize = sp2px(CANDIDATE_TEXT_SIZE_SP)
         color = Color.WHITE
         typeface = Typeface.DEFAULT_BOLD
-    }
-
-    private val preeditPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = sp2px(PREEDIT_TEXT_SIZE_SP)
-        color = Color.parseColor("#666666")
-        typeface = Typeface.DEFAULT
     }
 
     private val highlightBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -157,29 +147,8 @@ class SimpleCandidatesView @JvmOverloads constructor(
         candidatePaint.color = theme.candidateTextColor
         highlightedCandidatePaint.color = theme.candidateBackground
         highlightBgPaint.color = theme.candidateHighlightColor
-        preeditPaint.color = theme.preeditTextColor
         dividerPaint.color = theme.borderColor
         invalidate()
-    }
-
-    /**
-     * 设置编码区显示文本（当前拼音串预览）。
-     * 非空时作为编码区显示内容，覆盖 Rime 原始 preedit：
-     * - 九宫格：Service 传入当前解释的可读拼音（单串，如 "guo"）；拼音候选选择在左侧侧栏进行
-     * - null 时回退到 Rime 原始 preedit（全键盘拼音）
-     */
-    fun setComposingPreview(preview: String?) {
-        val normalized = preview?.takeIf { it.isNotEmpty() }
-        if (previewText == normalized) return
-        previewText = normalized
-        recalculateLayout()
-        invalidate()
-    }
-
-    /** 实际展示的编码区文本：有显式预览（九宫格拼音串）则优先，否则用 Rime preedit */
-    private fun displayPreedit(): String? {
-        previewText?.let { return it }
-        return preeditText?.takeIf { it.isNotEmpty() }
     }
 
     /**
@@ -190,11 +159,9 @@ class SimpleCandidatesView @JvmOverloads constructor(
         if (context == null) {
             candidates = emptyArray()
             highlightIndex = -1
-            preeditText = null
         } else {
             candidates = context.menu?.candidates ?: emptyArray()
             highlightIndex = context.menu?.highlightedCandidateIndex ?: -1
-            preeditText = context.composition?.preedit
         }
         scrollOffset = 0f
         recalculateLayout()
@@ -208,13 +175,6 @@ class SimpleCandidatesView @JvmOverloads constructor(
         candidateRects.clear()
         val paddingH = dp2px(CANDIDATE_PADDING_H_DP.toFloat())
         var x = paddingH
-
-        // 如果有preedit（含拼音串预览），先预留preedit区域
-        val preedit = displayPreedit()
-        if (!preedit.isNullOrEmpty()) {
-            val preeditWidth = preeditPaint.measureText(preedit) + paddingH * 2
-            x = preeditWidth
-        }
 
         for (candidate in candidates) {
             val text = candidate.text
@@ -243,24 +203,13 @@ class SimpleCandidatesView @JvmOverloads constructor(
         // 绘制背景
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
 
-        val preedit = displayPreedit()
-        if (candidates.isEmpty() && preedit.isNullOrEmpty()) return
+        if (candidates.isEmpty()) return
 
         canvas.save()
         canvas.translate(-scrollOffset, 0f)
 
         val paddingH = dp2px(CANDIDATE_PADDING_H_DP.toFloat())
         val textBaseline = height / 2f + candidatePaint.textSize / 3f
-
-        // 绘制preedit编码区（Rime preedit + 多击预览）
-        var startX = 0f
-        if (!preedit.isNullOrEmpty()) {
-            val preeditBaseline = height / 2f + preeditPaint.textSize / 3f
-            canvas.drawText(preedit, paddingH, preeditBaseline, preeditPaint)
-            startX = preeditPaint.measureText(preedit) + paddingH * 2
-            // 绘制分隔线
-            canvas.drawLine(startX, 4f, startX, height - 4f, dividerPaint)
-        }
 
         // 绘制候选词
         for (i in candidates.indices) {

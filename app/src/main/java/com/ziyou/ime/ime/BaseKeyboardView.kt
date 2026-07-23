@@ -87,6 +87,12 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
      */
     var onComposingPreview: ((preview: String?) -> Unit)? = null
 
+    /**
+     * 九宫格“中→英”专用回调：强制切换到 26 键英文模式。
+     * 不走 [onKeyPress] 异步路径，避免与 [onSwitchKeyboard] 产生竞态。
+     */
+    var onSwitchToQwertyEnglish: (() -> Unit)? = null
+
     // ===== 状态 =====
     /** 是否为中文模式（由 Service 层同步；变更时自动刷新） */
     var isChineseMode: Boolean = true
@@ -141,6 +147,13 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
     /** 按键高度倍率（默认 1.0）。子类可覆写以调整按键高度，如九宫格 5 行布局可适当加大。 */
     protected open val keyHeightMultiplier: Float = 1.0f
 
+    /**
+     * 强制指定按键宽度单元值（px）。
+     * 当非 null 时，recalculateKeyPositions 使用该值代替根据当前视图宽度自动计算的值，
+     * 用于底栏等需要与上方网格保持按键宽度一致的场景。
+     */
+    var forcedUnitWidth: Float? = null
+
     init {
         keyHeight = dp2px(KEY_HEIGHT_DP.toFloat())
         keyGap = dp2px(KEY_GAP_DP.toFloat())
@@ -192,7 +205,7 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
     }
 
     /** 重新计算所有按键的位置 */
-    private fun recalculateKeyPositions() {
+    protected open fun recalculateKeyPositions() {
         keyRects.clear()
         val availableWidth = width - keyboardPadding * 2
 
@@ -201,7 +214,8 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
             if (row.isEmpty()) continue
             val totalWeight = row.sumOf { it.width.toDouble() }.toFloat()
             val totalGapWidth = (row.size - 1) * keyGap
-            val unitWidth = (availableWidth - totalGapWidth) / totalWeight
+            val unitWidth = forcedUnitWidth
+                ?: (availableWidth - totalGapWidth) / totalWeight
 
             var x = keyboardPadding + rowIndent(rowIndex, unitWidth)
             val y = keyboardPadding + rowIndex * (keyHeight * keyHeightMultiplier + keyGap)
