@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.Color
 import android.util.Log
+import com.ziyou.ime.level.LevelEngine
+import com.ziyou.ime.level.LevelRepository
 
 /**
  * 主题管理器
@@ -88,11 +90,28 @@ object ThemeManager {
             Log.w(TAG, "未知的主题名称: $themeName")
             return false
         }
+        // 皮肤需达到对应等级才能应用（权益解锁）
+        if (!isThemeUnlocked(context, themeName)) {
+            Log.w(TAG, "主题未解锁（等级不足）: $themeName")
+            return false
+        }
         getPreferences(context).edit()
             .putString(KEY_CURRENT_THEME, themeName)
             .apply()
         Log.i(TAG, "主题已切换为: $themeName")
         return true
+    }
+
+    /** 指定主题在当前等级下是否已解锁。 */
+    fun isThemeUnlocked(context: Context, themeName: String): Boolean {
+        val level = LevelRepository.load(context).level
+        return LevelEngine.isThemeUnlocked(themeName, level)
+    }
+
+    /** 当前等级下已解锁的主题名称集合（供设置页筛选展示）。 */
+    fun getUnlockedThemeNames(context: Context): List<String> {
+        val level = LevelRepository.load(context).level
+        return themeMap.keys.filter { LevelEngine.isThemeUnlocked(it, level) }
     }
 
     fun getAllThemes(): List<KeyboardTheme> {

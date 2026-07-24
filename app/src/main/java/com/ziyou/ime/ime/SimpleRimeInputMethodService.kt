@@ -16,6 +16,8 @@ import com.ziyou.ime.core.RimeMessage
 import com.ziyou.ime.daemon.RimeSession
 import com.ziyou.ime.data.KeyRecordStack
 import com.ziyou.ime.data.SideSymbolRepository
+import com.ziyou.ime.level.LevelRepository
+import com.ziyou.ime.level.LevelStats
 import com.ziyou.ime.ui.SettingsActivity
 import com.ziyou.ime.util.T9PinYinUtils
 import kotlinx.coroutines.*
@@ -88,6 +90,9 @@ class SimpleRimeInputMethodService : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "InputMethodService onCreate")
+
+        // 初始化等级计分（热路径仅做内存自增，此处仅注入 applicationContext）
+        LevelStats.init(applicationContext)
 
         // 初始化Rime引擎（如果还未初始化）
         serviceScope.launch {
@@ -397,6 +402,20 @@ class SimpleRimeInputMethodService : InputMethodService() {
                 Log.e(TAG, "onStartInputView 处理异常: ${e.message}", e)
             }
         }
+
+        // 每日签到：发放首用/连续天数奖励（幂等，后台线程执行，不阻塞输入视图）
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val result = LevelRepository.checkInToday(applicationContext)
+                if (result.isFirstUseToday) {
+                    // MVP：每日简报 UI 展示留待 UI 阶段接入，此处先记录
+                    Log.d(TAG, "每日签到: 连续${result.state.streakDays}天 +${result.bonusPoints}分, " +
+                        "昨日${result.yesterdayChars}字/${result.yesterdayPoints}分")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "每日签到异常: ${e.message}")
+            }
+        }
     }
 
     /**
@@ -410,6 +429,9 @@ class SimpleRimeInputMethodService : InputMethodService() {
         // 丢弃未提交的多击预览并清空编码区
         keyboardView?.resetInputState()
         preeditOverlay?.setText(null)
+
+        // 输入视图隐藏，主动落盘累计的上屏计分，避免尾部数据丢失
+        LevelStats.flush()
 
         serviceScope.launch {
             try {
@@ -545,7 +567,7 @@ class SimpleRimeInputMethodService : InputMethodService() {
                 val commit = RimeSession.api.getCommit()
                 commit?.text?.let { text ->
                     // 将文本提交到当前编辑器
-                    currentInputConnection?.commitText(text, 1)
+                    commitAndCount(text)
                     Log.d(TAG, "commitText: $text")
                     keyRecordStack.clear()
                 }
@@ -562,13 +584,25 @@ class SimpleRimeInputMethodService : InputMethodService() {
                     // 可打印字符且Rime未处理，直接提交
                     keyCode in 0x20..0x7E && mask == 0 -> {
                         val char = keyCode.toChar().toString()
-                        currentInputConnection?.commitText(char, 1)
+                        commitAndCount(char)
                         Log.d(TAG, "直接提交字符: $char")
                     }
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "processRimeKey异常: ${e.message}", e)
+        }
+    }
+
+    /**
+     * 统一的文本上屏出口：提交到编辑器并做等级计分埋点。
+     * 计分仅统计 Unicode 码点数（脱敏，不触碰内容）；处于输入热路径，
+     * [LevelStats.onCommit] 内部仅做 O(1) 内存自增，达阈值才后台异步落盘。
+     */
+    private fun commitAndCount(text: CharSequence) {
+        currentInputConnection?.commitText(text, 1)
+        if (text.isNotEmpty()) {
+            LevelStats.onCommit(Character.codePointCount(text, 0, text.length))
         }
     }
 
@@ -588,7 +622,7 @@ class SimpleRimeInputMethodService : InputMethodService() {
                     // 选词后检查是否有commit
                     val commit = RimeSession.api.getCommit()
                     commit?.text?.let { text ->
-                        currentInputConnection?.commitText(text, 1)
+                        commitAndCount(text)
                         Log.d(TAG, "候选词提交: $text")
                         keyRecordStack.clear()
                     }
@@ -674,7 +708,7 @@ class SimpleRimeInputMethodService : InputMethodService() {
      */
     private fun handleSideSymbolInput(value: String) {
         if (value.isEmpty()) return
-        currentInputConnection?.commitText(value, 1)
+        commitAndCount(value)
     }
 
     /**
@@ -772,6 +806,8 @@ class SimpleRimeInputMethodService : InputMethodService() {
 
     override fun onDestroy() {
         Log.i(TAG, "InputMethodService onDestroy")
+        // 服务销毁前落盘剩余的上屏计分
+        LevelStats.flush()
         // 取消所有协程
         serviceScope.cancel()
         // 释放视图引用
