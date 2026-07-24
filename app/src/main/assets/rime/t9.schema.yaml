@@ -25,6 +25,9 @@ switches:
   - name: ascii_mode
     reset: 0
     states: [ 中文, ABC ]
+  - name: simplification
+    reset: 0
+    states: [ 简体, 繁体 ]
   - name: ascii_punct
     reset: 0
     states: [ 中文标点, 西文标点 ]
@@ -49,6 +52,7 @@ engine:
     - punct_translator
     - script_translator
   filters:
+    - simplifier@zh_trad
     - uniquifier
 
 speller:
@@ -86,6 +90,11 @@ translator:
   spelling_hints: 32
   preedit_format:
     - xform/([nljqxy])v/$1ü/
+
+zh_trad:
+  option_name: simplification
+  opencc_config: s2t.json
+  tips: all
 
 punctuator:
   import_preset: default

@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.core.*
+import com.ziyou.ime.dict.DictManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -80,6 +81,11 @@ object RimeSession {
         AssetDeployer.deployIfNeeded(context)
         Log.i(TAG, "资源文件部署完成")
 
+        // 第二步：注入已启用的扩展词库到主词库文件
+        // AssetDeployer 可能覆盖了 luna_pinyin.dict.yaml，需要重新追加扩展词库引用
+        DictManager.regenerateMainDict(context)
+        Log.i(TAG, "扩展词库注入完成")
+
         // 准备目录
         val sharedDir = getSharedDataDir(context)
         val userDir = getUserDataDir(context)
@@ -145,6 +151,36 @@ object RimeSession {
         isInitialized = false
 
         Log.i(TAG, "RimeSession 已销毁")
+    }
+
+    /**
+     * 重新部署 RIME 引擎（词库变更后调用）
+     * 关闭当前引擎 → 重新生成主词库 → 以 fullCheck 模式重启
+     */
+    suspend fun redeploy(context: Context) {
+        Log.i(TAG, "开始重新部署 RIME 引擎")
+
+        // 关闭当前引擎
+        if (isInitialized) {
+            try {
+                rimeApi?.shutdown()
+            } catch (e: Exception) {
+                Log.w(TAG, "关闭引擎异常: ${e.message}")
+            }
+            sessionScope?.cancel()
+            dispatcher?.shutdown()
+            rimeApi = null
+            dispatcher = null
+            sessionScope = null
+            isInitialized = false
+        }
+
+        // 重新注入扩展词库
+        DictManager.regenerateMainDict(context)
+
+        // 以 fullCheck 模式重新启动
+        initialize(context, fullCheck = true)
+        Log.i(TAG, "RIME 引擎重新部署完成")
     }
 
     /**

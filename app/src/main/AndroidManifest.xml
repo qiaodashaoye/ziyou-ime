@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:name=".ZiyouApplication"
         android:allowBackup="true"
@@ -35,6 +37,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 扩展词库管理 -->
+        <activity
+            android:name=".ui.DictManagerActivity"
+            android:exported="false"
+            android:label="扩展词库" />
 
     </application>
 </manifest>

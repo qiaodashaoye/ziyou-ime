@@ -1,0 +1,28 @@
+{
+  "name": "Traditional Chinese (Taiwan Standard) to Simplified Chinese",
+  "normalization": [
+    { "dict": { "type": "text", "file": "CJK_Compatibility_Ideographs.txt" } }
+  ],
+  "conversion_chain": [
+    {
+      "dict": {
+        "type": "group",
+        "match_policy": "short_circuit",
+        "dicts": [
+          { "type": "text", "file": "TWVariantsRevPhrases.txt" },
+          { "type": "text", "file": "TWPhrasesRev.txt" }
+        ]
+      }
+    },
+    {
+      "dict": {
+        "type": "group",
+        "match_policy": "short_circuit",
+        "dicts": [
+          { "type": "text", "file": "TSPhrases.txt" },
+          { "type": "text", "file": "TSCharacters.txt" }
+        ]
+      }
+    }
+  ]
+}

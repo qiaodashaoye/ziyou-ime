@@ -3,17 +3,14 @@
 
 schema:
   schema_id: luna_pinyin
-  name: 朙月拼音
-  version: "0.15.test"
+  name: 朙月拼音·简体
+  version: "2026-07-23"
   author:
     - 佛振 <chen.sst@gmail.com>
   description: |
-    Rime 預設的拼音輸入方案。
-    參考以下作品而創作：
-      * CC-CEDICT
-      * Android open source project
-      * Chewing - 新酷音
-      * opencc - 開放中文轉換
+    简体中文拼音输入方案。
+    词库基于雾凇拼音 (rime-ice) 长期维护的简体中文词库。
+    https://github.com/iDvel/rime-ice
 
 switches:
   - name: ascii_mode
@@ -21,19 +18,13 @@ switches:
     states: [ 中文, ABC ]
     abbrev: [ 中, Ａ ]
   - name: full_shape
-    states: [ 半寬文字, 全寬文字 ]
-#  - name: simplification
-#    states: [ 傳統漢字, 简化字 ]
-#    abbrev: [ 繁, 简 ]
-  - options: [ zh_trad, zh_simp, zh_hk, zh_tw ]
-    states:
-      - 傳統漢字
-      - 简化字
-      - 香港字形
-      - 臺灣字形
-    abbrev: [ 繁, 简, 港, 臺 ]
+    states: [ 半宽文字, 全宽文字 ]
+  - name: simplification
+    reset: 0
+    states: [ 简体, 繁体 ]
+    abbrev: [ 简, 繁 ]
   - name: ascii_punct
-    states: [ 中文標點, 西文標點 ]
+    states: [ 中文标点, 西文标点 ]
     abbrev: [ '。', '．' ]
 
 engine:
@@ -63,8 +54,7 @@ engine:
     - script_translator@pinyin
   filters:
     - reverse_lookup_filter@cangjie_lookup
-    - simplifier@zh_simp
-    - simplifier@zh_tw
+    - simplifier@zh_trad
     - uniquifier
 
 speller:
@@ -136,13 +126,10 @@ reverse_lookup:
   comment_format:
     - xform/([nl])v/$1ü/
 
-zh_simp:
-  option_name: zh_simp
+zh_trad:
+  option_name: simplification
+  opencc_config: s2t.json
   tips: all
-
-zh_tw:
-  option_name: zh_tw
-  opencc_config: t2tw.json
 
 punctuator:
   import_preset: default

@@ -149,6 +149,11 @@ class SettingsActivity : AppCompatActivity() {
         // ===== 数据同步 =====
         rootLayout.addView(createSectionHeader("数据"))
         rootLayout.addView(createSettingItem(
+            title = "扩展词库",
+            summary = "下载并管理专业词库扩展包",
+            onClick = { startActivity(Intent(this, DictManagerActivity::class.java)) }
+        ))
+        rootLayout.addView(createSettingItem(
             title = "同步用户词典",
             summary = "同步用户自定义词组和输入历史",
             onClick = { syncUserData() }
