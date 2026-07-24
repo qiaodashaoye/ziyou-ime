@@ -55,6 +55,10 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
         private const val FUNC_TEXT_SIZE_SP = 12f
         /** 键盘内边距（dp） */
         private const val KEYBOARD_PADDING_DP = 3
+        /** 长按触发连续重复前的初始延迟（ms） */
+        private const val REPEAT_START_DELAY_MS = 400L
+        /** 连续重复的触发间隔（ms） */
+        private const val REPEAT_INTERVAL_MS = 60L
     }
 
     // ===== Shift 状态枚举（供全键盘等使用） =====
@@ -123,6 +127,36 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
 
     /** 当前按下的按键索引 */
     private var pressedKeyIndex: Int = -1
+
+    // ===== 长按连续触发（如退格键长按持续删除） =====
+
+    /** 本次按下过程中重复触发是否已执行过（执行过则 ACTION_UP 时不再补发一次按键） */
+    private var keyRepeatFired = false
+
+    /** 周期性触发按键的任务：每次执行等同一次完整点按，并重新调度自身 */
+    private val keyRepeatRunnable = object : Runnable {
+        override fun run() {
+            val index = pressedKeyIndex
+            if (index < 0 || index >= keyRects.size) return
+            val key = keyRects[index].key
+            if (!isRepeatableKey(key)) return
+            keyRepeatFired = true
+            handleKeyUp(key)
+            performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            postDelayed(this, REPEAT_INTERVAL_MS)
+        }
+    }
+
+    /**
+     * 判断按键是否支持长按连续触发。默认仅退格键支持，
+     * 子类可覆写以扩展（如方向键等）。
+     */
+    protected open fun isRepeatableKey(key: Key): Boolean = key.code == KeyCode.XK_BackSpace
+
+    /** 取消尚未触发或正在进行的连续重复调度 */
+    private fun cancelKeyRepeat() {
+        removeCallbacks(keyRepeatRunnable)
+    }
 
     // ===== 画笔（随主题重建） =====
     protected val keyBgPaint = fillPaint()
@@ -292,13 +326,20 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
     // ===== 触摸处理 =====
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        when (event.action) {
+        // 使用 actionMasked：多指触摸时 ACTION_POINTER_DOWN/UP 携带 pointer index，
+        // 直接比较 action 会漏掉事件，导致按压状态残留、后续点击无响应。
+        when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 val index = findKeyAt(event.x, event.y)
                 if (index >= 0) {
                     pressedKeyIndex = index
+                    keyRepeatFired = false
                     invalidate()
                     performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    // 可重复键：延迟启动连续触发（长按持续删除）
+                    if (isRepeatableKey(keyRects[index].key)) {
+                        postDelayed(keyRepeatRunnable, REPEAT_START_DELAY_MS)
+                    }
                 }
                 return true
             }
@@ -306,6 +347,8 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
             MotionEvent.ACTION_MOVE -> {
                 val index = findKeyAt(event.x, event.y)
                 if (index != pressedKeyIndex) {
+                    // 手指滑离原按键：停止连续触发
+                    cancelKeyRepeat()
                     pressedKeyIndex = index
                     invalidate()
                 }
@@ -313,15 +356,45 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (pressedKeyIndex >= 0 && event.action == MotionEvent.ACTION_UP) {
+                cancelKeyRepeat()
+                // 连续触发已执行过时，抬起不再补发一次按键，避免多删一个字符
+                if (pressedKeyIndex >= 0 && event.actionMasked == MotionEvent.ACTION_UP && !keyRepeatFired) {
                     handleKeyUp(keyRects[pressedKeyIndex].key)
                 }
                 pressedKeyIndex = -1
+                keyRepeatFired = false
                 invalidate()
                 return true
             }
         }
         return super.onTouchEvent(event)
+    }
+
+    /**
+     * 清理触摸按压相关的瞬时状态（按下高亮、长按连续触发）。
+     * 在视图脱离窗口或窗口失焦（如跳转设置页 / 词库下载页）时调用，
+     * 避免残留的 pressedKeyIndex / 重复任务使返回输入框后按键表现异常。
+     */
+    private fun clearPressedState() {
+        cancelKeyRepeat()
+        if (pressedKeyIndex != -1) {
+            pressedKeyIndex = -1
+            invalidate()
+        }
+        keyRepeatFired = false
+    }
+
+    override fun onDetachedFromWindow() {
+        clearPressedState()
+        super.onDetachedFromWindow()
+    }
+
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        // 失焦时手指的 ACTION_UP/CANCEL 可能不会再派发到本视图，主动清理按压状态
+        if (!hasWindowFocus) {
+            clearPressedState()
+        }
     }
 
     /** 按键抬起处理（子类实现具体布局的输入逻辑） */
@@ -333,9 +406,9 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
      */
     protected fun handleCommonKey(key: Key): Boolean = when (key.code) {
         KeyCode.KEYCODE_SWITCH_LANGUAGE -> {
-            isChineseMode = !isChineseMode
+            // 不在视图层预翻转 isChineseMode：引擎繁忙（如词库下载后重新部署）时
+            // 预翻转会使显示与 ascii_mode 实际状态错位，统一由 Service 确认后回写
             onKeyPress?.invoke(KeyCode.KEYCODE_SWITCH_LANGUAGE, 0)
-            invalidate()
             true
         }
         KeyCode.KEYCODE_SYMBOL -> {

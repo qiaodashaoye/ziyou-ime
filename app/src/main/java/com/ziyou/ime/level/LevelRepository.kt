@@ -2,6 +2,7 @@ package com.ziyou.ime.level
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.ziyou.ime.core.level.LevelEngine
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale

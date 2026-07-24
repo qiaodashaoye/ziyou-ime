@@ -2,24 +2,25 @@ package com.ziyou.ime.ime
 
 import android.content.Intent
 import android.inputmethodservice.InputMethodService
+import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
-import android.view.ViewTreeObserver
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.config.ThemeManager
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.core.RimeMessage
-import com.ziyou.ime.daemon.RimeSession
-import com.ziyou.ime.data.KeyRecordStack
+import com.ziyou.ime.daemon.RimeEngine
+import com.ziyou.ime.core.t9.KeyRecordStack
 import com.ziyou.ime.data.SideSymbolRepository
+import com.ziyou.ime.di.AppContainer
 import com.ziyou.ime.level.LevelRepository
 import com.ziyou.ime.level.LevelStats
 import com.ziyou.ime.ui.SettingsActivity
-import com.ziyou.ime.util.T9PinYinUtils
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 
@@ -33,10 +34,10 @@ import kotlinx.coroutines.flow.collectLatest
  * 4. 将Rime输出（commit text）提交到编辑器
  * 5. 同步Rime上下文状态到UI（候选词、编码区）
  */
-class SimpleRimeInputMethodService : InputMethodService() {
+class ZiYouInputMethodService : InputMethodService() {
 
     companion object {
-        private const val TAG = "SimpleRimeIMS"
+        private const val TAG = "ZiYouIMS"
 
         // 键盘布局偏好持久化
         private const val PREF_NAME = "ziyou_keyboard"
@@ -46,10 +47,20 @@ class SimpleRimeInputMethodService : InputMethodService() {
         private const val T9_SCHEMA_ID = "t9"
         /** 退出九宫格时的默认回退方案 id */
         private const val DEFAULT_SCHEMA_ID = "luna_pinyin"
+
+        /** 等待引擎就绪的轮询间隔（ms） */
+        private const val ENGINE_READY_POLL_MS = 50L
+        /** 视图同步类操作等待引擎就绪的超时（ms）：词库重部署可能耗时较长 */
+        private const val ENGINE_READY_TIMEOUT_MS = 10_000L
+        /** 按键处理等待引擎就绪的短超时（ms）：避免按键响应长时间挂起 */
+        private const val KEY_ENGINE_READY_TIMEOUT_MS = 3_000L
     }
 
     /** 服务协程作用域，生命周期跟随Service */
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    /** Rime 引擎（经 DI 容器获取，便于替换/测试；生产实现为 RimeSession 单例）。 */
+    private val rime: RimeEngine get() = AppContainer.rimeEngine
 
     /** 键盘容器：承载当前键盘视图，便于在不同布局之间切换 */
     private var keyboardContainer: FrameLayout? = null
@@ -85,6 +96,23 @@ class SimpleRimeInputMethodService : InputMethodService() {
     /** 九宫格输入状态追踪栈（拼音消歧与智能回退） */
     private val keyRecordStack = KeyRecordStack()
 
+    /** 部署完成后的键盘状态重同步任务（去重：新部署消息到来时取消上一次） */
+    private var deploySyncJob: Job? = null
+
+    /** 输入逻辑控制器（与 Rime 交互、上屏、刷新 UI），经 DI 容器获取引擎。 */
+    private val inputLogic by lazy {
+        InputLogicController(AppContainer.rimeEngine, serviceScope, keyRecordStack, inputLogicCallbacks)
+    }
+
+    /** 提供给 [InputLogicController] 的回调：编辑器连接 + 主线程 UI 渲染。 */
+    private val inputLogicCallbacks = object : InputLogicController.Callbacks {
+        override fun currentInputConnection(): InputConnection? =
+            this@ZiYouInputMethodService.currentInputConnection
+
+        override fun renderContext(context: ContextProto?) =
+            this@ZiYouInputMethodService.renderContext(context)
+    }
+
     // ===== 生命周期 =====
 
     override fun onCreate() {
@@ -97,11 +125,11 @@ class SimpleRimeInputMethodService : InputMethodService() {
         // 初始化Rime引擎（如果还未初始化）
         serviceScope.launch {
             try {
-                if (!RimeSession.initialized) {
+                if (!rime.initialized) {
                     Log.i(TAG, "开始初始化Rime引擎...")
                     // 首次安装或版本升级（新增/修改方案）时使用 fullCheck，以编译新方案（如 t9）
                     val needsFullCheck = AssetDeployer.needsDeploy(applicationContext)
-                    RimeSession.initialize(applicationContext, fullCheck = needsFullCheck)
+                    rime.initialize(applicationContext, fullCheck = needsFullCheck)
                     Log.i(TAG, "Rime引擎初始化完成 (fullCheck=$needsFullCheck)")
                 }
             } catch (e: Exception) {
@@ -111,7 +139,7 @@ class SimpleRimeInputMethodService : InputMethodService() {
 
         // 监听Rime消息（方案切换、选项变更等）
         serviceScope.launch {
-            RimeSession.messageFlow.collectLatest { message ->
+            rime.messageFlow.collectLatest { message ->
                 handleRimeMessage(message)
             }
         }
@@ -188,109 +216,30 @@ class SimpleRimeInputMethodService : InputMethodService() {
 
     // ===== 键盘布局管理 =====
 
-    /**
-     * 根据类型创建键盘视图。新增键盘类型时仅需在此登记。
-     */
-    private fun createKeyboardView(type: KeyboardType): BaseKeyboardView = when (type) {
-        KeyboardType.QWERTY -> SimpleKeyboardView(this)
-        KeyboardType.NINE_GRID -> NineGridKeyboardView(this)
+    /** 键盘视图装载器（承担键盘视图创建与九宫格复合布局组装）。 */
+    private val keyboardLayoutManager by lazy { KeyboardLayoutManager(this, keyboardCallbacks) }
+
+    /** 键盘视图交互回调，转发到 Service 内部处理方法。 */
+    private val keyboardCallbacks = object : KeyboardLayoutManager.Callbacks {
+        override fun onKeyPress(keyCode: Int, mask: Int) = handleSoftKeyPress(keyCode, mask)
+        override fun onSwitchKeyboard(target: KeyboardType) = switchKeyboard(target)
+        override fun onSwitchToQwertyEnglish() = switchToQwertyEnglish()
+        override fun onComposingPreview(preview: String?) { preeditOverlay?.setText(preview) }
+        override fun onPinyinSelect(pinyin: String) = handlePinyinSelect(pinyin)
+        override fun onSideSymbolInput(value: String) = handleSideSymbolInput(value)
+        override fun onAddSymbol() = openSideSymbolSettings()
     }
 
     /**
-     * 安装指定类型的键盘到容器，并完成回调绑定、主题与状态同步。
-     *
-     * 九宫格布局额外在键盘左侧挂载 [PinyinSideBarView] 拼音侧栏，
-     * 通过横向 [LinearLayout] 以 `侧栏 : 键盘 ≈ 18 : 82` 的权重排布
-     * （参考 yuyansdk CandidatesContainer 的 `skbWidth * 0.18`）。
+     * 安装指定类型的键盘到容器，并同步当前视图引用。
+     * 键盘视图创建与九宫格复合布局的组装细节委托 [KeyboardLayoutManager]。
      */
     private fun installKeyboard(type: KeyboardType) {
         val container = keyboardContainer ?: return
-        val theme = ThemeManager.getCurrentTheme(this)
-        val view = createKeyboardView(type).apply {
-            // 应用当前主题
-            applyTheme(theme)
-            // 按键回调
-            onKeyPress = { keyCode, mask -> handleSoftKeyPress(keyCode, mask) }
-            // 键盘切换回调
-            onSwitchKeyboard = { target -> switchKeyboard(target) }
-            // 九宫格“中→英”专用回调：强制英文 + 切到 26 键
-            onSwitchToQwertyEnglish = { switchToQwertyEnglish() }
-            // 编码预览（如九宫格多击未提交字母）实时反馈到编码区悬浮层
-            onComposingPreview = { preview -> preeditOverlay?.setText(preview) }
-        }
-        container.removeAllViews()
-        pinyinSideBar = null
-        nineGridBottomBar = null
-
-        if (type == KeyboardType.NINE_GRID) {
-            // 九宫格主网格只显示前三行（1-9 数字键 + 右侧功能列）
-            val grid = view as NineGridKeyboardView
-            grid.setGridRowCount(3)
-
-            // 左侧拼音侧栏（高度与三行网格匹配，底部与数字键行对齐）
-            val sideBar = PinyinSideBarView(this).apply {
-                applyTheme(theme)
-                setSideSymbols(SideSymbolRepository.getPinyinSideSymbols(this@SimpleRimeInputMethodService))
-                onPinyinSelect = { pinyin -> handlePinyinSelect(pinyin) }
-                onSymbolInput = { value -> handleSideSymbolInput(value) }
-                onAddSymbol = { openSideSymbolSettings() }
-            }
-            // 横向容器：[侧栏][三行网格]
-            val topRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-            }
-            topRow.addView(sideBar, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.8f))
-            grid.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 8.2f)
-            topRow.addView(grid)
-
-            // 底栏视图：全宽横跨屏幕，延伸至屏幕最左侧边缘
-            val bottomBar = NineGridBottomBarView(this).apply {
-                applyTheme(theme)
-                onKeyPress = { keyCode, mask -> handleSoftKeyPress(keyCode, mask) }
-                onSwitchKeyboard = { target -> switchKeyboard(target) }
-                onSwitchToQwertyEnglish = { switchToQwertyEnglish() }
-                isChineseMode = view.isChineseMode
-            }
-            nineGridBottomBar = bottomBar
-
-            // 纵向容器：[上方：侧栏+三行网格][下方：全宽底栏]
-            val verticalContainer = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT
-                )
-            }
-            verticalContainer.addView(topRow, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ))
-            verticalContainer.addView(bottomBar, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ))
-            container.addView(verticalContainer)
-            pinyinSideBar = sideBar
-
-            // 布局完成后同步底栏按键宽度与上方网格保持一致
-            grid.viewTreeObserver.addOnGlobalLayoutListener(object :
-                ViewTreeObserver.OnGlobalLayoutListener {
-                override fun onGlobalLayout() {
-                    grid.viewTreeObserver.removeOnGlobalLayoutListener(this)
-                    grid.gridUnitWidth?.let { unitWidth ->
-                        bottomBar.forcedUnitWidth = unitWidth
-                        bottomBar.requestLayout()
-                    }
-                }
-            })
-        } else {
-            view.layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT
-            )
-            container.addView(view)
-        }
-        keyboardView = view
+        val installed = keyboardLayoutManager.install(container, type)
+        keyboardView = installed.keyboardView
+        pinyinSideBar = installed.pinyinSideBar
+        nineGridBottomBar = installed.nineGridBottomBar
         currentKeyboardType = type
     }
 
@@ -318,8 +267,30 @@ class SimpleRimeInputMethodService : InputMethodService() {
                 applyEngineForKeyboard(type)
             } catch (e: Exception) {
                 Log.w(TAG, "切换键盘同步方案异常: ${e.message}")
+                // 同步失败（如词库重部署期间引擎不可用）时清除中→英标志，
+                // 避免残留的 pendingEnglishMode 吞掉后续一次中英切换
+                pendingEnglishMode = false
             }
         }
+    }
+
+    /**
+     * 等待 Rime 引擎就绪（初始化完成）。
+     *
+     * 词库下载/启用后 [com.ziyou.ime.daemon.RimeSession.redeploy] 会销毁并重建引擎，
+     * 窗口期内 `rime.api` 直接抛 IllegalStateException。所有非热路径的引擎访问
+     * （状态同步、模式切换）先经本方法等待，避免在重部署期间直接失败且无重试。
+     *
+     * @return true 表示引擎已就绪；false 表示等待超时（调用方应放弃本次操作，
+     *         由部署完成消息触发的重同步兑底）
+     */
+    private suspend fun awaitEngineReady(timeoutMs: Long): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (!rime.initialized) {
+            if (SystemClock.elapsedRealtime() >= deadline) return false
+            delay(ENGINE_READY_POLL_MS)
+        }
+        return true
     }
 
     /**
@@ -331,29 +302,29 @@ class SimpleRimeInputMethodService : InputMethodService() {
     private suspend fun applyEngineForKeyboard(type: KeyboardType) {
         when (type) {
             KeyboardType.NINE_GRID -> {
-                val current = RimeSession.api.getCurrentSchema()
+                val current = rime.api.getCurrentSchema()
                 if (current != T9_SCHEMA_ID) {
                     schemeBeforeT9 = current
-                    RimeSession.api.selectSchema(T9_SCHEMA_ID)
+                    rime.api.selectSchema(T9_SCHEMA_ID)
                 }
-                if (RimeSession.api.getOption("ascii_mode")) {
-                    RimeSession.api.setOption("ascii_mode", false)
+                if (rime.api.getOption("ascii_mode")) {
+                    rime.api.setOption("ascii_mode", false)
                 }
             }
             KeyboardType.QWERTY -> {
-                if (RimeSession.api.getCurrentSchema() == T9_SCHEMA_ID) {
-                    RimeSession.api.selectSchema(schemeBeforeT9 ?: DEFAULT_SCHEMA_ID)
+                if (rime.api.getCurrentSchema() == T9_SCHEMA_ID) {
+                    rime.api.selectSchema(schemeBeforeT9 ?: DEFAULT_SCHEMA_ID)
                     schemeBeforeT9 = null
                 }
                 // 九宫格“中→英”触发：强制英文模式，避免与 handleSoftKeyPress 竞态
                 if (pendingEnglishMode) {
-                    RimeSession.api.setOption("ascii_mode", true)
+                    rime.api.setOption("ascii_mode", true)
                     pendingEnglishMode = false
                 }
             }
         }
-        val isAscii = RimeSession.api.getOption("ascii_mode")
-        val context = RimeSession.api.getContext()
+        val isAscii = rime.api.getOption("ascii_mode")
+        val context = rime.api.getContext()
         val pinyinHints = buildPinyinHints(context)
         withContext(Dispatchers.Main) {
             keyboardView?.isChineseMode = !isAscii
@@ -366,7 +337,7 @@ class SimpleRimeInputMethodService : InputMethodService() {
             // 刷新左侧拼音侧栏（拼音候选 + 自定义符号）
             if (type == KeyboardType.NINE_GRID) {
                 pinyinSideBar?.setSideSymbols(
-                    SideSymbolRepository.getPinyinSideSymbols(this@SimpleRimeInputMethodService)
+                    SideSymbolRepository.getPinyinSideSymbols(this@ZiYouInputMethodService)
                 )
                 pinyinSideBar?.setPinyinCandidates(pinyinHints)
             }
@@ -394,8 +365,14 @@ class SimpleRimeInputMethodService : InputMethodService() {
 
         serviceScope.launch {
             try {
+                // 词库下载后引擎可能正在重新部署，先等待就绪再同步，
+                // 否则 rime.api 抛异常导致 t9 方案/ascii_mode 永不恢复，九宫格按键失效
+                if (!awaitEngineReady(ENGINE_READY_TIMEOUT_MS)) {
+                    Log.w(TAG, "onStartInputView: Rime引擎未就绪（可能正在重新部署），待部署完成消息触发重同步")
+                    return@launch
+                }
                 // 清除之前的编码
-                RimeSession.api.clearComposition()
+                rime.api.clearComposition()
                 // 同步当前键盘对应的方案与状态（九宫格会切到 T9 方案）
                 applyEngineForKeyboard(currentKeyboardType)
             } catch (e: Exception) {
@@ -435,7 +412,7 @@ class SimpleRimeInputMethodService : InputMethodService() {
 
         serviceScope.launch {
             try {
-                RimeSession.api.clearComposition()
+                rime.api.clearComposition()
             } catch (e: Exception) {
                 Log.w(TAG, "清除编码异常: ${e.message}")
             }
@@ -463,7 +440,7 @@ class SimpleRimeInputMethodService : InputMethodService() {
 
         // 异步处理按键
         serviceScope.launch {
-            processRimeKey(rimeKeyCode, mask)
+            inputLogic.processKey(rimeKeyCode, mask)
         }
         return true
     }
@@ -486,9 +463,13 @@ class SimpleRimeInputMethodService : InputMethodService() {
                 }
                 serviceScope.launch {
                     try {
-                        val currentAscii = RimeSession.api.getOption("ascii_mode")
-                        RimeSession.api.setOption("ascii_mode", !currentAscii)
-                        // 键盘视图已在View内部切换了显示，这里同步
+                        if (!awaitEngineReady(KEY_ENGINE_READY_TIMEOUT_MS)) {
+                            Log.w(TAG, "切换中英文失败：Rime引擎未就绪（可能正在重新部署）")
+                            return@launch
+                        }
+                        val currentAscii = rime.api.getOption("ascii_mode")
+                        rime.api.setOption("ascii_mode", !currentAscii)
+                        // 视图不再预翻转，统一在此按引擎结果回写（含九宫格底栏）
                         keyboardView?.isChineseMode = currentAscii // 反转
                         nineGridBottomBar?.isChineseMode = currentAscii
                         Log.d(TAG, "切换中英文: ascii_mode=${!currentAscii}")
@@ -502,8 +483,13 @@ class SimpleRimeInputMethodService : InputMethodService() {
             KeyCode.KEYCODE_SWITCH_NUMBER_MODE -> {
                 serviceScope.launch {
                     try {
-                        val currentAscii = RimeSession.api.getOption("ascii_mode")
-                        RimeSession.api.setOption("ascii_mode", !currentAscii)
+                        if (!awaitEngineReady(KEY_ENGINE_READY_TIMEOUT_MS)) {
+                            Log.w(TAG, "切换中数模式失败：Rime引擎未就绪（可能正在重新部署）")
+                            return@launch
+                        }
+                        val currentAscii = rime.api.getOption("ascii_mode")
+                        rime.api.setOption("ascii_mode", !currentAscii)
+                        // 视图不再预翻转，统一在此按引擎结果回写（含九宫格底栏）
                         keyboardView?.isChineseMode = currentAscii // 反转
                         nineGridBottomBar?.isChineseMode = currentAscii
                         Log.d(TAG, "切换中数模式: ascii_mode=${!currentAscii}")
@@ -525,14 +511,7 @@ class SimpleRimeInputMethodService : InputMethodService() {
                     val restoreCommand = keyRecordStack.popAndRestore()
                     if (restoreCommand != null) {
                         // 撤销拼音选择：将已锁定拼音替换回原 T9 键
-                        serviceScope.launch {
-                            RimeSession.api.replaceKey(
-                                restoreCommand.caretPos,
-                                restoreCommand.length,
-                                restoreCommand.replacement
-                            )
-                            updateUI()
-                        }
+                        inputLogic.restorePinyin(restoreCommand)
                         return  // 不发送普通 BackSpace
                     }
                     // restoreCommand 为 null 表示弹出的是普通 T9Key/Apostrophe，继续执行正常退格
@@ -545,170 +524,55 @@ class SimpleRimeInputMethodService : InputMethodService() {
                     }
                 }
                 serviceScope.launch {
-                    processRimeKey(keyCode, mask)
+                    inputLogic.processKey(keyCode, mask)
                 }
             }
         }
     }
 
-    /**
-     * 核心按键处理：将按键发送给Rime引擎，处理返回结果
-     *
-     * @param keyCode Rime keysym
-     * @param mask 修饰键mask
-     */
-    private suspend fun processRimeKey(keyCode: Int, mask: Int) {
-        try {
-            val consumed = RimeSession.api.processKey(keyCode, mask)
-            Log.d(TAG, "processKey($keyCode, $mask) -> consumed=$consumed")
+    // ===== 候选词操作（委托 InputLogicController）=====
 
-            if (consumed) {
-                // Rime消费了这个按键，检查是否有commit文本
-                val commit = RimeSession.api.getCommit()
-                commit?.text?.let { text ->
-                    // 将文本提交到当前编辑器
-                    commitAndCount(text)
-                    Log.d(TAG, "commitText: $text")
-                    keyRecordStack.clear()
-                }
-                // 更新候选词和编码区UI
-                updateUI()
-            } else {
-                // Rime未消费，某些键可能需要直接输出
-                when {
-                    // 退格键：Rime无编码可删时，直接删除编辑器中的字符
-                    keyCode == KeyCode.XK_BackSpace -> {
-                        currentInputConnection?.deleteSurroundingText(1, 0)
-                        Log.d(TAG, "直接删除: deleteSurroundingText(1, 0)")
-                    }
-                    // 可打印字符且Rime未处理，直接提交
-                    keyCode in 0x20..0x7E && mask == 0 -> {
-                        val char = keyCode.toChar().toString()
-                        commitAndCount(char)
-                        Log.d(TAG, "直接提交字符: $char")
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "processRimeKey异常: ${e.message}", e)
-        }
-    }
+    /** 处理候选词点击。 */
+    private fun handleCandidateClick(index: Int) = inputLogic.selectCandidate(index)
+
+    /** 处理翻页。@param forward true=下一页, false=上一页 */
+    private fun handlePageChange(forward: Boolean) = inputLogic.changePage(forward)
 
     /**
-     * 统一的文本上屏出口：提交到编辑器并做等级计分埋点。
-     * 计分仅统计 Unicode 码点数（脱敏，不触碰内容）；处于输入热路径，
-     * [LevelStats.onCommit] 内部仅做 O(1) 内存自增，达阈值才后台异步落盘。
-     */
-    private fun commitAndCount(text: CharSequence) {
-        currentInputConnection?.commitText(text, 1)
-        if (text.isNotEmpty()) {
-            LevelStats.onCommit(Character.codePointCount(text, 0, text.length))
-        }
-    }
-
-    // ===== 候选词操作 =====
-
-    /**
-     * 处理候选词点击
-     * @param index 候选词在当前页的索引
-     */
-    private fun handleCandidateClick(index: Int) {
-        serviceScope.launch {
-            try {
-                val success = RimeSession.api.selectCandidate(index)
-                Log.d(TAG, "selectCandidate($index) -> $success")
-
-                if (success) {
-                    // 选词后检查是否有commit
-                    val commit = RimeSession.api.getCommit()
-                    commit?.text?.let { text ->
-                        commitAndCount(text)
-                        Log.d(TAG, "候选词提交: $text")
-                        keyRecordStack.clear()
-                    }
-                    // 更新UI
-                    updateUI()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "选择候选词异常: ${e.message}", e)
-            }
-        }
-    }
-
-    /**
-     * 处理翻页操作
-     * @param forward true=下一页, false=上一页
-     */
-    private fun handlePageChange(forward: Boolean) {
-        serviceScope.launch {
-            try {
-                // backward参数含义：true=向前翻（上一页）
-                val success = RimeSession.api.changePage(backward = !forward)
-                if (success) {
-                    updateUI()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "翻页异常: ${e.message}", e)
-            }
-        }
-    }
-
-    // ===== UI更新 =====
-
-    /**
-     * 从Rime获取最新上下文并更新UI
-     * 包括候选词列表、编码区显示
-     */
-    private suspend fun updateUI() {
-        try {
-            val context: ContextProto? = RimeSession.api.getContext()
-            val pinyinHints = buildPinyinHints(context)
-
-            // 切换到主线程更新UI
-            withContext(Dispatchers.Main) {
-                // 更新候选词视图
-                candidatesView?.updateCandidates(context)
-                // 编码区悬浮层：九宫格显示拼音预览，全键盘回退到 Rime 原始 preedit
-                preeditOverlay?.setText(
-                    buildPinyinPreview(context, pinyinHints) ?: context?.composition?.preedit
-                )
-                // 更新键盘编码区
-                keyboardView?.updateComposition(context?.composition)
-                // 左侧拼音侧栏：有候选拼音则展示拼音，否则展示自定义符号
-                pinyinSideBar?.setPinyinCandidates(pinyinHints)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "updateUI异常: ${e.message}", e)
-        }
-    }
-
-    /**
-     * 处理用户在拼音候选区点击选择拼音
-     * 将 Rime 编码中对应的 T9 键序列替换为所选拼音
+     * 处理用户在拼音候选区点击选择拼音。
+     * 在主线程同步更新状态机（保证与退格等其他栈操作时序一致），再委托控制器送 Rime 替换。
      */
     private fun handlePinyinSelect(pinyin: String) {
-        // 锁定「首个未确定音节」对应的 T9 数字段，得到编码替换指令。
-        // 在主线程同步更新状态机，保证与退格等其他栈操作的时序一致。
         val command = keyRecordStack.pushPinyinSelectAction(pinyin) ?: return
-        serviceScope.launch {
-            // 用选定拼音替换编码中对应的 T9 键序列（含末尾分词符），锁定该音节
-            RimeSession.api.replaceKey(command.caretPos, command.length, command.replacement)
-            // replaceKey 会把光标停在已锁定拼音之后（编码串中部），而 Rime 仅组织光标
-            // 之前的片段，导致候选只剩「已锁定音节」的单字。将光标移到编码串末尾，令 Rime
-            // 组织「已锁定拼音 + 后续未确定音节」的完整组合候选（如 guo'486 → 组词候选）。
-            RimeSession.api.processKey(KeyCode.XK_End, 0)
-            updateUI()
-        }
+        inputLogic.selectPinyin(command)
     }
 
     /**
      * 处理左侧侧栏符号点击（无候选拼音时展示的自定义符号）。
-     * 侧栏符号仅在无活跃编码时可见，因此直接上屏其内容即可。
-     * —— 等价 yuyansdk 中 `inputView.responseKeyEvent(SoftKey(label = symbol))`。
+     * 侧栏符号仅在无活跃编码时可见，直接上屏其内容即可。
      */
     private fun handleSideSymbolInput(value: String) {
-        if (value.isEmpty()) return
-        commitAndCount(value)
+        inputLogic.commitSideSymbol(value)
+    }
+
+    // ===== UI 渲染 =====
+
+    /**
+     * 根据最新 Rime 上下文刷新候选词、编码区与拼音侧栏（在主线程调用）。
+     * 供 [InputLogicController] 通过回调驱动。
+     */
+    private fun renderContext(context: ContextProto?) {
+        val pinyinHints = buildPinyinHints(context)
+        // 更新候选词视图
+        candidatesView?.updateCandidates(context)
+        // 编码区悬浮层：九宫格显示拼音预览，全键盘回退到 Rime 原始 preedit
+        preeditOverlay?.setText(
+            buildPinyinPreview(context, pinyinHints) ?: context?.composition?.preedit
+        )
+        // 更新键盘编码区
+        keyboardView?.updateComposition(context?.composition)
+        // 左侧拼音侧栏：有候选拼音则展示拼音，否则展示自定义符号
+        pinyinSideBar?.setPinyinCandidates(pinyinHints)
     }
 
     /**
@@ -724,50 +588,21 @@ class SimpleRimeInputMethodService : InputMethodService() {
     }
 
     /**
-     * 生成九宫格拼音候选列表。
-     * 优先使用 T9PinYinUtils 从 T9 编码直接生成拼音（更精确），
-     * 回退到从候选 comment 提取。
+     * 生成九宫格拼音候选列表（委托 [PinyinHintProvider]）。
+     * 仅九宫格布局有效，其余布局返回 null。
      */
     private fun buildPinyinHints(context: ContextProto?): List<String>? {
         if (currentKeyboardType != KeyboardType.NINE_GRID) return null
-        if (context == null) return null
-        // 优先：从 Rime 原始输入串提取「首个未消歧的数字段」，用本地 T9 表还原候选拼音。
-        // 输入串以数字（2-9）与已锁定拼音 + 分词符（'）混排，如 "guo'486"。
-        val digitSegment = context.input
-            .split('\'', ' ')
-            .firstOrNull { seg -> seg.isNotEmpty() && seg.all { it in '2'..'9' } }
-        if (digitSegment != null) {
-            val pinyins = T9PinYinUtils.t9KeyToPinyin(digitSegment).filter { it.isNotBlank() }
-            if (pinyins.isNotEmpty()) return pinyins.take(8)
-        }
-        // 回退：从候选词 comment（spelling_hints）提取真实拼音
-        val candidates = context.menu?.candidates ?: return null
-        if (candidates.isEmpty()) return null
-        val hints = LinkedHashSet<String>()
-        for (candidate in candidates) {
-            val py = candidate.comment.trim()
-            if (py.isNotEmpty()) hints.add(py)
-            if (hints.size >= 8) break
-        }
-        return hints.toList().takeIf { it.isNotEmpty() }
+        return PinyinHintProvider.buildHints(context)
     }
 
     /**
-     * 生成顶部编码区的「当前拼音」单串预览（与主流九宫格一致：顶部只展示当前解释的拼音）。
-     *
-     * 取高亮候选的拼音读音（spelling_hints comment）作为当前解释；无候选时回退到首个拼音提示。
+     * 生成顶部编码区的"当前拼音"单串预览（委托 [PinyinHintProvider]）。
      * 非九宫格返回 null，由候选视图沿用 Rime 原始 preedit。
      */
     private fun buildPinyinPreview(context: ContextProto?, hints: List<String>?): String? {
         if (currentKeyboardType != KeyboardType.NINE_GRID) return null
-        val menu = context?.menu
-        val candidates = menu?.candidates
-        val highlighted = menu?.highlightedCandidateIndex ?: -1
-        if (candidates != null && highlighted in candidates.indices) {
-            val comment = candidates[highlighted].comment.trim()
-            if (comment.isNotEmpty()) return comment
-        }
-        return hints?.firstOrNull()
+        return PinyinHintProvider.buildPreview(context, hints)
     }
 
     // ===== Rime消息处理 =====
@@ -783,9 +618,17 @@ class SimpleRimeInputMethodService : InputMethodService() {
                 // ascii_mode变更时同步键盘显示
                 if (message.option == "ascii_mode" || message.option == "!ascii_mode") {
                     serviceScope.launch {
-                        val isAscii = RimeSession.api.getOption("ascii_mode")
-                        withContext(Dispatchers.Main) {
-                            keyboardView?.isChineseMode = !isAscii
+                        try {
+                            // 重部署期间引擎不可用，跳过（部署完成后会整体重同步）
+                            if (!rime.initialized) return@launch
+                            val isAscii = rime.api.getOption("ascii_mode")
+                            withContext(Dispatchers.Main) {
+                                keyboardView?.isChineseMode = !isAscii
+                                // 九宫格“数”键位于独立底栏视图，同样需同步，否则显示与引擎状态相反
+                                nineGridBottomBar?.isChineseMode = !isAscii
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "同步 ascii_mode 状态异常: ${e.message}")
                         }
                     }
                 }
@@ -795,6 +638,22 @@ class SimpleRimeInputMethodService : InputMethodService() {
             }
             is RimeMessage.DeployMessage -> {
                 Log.d(TAG, "Rime部署状态: ${message.status}")
+                // 词库下载/启用后 RimeSession.redeploy 会整体重建引擎，方案与选项全部复位。
+                // 待引擎就绪后重新同步当前键盘的方案与中英文状态，
+                // 否则九宫格停留在默认方案上，中/数切换等按键表现为“失效”。
+                deploySyncJob?.cancel()
+                deploySyncJob = serviceScope.launch {
+                    if (!awaitEngineReady(ENGINE_READY_TIMEOUT_MS)) {
+                        Log.w(TAG, "部署后重同步超时：Rime引擎仍未就绪")
+                        return@launch
+                    }
+                    try {
+                        applyEngineForKeyboard(currentKeyboardType)
+                        Log.i(TAG, "部署完成，已重同步键盘状态 (type=$currentKeyboardType)")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "部署后重同步键盘状态异常: ${e.message}")
+                    }
+                }
             }
             is RimeMessage.UnknownMessage -> {
                 Log.d(TAG, "Rime未知消息: type=${message.type}, value=${message.value}")

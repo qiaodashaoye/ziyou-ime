@@ -32,16 +32,12 @@ class SimpleCandidatesView @JvmOverloads constructor(
 ) : View(context, attrs, defStyleAttr) {
 
     companion object {
-        /** 视图高度（dp） */
-        private const val VIEW_HEIGHT_DP = 40
+        /** 视图高度（dp），紧凑显示以减少垂直空间占用 */
+        private const val VIEW_HEIGHT_DP = 32
         /** 候选词字体大小（sp） */
         private const val CANDIDATE_TEXT_SIZE_SP = 16f
         /** 候选词水平内边距（dp） */
         private const val CANDIDATE_PADDING_H_DP = 12
-        /** 高亮圆角半径（dp） */
-        private const val HIGHLIGHT_RADIUS_DP = 4f
-        /** 分隔线宽度（dp） */
-        private const val DIVIDER_WIDTH_DP = 1f
     }
 
     /** 候选词点击回调 */
@@ -63,23 +59,13 @@ class SimpleCandidatesView @JvmOverloads constructor(
 
     private val highlightedCandidatePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = sp2px(CANDIDATE_TEXT_SIZE_SP)
-        color = Color.WHITE
-        typeface = Typeface.DEFAULT_BOLD
-    }
-
-    private val highlightBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#4A90D9")
-        style = Paint.Style.FILL
+        typeface = Typeface.DEFAULT_BOLD
     }
 
     private val bgPaint = Paint().apply {
         color = Color.parseColor("#F5F5F5")
         style = Paint.Style.FILL
-    }
-
-    private val dividerPaint = Paint().apply {
-        color = Color.parseColor("#DDDDDD")
-        strokeWidth = dp2px(DIVIDER_WIDTH_DP)
     }
 
     // 每个候选词的位置信息（左x, 右x）
@@ -145,9 +131,8 @@ class SimpleCandidatesView @JvmOverloads constructor(
     fun applyTheme(theme: KeyboardTheme) {
         bgPaint.color = theme.candidateBackground
         candidatePaint.color = theme.candidateTextColor
-        highlightedCandidatePaint.color = theme.candidateBackground
-        highlightBgPaint.color = theme.candidateHighlightColor
-        dividerPaint.color = theme.borderColor
+        // 选中项仅通过高亮字体颜色表示，不再绘制背景框
+        highlightedCandidatePaint.color = theme.candidateHighlightColor
         invalidate()
     }
 
@@ -216,31 +201,10 @@ class SimpleCandidatesView @JvmOverloads constructor(
             if (i >= candidateRects.size) break
             val rect = candidateRects[i]
 
-            // 高亮背景
-            if (i == highlightIndex) {
-                val highlightRect = RectF(
-                    rect.left + 2f,
-                    4f,
-                    rect.right - 2f,
-                    height - 4f
-                )
-                canvas.drawRoundRect(
-                    highlightRect,
-                    dp2px(HIGHLIGHT_RADIUS_DP),
-                    dp2px(HIGHLIGHT_RADIUS_DP),
-                    highlightBgPaint
-                )
-            }
-
-            // 绘制文字
+            // 选中项仅改变字体颜色（高亮色 + 加粗），不绘制边框/背景；候选词之间也不再绘制竖线分隔符
             val paint = if (i == highlightIndex) highlightedCandidatePaint else candidatePaint
             val textX = rect.left + dp2px(CANDIDATE_PADDING_H_DP.toFloat())
             canvas.drawText(candidates[i].text, textX, textBaseline, paint)
-
-            // 绘制分隔线（非最后一个）
-            if (i < candidates.size - 1) {
-                canvas.drawLine(rect.right, 8f, rect.right, height - 8f, dividerPaint)
-            }
         }
 
         canvas.restore()

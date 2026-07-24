@@ -6,7 +6,7 @@ package com.ziyou.ime.ime
  * 用于在多种输入布局之间切换。新增键盘类型时只需：
  * 1. 在此枚举中追加一项
  * 2. 编写对应的 [BaseKeyboardView] 子类
- * 3. 在 SimpleRimeInputMethodService.createKeyboardView() 中登记
+ * 3. 在 ZiYouInputMethodService.createKeyboardView() 中登记
  *
  * 现有 / 规划中的布局：
  * - [QWERTY]     标准全键盘（26 键）

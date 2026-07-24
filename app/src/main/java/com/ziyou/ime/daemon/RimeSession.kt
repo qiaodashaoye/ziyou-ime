@@ -6,9 +6,13 @@ import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.core.*
 import com.ziyou.ime.dict.DictManager
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
@@ -33,7 +37,7 @@ import java.io.File
  * RimeSession.destroy()
  * ```
  */
-object RimeSession {
+object RimeSession : RimeEngine {
 
     private const val TAG = "RimeSession"
 
@@ -45,21 +49,30 @@ object RimeSession {
     private var dispatcher: RimeDispatcher? = null
     private var rimeApi: SimpleRimeImpl? = null
     private var sessionScope: CoroutineScope? = null
+
+    @Volatile
     private var isInitialized = false
+
+    /**
+     * 生命周期互斥锁：串行化 initialize/destroy/redeploy。
+     * librime 非线程安全，且上述操作会重建 dispatcher/scope；若并发调用（如 IME 服务
+     * onCreate 与设置页同时触发），isInitialized 守卫会被双双穿过导致双重初始化与线程泄漏。
+     */
+    private val lifecycleMutex = Mutex()
 
     /** Rime引擎启动超时时间（毫秒） */
     private const val STARTUP_TIMEOUT_MS = 120_000L
 
     /** 获取RimeApi实例（需要先调用initialize） */
-    val api: RimeApi
+    override val api: RimeApi
         get() = rimeApi ?: throw IllegalStateException("RimeSession 未初始化，请先调用 initialize()")
 
     /** 获取消息流 */
-    val messageFlow: SharedFlow<RimeMessage>
+    override val messageFlow: SharedFlow<RimeMessage>
         get() = RimeMessageHandler.messageFlow
 
     /** 是否已初始化 */
-    val initialized: Boolean
+    override val initialized: Boolean
         get() = isInitialized
 
     /**
@@ -67,7 +80,12 @@ object RimeSession {
      * @param context 应用上下文
      * @param fullCheck 是否完整检查（首次安装/升级后为true）
      */
-    suspend fun initialize(context: Context, fullCheck: Boolean = false) {
+    override suspend fun initialize(context: Context, fullCheck: Boolean) = lifecycleMutex.withLock {
+        doInitialize(context, fullCheck)
+    }
+
+    /** 实际初始化逻辑（不加锁，仅由已持有 [lifecycleMutex] 的调用方调用）。 */
+    private suspend fun doInitialize(context: Context, fullCheck: Boolean) {
         if (isInitialized) {
             Log.w(TAG, "RimeSession 已初始化，跳过重复初始化")
             return
@@ -75,21 +93,26 @@ object RimeSession {
 
         Log.i(TAG, "开始初始化 RimeSession")
 
-        // 第一步：部署资源文件（首次安装/升级时从 assets 复制到内部存储）
-        // 这里运行在协程线程上，不会阻塞主线程
-        Log.i(TAG, "部署 Rime 资源文件...")
-        AssetDeployer.deployIfNeeded(context)
-        Log.i(TAG, "资源文件部署完成")
+        // 资源部署、主词库重写、目录创建均为阻塞磁盘 IO。调用方（IME 服务）通常在
+        // Dispatchers.Main 上发起本挂起函数，若直接执行会阻塞主线程（首次安装/升级时
+        // 需递归复制整包 assets，有 ANR 风险），故显式切到 IO 线程执行。
+        withContext(Dispatchers.IO) {
+            // 第一步：部署资源文件（首次安装/升级时从 assets 复制到内部存储）
+            Log.i(TAG, "部署 Rime 资源文件...")
+            AssetDeployer.deployIfNeeded(context)
+            Log.i(TAG, "资源文件部署完成")
 
-        // 第二步：注入已启用的扩展词库到主词库文件
-        // AssetDeployer 可能覆盖了 luna_pinyin.dict.yaml，需要重新追加扩展词库引用
-        DictManager.regenerateMainDict(context)
-        Log.i(TAG, "扩展词库注入完成")
+            // 第二步：注入已启用的扩展词库到主词库文件
+            // AssetDeployer 可能覆盖了 luna_pinyin.dict.yaml，需要重新追加扩展词库引用
+            DictManager.regenerateMainDict(context)
+            Log.i(TAG, "扩展词库注入完成")
 
-        // 准备目录
+            // 准备目录
+            ensureDirectories(getSharedDataDir(context), getUserDataDir(context))
+        }
+
         val sharedDir = getSharedDataDir(context)
         val userDir = getUserDataDir(context)
-        ensureDirectories(sharedDir, userDir)
 
         // 创建调度器和API实例
         val newDispatcher = RimeDispatcher()
@@ -131,7 +154,12 @@ object RimeSession {
     /**
      * 销毁Rime会话，释放所有资源
      */
-    suspend fun destroy() {
+    override suspend fun destroy() = lifecycleMutex.withLock {
+        doDestroy()
+    }
+
+    /** 实际销毁逻辑（不加锁，仅由已持有 [lifecycleMutex] 的调用方调用）。 */
+    private suspend fun doDestroy() {
         if (!isInitialized) return
 
         Log.i(TAG, "销毁 RimeSession")
@@ -157,30 +185,15 @@ object RimeSession {
      * 重新部署 RIME 引擎（词库变更后调用）
      * 关闭当前引擎 → 重新生成主词库 → 以 fullCheck 模式重启
      */
-    suspend fun redeploy(context: Context) {
-        Log.i(TAG, "开始重新部署 RIME 引擎")
-
-        // 关闭当前引擎
-        if (isInitialized) {
-            try {
-                rimeApi?.shutdown()
-            } catch (e: Exception) {
-                Log.w(TAG, "关闭引擎异常: ${e.message}")
-            }
-            sessionScope?.cancel()
-            dispatcher?.shutdown()
-            rimeApi = null
-            dispatcher = null
-            sessionScope = null
-            isInitialized = false
+    override suspend fun redeploy(context: Context) {
+        lifecycleMutex.withLock {
+            Log.i(TAG, "开始重新部署 RIME 引擎")
+            // 关闭当前引擎（doDestroy 在未初始化时安全早返回）
+            doDestroy()
+            // 以 fullCheck 模式重新启动（doInitialize 内部已在 IO 线程重新注入扩展词库并部署资源）
+            doInitialize(context, fullCheck = true)
+            Log.i(TAG, "RIME 引擎重新部署完成")
         }
-
-        // 重新注入扩展词库
-        DictManager.regenerateMainDict(context)
-
-        // 以 fullCheck 模式重新启动
-        initialize(context, fullCheck = true)
-        Log.i(TAG, "RIME 引擎重新部署完成")
     }
 
     /**

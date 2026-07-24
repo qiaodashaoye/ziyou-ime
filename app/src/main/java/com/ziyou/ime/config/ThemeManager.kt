@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.Color
 import android.util.Log
-import com.ziyou.ime.level.LevelEngine
+import com.ziyou.ime.core.level.LevelEngine
 import com.ziyou.ime.level.LevelRepository
 
 /**

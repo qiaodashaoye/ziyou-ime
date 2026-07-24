@@ -29,7 +29,9 @@ data class RemoteDictInfo(
     val version: String,
     val url: String,
     val size: Long,
-    val author: String
+    val author: String,
+    /** 词库文件的 SHA-256（十六进制，可选）。下载后校验，为空则跳过校验（向后兼容）。 */
+    val sha256: String = ""
 ) {
     val dictCategory: DictCategory
         get() = DictCategory.fromValue(category)
@@ -40,6 +42,17 @@ data class RemoteDictInfo(
             size < 1024 * 1024 -> "${size / 1024} KB"
             else -> String.format("%.1f MB", size / (1024.0 * 1024.0))
         }
+
+    companion object {
+        /**
+         * 合法词库 ID 正则：仅允许字母 / 数字 / 下划线 / 连字符。
+         * 用于阻断恶意 catalog 通过 id（如 "../../foo"）拼接文件名造成的路径穿越写盘。
+         */
+        private val ID_PATTERN = Regex("^[A-Za-z0-9_-]+$")
+
+        /** 校验词库 id 是否合法（非空且仅含安全字符）。 */
+        fun isValidId(id: String): Boolean = id.isNotEmpty() && ID_PATTERN.matches(id)
+    }
 }
 
 /** 本地已安装词库信息 */

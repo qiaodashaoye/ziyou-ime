@@ -16,6 +16,8 @@ import com.ziyou.ime.config.ThemeManager
 import com.ziyou.ime.daemon.RimeSession
 import com.ziyou.ime.data.SideSymbol
 import com.ziyou.ime.data.SideSymbolRepository
+import com.ziyou.ime.core.level.LevelEngine
+import com.ziyou.ime.level.LevelRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -43,6 +45,7 @@ class SettingsActivity : AppCompatActivity() {
     // UI组件引用
     private lateinit var schemaValueText: TextView
     private lateinit var themeValueText: TextView
+    private lateinit var levelValueText: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -135,6 +138,18 @@ class SettingsActivity : AppCompatActivity() {
         )
         themeItem.setOnClickListener { showThemeSelector() }
         rootLayout.addView(themeItem)
+        rootLayout.addView(createDivider())
+
+        // ===== 成长（等级体系）=====
+        rootLayout.addView(createSectionHeader("成长"))
+        val levelItem = createSettingItemWithValue(
+            title = "我的等级",
+            valueHolder = { levelValueText = it }
+        )
+        levelItem.setOnClickListener {
+            startActivity(Intent(this, LevelActivity::class.java))
+        }
+        rootLayout.addView(levelItem)
         rootLayout.addView(createDivider())
 
         // ===== 九宫格 =====
@@ -377,6 +392,11 @@ class SettingsActivity : AppCompatActivity() {
                 ThemeManager.THEME_MATERIAL -> "Material（蓝色调）"
                 else -> themeName
             }
+        }
+
+        if (::levelValueText.isInitialized) {
+            val levelState = LevelRepository.load(this)
+            levelValueText.text = "Lv.${levelState.level} ${LevelEngine.levelName(levelState.level)}"
         }
     }
 

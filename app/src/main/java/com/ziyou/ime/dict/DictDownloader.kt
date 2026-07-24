@@ -10,6 +10,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 
 /**
  * 词库下载器
@@ -69,6 +70,11 @@ object DictDownloader {
         targetDir: File,
         onProgress: ((Long, Long) -> Unit)? = null
     ): File? = withContext(Dispatchers.IO) {
+        // 防御性校验：id 会拼接为文件名，非法 id（含路径分隔符 / ".."）可能写到目录外。
+        if (!RemoteDictInfo.isValidId(info.id)) {
+            Log.e(TAG, "非法词库 id，拒绝下载: ${info.id}")
+            return@withContext null
+        }
         var connection: HttpURLConnection? = null
         try {
             if (!targetDir.exists()) {
@@ -104,6 +110,20 @@ object DictDownloader {
                     }
                     output.flush()
                 }
+            }
+
+            // 完整性校验：catalog 提供 sha256 时校验下载内容，不匹配则删除并拒绝安装，
+            // 防止镜像被投毒 / 传输被篡改的词库注入主词库。为空则跳过（向后兼容旧 catalog）。
+            if (info.sha256.isNotEmpty()) {
+                val actual = sha256Of(targetFile)
+                if (!actual.equals(info.sha256, ignoreCase = true)) {
+                    Log.e(TAG, "词库 ${info.id} SHA-256 校验失败：期望 ${info.sha256}，实际 $actual")
+                    targetFile.delete()
+                    return@withContext null
+                }
+                Log.i(TAG, "词库 ${info.id} SHA-256 校验通过")
+            } else {
+                Log.w(TAG, "词库 ${info.id} 未提供 SHA-256，跳过完整性校验")
             }
 
             Log.i(TAG, "词库 ${info.id} 下载完成: ${targetFile.absolutePath} ($downloadedBytes bytes)")
@@ -205,6 +225,19 @@ object DictDownloader {
         return count
     }
 
+    /** 计算文件的 SHA-256（十六进制小写字符串）。 */
+    private fun sha256Of(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(BUFFER_SIZE)
+            var read: Int
+            while (input.read(buffer).also { read = it } != -1) {
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
     /** 解析 catalog.json 内容 */
     private fun parseCatalog(jsonStr: String): DictCatalog? {
         return try {
@@ -215,16 +248,23 @@ object DictDownloader {
             val dictionaries = mutableListOf<RemoteDictInfo>()
             for (i in 0 until dictArray.length()) {
                 val obj = dictArray.getJSONObject(i)
+                val id = obj.getString("id")
+                // 在不可信边界（远程 catalog）直接丢弃非法 id，确保其永不进入安装记录与文件系统。
+                if (!RemoteDictInfo.isValidId(id)) {
+                    Log.w(TAG, "跳过非法词库 id: $id")
+                    continue
+                }
                 dictionaries.add(
                     RemoteDictInfo(
-                        id = obj.getString("id"),
+                        id = id,
                         name = obj.getString("name"),
                         category = obj.optString("category", "professional"),
                         description = obj.optString("description", ""),
                         version = obj.optString("version", "1.0.0"),
                         url = obj.getString("url"),
                         size = obj.optLong("size", 0),
-                        author = obj.optString("author", "")
+                        author = obj.optString("author", ""),
+                        sha256 = obj.optString("sha256", "")
                     )
                 )
             }

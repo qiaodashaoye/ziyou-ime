@@ -1,4 +1,4 @@
-package com.ziyou.ime.data
+package com.ziyou.ime.core.t9
 
 import com.ziyou.ime.util.T9PinYinUtils
 

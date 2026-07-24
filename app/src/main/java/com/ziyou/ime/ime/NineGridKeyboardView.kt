@@ -201,11 +201,10 @@ class NineGridKeyboardView @JvmOverloads constructor(
                 onSwitchToQwertyEnglish?.invoke()
                 invalidate()
             }
-            // 中文/数字模式切换
+            // 中文/数字模式切换：不预翻转 isChineseMode，由 Service 确认 ascii_mode 后回写，
+            // 避免引擎繁忙（如词库下载后重新部署）时视图与引擎状态错位
             KeyCode.KEYCODE_SWITCH_NUMBER_MODE -> {
-                isChineseMode = !isChineseMode
                 onKeyPress?.invoke(KeyCode.KEYCODE_SWITCH_NUMBER_MODE, 0)
-                invalidate()
             }
             // 重输：发送 Escape 清除当前编码
             ESCAPE_CODE -> sendKey(KeyCode.XK_Escape, 0)
@@ -285,11 +284,10 @@ class NineGridBottomBarView @JvmOverloads constructor(
                 onSwitchToQwertyEnglish?.invoke()
                 invalidate()
             }
-            // 中文/数字模式切换
+            // 中文/数字模式切换：不预翻转 isChineseMode，由 Service 确认 ascii_mode 后回写，
+            // 避免引擎繁忙（如词库下载后重新部署）时视图与引擎状态错位
             KeyCode.KEYCODE_SWITCH_NUMBER_MODE -> {
-                isChineseMode = !isChineseMode
                 onKeyPress?.invoke(KeyCode.KEYCODE_SWITCH_NUMBER_MODE, 0)
-                invalidate()
             }
             else -> {
                 if (handleCommonKey(key)) return

@@ -28,6 +28,9 @@ android {
             isJniDebuggable = false
         }
         release {
+            // JNI 重度应用：R8 会按名反射查找 core 包下的类/方法（见 proguard-rules.pro 的
+            // -keep com.ziyou.ime.core.**），故开启压缩/混淆以减小体积，但关闭激进优化
+            // 以避免破坏 JNI 符号与反射调用。二者组合是有意为之，并非冲突。
             optimization {
                 enable = false
             }
@@ -64,39 +67,40 @@ android {
 
 dependencies {
 
+    // ===== 内部模块：纯逻辑层（无 Android UI / 无 JNI 依赖）=====
+    implementation(project(":core-logic"))
+
+    // ===== AndroidX Core =====
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+
+    // ===== Jetpack Compose（单一 BOM 统一版本）=====
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
-    implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.compose.material3)
+
+    // ===== Coroutines =====
+    implementation(libs.kotlinx.coroutines.android)
+
+    // ===== Preferences =====
+    implementation(libs.androidx.preference.ktx)
+
+    // ===== Debug 工具 =====
+    debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    // ===== 单元测试 =====
     testImplementation(libs.junit)
+
+    // ===== 仪器化测试 =====
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
-    debugImplementation(libs.androidx.compose.ui.test.manifest)
-    debugImplementation(libs.androidx.compose.ui.tooling)
-
-    // AndroidX Core
-    implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.appcompat:appcompat:1.7.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.3")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.3")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.3")
-
-    // Jetpack Compose
-    implementation(platform("androidx.compose:compose-bom:2024.06.00"))
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.activity:activity-compose:1.9.0")
-
-    // Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-
-    // Preferences
-    implementation("androidx.preference:preference-ktx:1.2.1")
 }

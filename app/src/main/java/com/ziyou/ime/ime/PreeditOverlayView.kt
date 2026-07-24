@@ -15,7 +15,8 @@ import com.ziyou.ime.config.KeyboardTheme
  * 独立显示 Rime 编码区（preedit）文本，位于候选词列表上方，通过垂直 LinearLayout 堆叠。
  * 职责单一：仅负责编码区文本的渲染与主题适配。
  *
- * 空值规范：传入 null 或空字符串时设为 GONE（不占位），有效文本时设为 VISIBLE。
+ * 显示规范：始终可见并绘制背景（即使无编码文本），与下方候选词区共享同一背景、
+ * 不绘制分割线，使二者在视觉上连续为一个整体。
  */
 class PreeditOverlayView @JvmOverloads constructor(
     context: Context,
@@ -28,10 +29,8 @@ class PreeditOverlayView @JvmOverloads constructor(
         private const val TEXT_SIZE_SP = 12f
         /** 水平内边距（dp） */
         private const val PADDING_H_DP = 12
-        /** 默认视图高度（dp），与候选词区域保持一致 */
-        private const val VIEW_HEIGHT_DP = 40
-        /** 分隔线宽度（dp） */
-        private const val DIVIDER_WIDTH_DP = 1f
+        /** 默认视图高度（dp），紧凑显示以减少垂直空间占用 */
+        private const val VIEW_HEIGHT_DP = 24
     }
 
     /** 当前显示的编码文本 */
@@ -48,24 +47,16 @@ class PreeditOverlayView @JvmOverloads constructor(
         style = Paint.Style.FILL
     }
 
-    private val dividerPaint = Paint().apply {
-        color = Color.parseColor("#DDDDDD")
-        strokeWidth = dp2px(DIVIDER_WIDTH_DP)
-    }
-
     /**
      * 设置编码区显示文本。
      *
-     * 空值规范：
-     * - null 或空字符串 → GONE（不占位）
-     * - 有效文本 → VISIBLE 并触发重绘
+     * 显示规范：视图始终可见（保持背景与候选词区连续），
+     * 传入 null 或空字符串时清空文本仅绘制背景，有效文本时绘制文本。
      */
     fun setText(text: String?) {
         val normalized = text?.takeIf { it.isNotEmpty() }
         if (displayText == normalized) return
         displayText = normalized
-        visibility = if (normalized != null) VISIBLE else GONE
-        requestLayout()
         invalidate()
     }
 
@@ -75,7 +66,6 @@ class PreeditOverlayView @JvmOverloads constructor(
     fun applyTheme(theme: KeyboardTheme) {
         textPaint.color = theme.preeditTextColor
         bgPaint.color = theme.candidateBackground
-        dividerPaint.color = theme.borderColor
         invalidate()
     }
 
@@ -87,21 +77,15 @@ class PreeditOverlayView @JvmOverloads constructor(
     }
 
     override fun onDraw(canvas: Canvas) {
-        val text = displayText ?: return
-
-        // 绘制背景
+        // 始终绘制背景（即使无编码文本），与下方候选词区共享同一背景，视觉连续为整体
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
+
+        // 无编码文本时仅保留背景，不绘制文本、不绘制分割线
+        val text = displayText ?: return
 
         // 绘制编码文本（垂直居中）
         val baseline = height / 2f + textPaint.textSize / 3f
         canvas.drawText(text, dp2px(PADDING_H_DP.toFloat()), baseline, textPaint)
-
-        // 绘制底部分隔线
-        canvas.drawLine(
-            0f, height.toFloat(),
-            width.toFloat(), height.toFloat(),
-            dividerPaint
-        )
     }
 
     // ===== 单位转换工具 =====

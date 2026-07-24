@@ -1,6 +1,5 @@
-package com.ziyou.ime.level
+package com.ziyou.ime.core.level
 
-import com.ziyou.ime.config.ThemeManager
 import kotlin.math.floor
 import kotlin.math.min
 
@@ -16,6 +15,12 @@ object LevelEngine {
 
     /** MVP 阶段的等级上限（1–10 级）。 */
     const val MAX_LEVEL = 10
+
+    // 主题名（与 com.ziyou.ime.config.ThemeManager 的常量保持一致）。
+    // 此处以字面量声明，避免纯逻辑模块反向依赖 Android 配置层（ThemeManager）。
+    private const val THEME_LIGHT = "Light"
+    private const val THEME_DARK = "Dark"
+    private const val THEME_MATERIAL = "Material"
 
     /**
      * 1–10 级累计积分门槛（指数型递增，前快后慢）。
@@ -135,9 +140,9 @@ object LevelEngine {
      * Light 为默认皮肤（Lv.1 起可用）；Dark 于 Lv.2 解锁；Material 于 Lv.7 解锁。
      */
     private val THEME_UNLOCK_LEVEL: Map<String, Int> = mapOf(
-        ThemeManager.THEME_LIGHT to 1,
-        ThemeManager.THEME_DARK to 2,
-        ThemeManager.THEME_MATERIAL to 7
+        THEME_LIGHT to 1,
+        THEME_DARK to 2,
+        THEME_MATERIAL to 7
     )
 
     /**
