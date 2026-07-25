@@ -11,7 +11,8 @@ import org.junit.Test
 /**
  * [PinyinHintProvider] 纯逻辑回归测试。
  *
- * 覆盖：从数字输入串还原候选拼音、回退到候选 comment、预览优先取高亮候选读音、空上下文边界。
+ * 覆盖：从数字输入串还原候选拼音、回退到候选 comment、
+ * 预览与高亮候选读音同源且长度匹配实际击键、空上下文边界。
  */
 class PinyinHintProviderTest {
 
@@ -65,17 +66,88 @@ class PinyinHintProviderTest {
     }
 
     @Test
-    fun buildPreview_prefersHighlightedCandidateComment() {
+    fun buildPreview_followsHighlightedCandidatePinyin() {
+        // 核心缺陷场景：输入 48，首位候选是"乎"(hu)，
+        // 编码区必须展示 hu（与候选读音一致），而非本地 T9 表序的 gu
         val ctx = context(
-            input = "486",
-            candidates = listOf(candidate("过", "guo"), candidate("锅", "guo")),
-            highlighted = 1
+            input = "48",
+            candidates = listOf(candidate("乎", "hu"), candidate("顾", "gu")),
+            highlighted = 0
         )
-        assertEquals("guo", PinyinHintProvider.buildPreview(ctx, listOf("gun")))
+        assertEquals("hu", PinyinHintProvider.buildPreview(ctx))
     }
 
     @Test
-    fun buildPreview_noCandidate_fallsBackToFirstHint() {
-        assertEquals("gun", PinyinHintProvider.buildPreview(context(input = "486"), listOf("gun", "guo")))
+    fun buildPreview_highlightSwitch_followsNewCandidate() {
+        // 高亮切到"顾"(gu) 时，编码区同步展示 gu
+        val ctx = context(
+            input = "48",
+            candidates = listOf(candidate("乎", "hu"), candidate("顾", "gu")),
+            highlighted = 1
+        )
+        assertEquals("gu", PinyinHintProvider.buildPreview(ctx))
+    }
+
+    @Test
+    fun buildPreview_partialSyllable_truncatesToKeyCount() {
+        // 仅击 1 键（4），候选"好"完整拼音 hao：只展示已击键部分 h，不展示完整拼音
+        val ctx = context(
+            input = "4",
+            candidates = listOf(candidate("好", "hao")),
+            highlighted = 0
+        )
+        assertEquals("h", PinyinHintProvider.buildPreview(ctx))
+    }
+
+    @Test
+    fun buildPreview_multiSyllable_alignsCommentSyllables() {
+        // 连续击键 64426（ni=64, hao=426），候选"你好"comment "ni hao" → ni'hao
+        val ctx = context(
+            input = "64426",
+            candidates = listOf(candidate("你好", "ni hao")),
+            highlighted = 0
+        )
+        assertEquals("ni'hao", PinyinHintProvider.buildPreview(ctx))
+    }
+
+    @Test
+    fun buildPreview_lockedPinyinKeptVerbatim() {
+        // 已锁定拼音 guo 原样保留；数字段 486 按候选读音第二音节 hun 还原
+        val ctx = context(
+            input = "guo'486",
+            candidates = listOf(candidate("国魂", "guo hun")),
+            highlighted = 0
+        )
+        assertEquals("guo'hun", PinyinHintProvider.buildPreview(ctx))
+    }
+
+    @Test
+    fun buildPreview_noCandidate_fallsBackToLocalT9Table() {
+        // 无候选时回退本地 T9 表：486 → GTM 首个等长匹配 gun
+        assertEquals("gun", PinyinHintProvider.buildPreview(context(input = "486")))
+    }
+
+    @Test
+    fun buildPreview_incompatibleComment_fallsBackToLocalT9Table() {
+        // 候选读音与击键不兼容（ma 的键序 62 与 486 无任何前缀关系）时回退本地还原
+        val ctx = context(
+            input = "486",
+            candidates = listOf(candidate("妈", "ma")),
+            highlighted = 0
+        )
+        assertEquals("gun", PinyinHintProvider.buildPreview(ctx))
+    }
+
+    @Test
+    fun buildPreview_letterCountAlwaysMatchesKeyCount() {
+        // 无论是否有候选消歧，预览字母总数必须等于击键数
+        val preview = PinyinHintProvider.buildPreview(context(input = "64426"))
+        assertEquals(5, preview!!.replace("'", "").length)
+    }
+
+    @Test
+    fun buildPreview_emptyInput_returnsNull() {
+        assertNull(PinyinHintProvider.buildPreview(context(input = "")))
+        assertNull(PinyinHintProvider.buildPreview(null))
     }
 }

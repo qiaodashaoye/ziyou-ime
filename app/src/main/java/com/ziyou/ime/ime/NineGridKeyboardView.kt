@@ -7,7 +7,6 @@ import android.graphics.Typeface
 import android.util.AttributeSet
 import android.view.ViewTreeObserver
 import com.ziyou.ime.core.CompositionProto
-import com.ziyou.ime.util.T9PinYinUtils
 
 /**
  * 九宫格（T9）键盘视图 —— 智能九键
@@ -219,16 +218,15 @@ class NineGridKeyboardView @JvmOverloads constructor(
     // ===== 编码显示格式化 =====
 
     /**
-     * 覆写编码显示：九宫格模式下将 T9 数字编码格式化为可读拼音。
-     * 由于键盘视图层无法获取候选词 comment，采用 lowercase 降级显示。
-     * 当编码区移至候选栏后，此处的 compositionText 作为备用数据源保留。
+     * 编码区兼容入口（仅兜底）：
+     * 九宫格的编码预览由 Service 层统一计算（PinyinHintProvider.buildPreview，
+     * 按候选读音+实际击键还原）并经 updateCompositionPreview 推送，
+     * 与候选栏编码区同源，避免本视图自行格式化导致两处拼音不一致。
+     * 本覆写仅在无预览（如编码已清空）时被调用，降级展示小写 preedit。
      */
     override fun updateComposition(composition: CompositionProto?) {
         if (composition != null && !composition.preedit.isNullOrEmpty()) {
-            val preedit = composition.preedit ?: ""
-            // 使用 T9PinYinUtils 格式化；comment 为空时退化为原始编码
-            val formatted = T9PinYinUtils.getT9Composition(preedit, "")
-            compositionText = formatted.lowercase()
+            compositionText = composition.preedit?.lowercase()
             invalidate()
         } else {
             super.updateComposition(composition)

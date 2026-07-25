@@ -438,6 +438,16 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
         invalidate()
     }
 
+    /**
+     * 以外部计算好的预览串直接更新编码区。
+     * 由 Service 层推送与候选栏编码区同源的内容（如九宫格按候选读音还原的拼音），
+     * 避免键盘视图自行格式化 preedit 导致两处编码显示不一致。
+     */
+    fun updateCompositionPreview(preview: String?) {
+        compositionText = preview
+        invalidate()
+    }
+
     /** 设置中文模式状态（保留供 Java 调用；Kotlin 侧可直接对 [isChineseMode] 赋值） */
     fun updateChineseMode(chinese: Boolean) {
         isChineseMode = chinese

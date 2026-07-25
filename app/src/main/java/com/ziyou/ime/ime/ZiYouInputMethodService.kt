@@ -329,11 +329,15 @@ class ZiYouInputMethodService : InputMethodService() {
         withContext(Dispatchers.Main) {
             keyboardView?.isChineseMode = !isAscii
             candidatesView?.updateCandidates(context)
-            // 编码区悬浮层：九宫格显示拼音预览，全键盘回退到 Rime 原始 preedit
-            preeditOverlay?.setText(
-                buildPinyinPreview(context, pinyinHints) ?: context?.composition?.preedit
-            )
-            keyboardView?.updateComposition(context?.composition)
+            // 编码区同源同步：九宫格按候选读音+实际击键还原预览，悬浮层与键盘视图
+            // 共用同一串；全键盘回退到 Rime 原始 preedit
+            val preview = buildPinyinPreview(context)
+            preeditOverlay?.setText(preview ?: context?.composition?.preedit)
+            if (preview != null) {
+                keyboardView?.updateCompositionPreview(preview)
+            } else {
+                keyboardView?.updateComposition(context?.composition)
+            }
             // 刷新左侧拼音侧栏（拼音候选 + 自定义符号）
             if (type == KeyboardType.NINE_GRID) {
                 pinyinSideBar?.setSideSymbols(
@@ -565,12 +569,15 @@ class ZiYouInputMethodService : InputMethodService() {
         val pinyinHints = buildPinyinHints(context)
         // 更新候选词视图
         candidatesView?.updateCandidates(context)
-        // 编码区悬浮层：九宫格显示拼音预览，全键盘回退到 Rime 原始 preedit
-        preeditOverlay?.setText(
-            buildPinyinPreview(context, pinyinHints) ?: context?.composition?.preedit
-        )
-        // 更新键盘编码区
-        keyboardView?.updateComposition(context?.composition)
+        // 编码区同源同步：九宫格按候选读音+实际击键还原预览，悬浮层与键盘视图
+        // 共用同一串，确保编码区与候选区拼音一致；全键盘回退到 Rime 原始 preedit
+        val preview = buildPinyinPreview(context)
+        preeditOverlay?.setText(preview ?: context?.composition?.preedit)
+        if (preview != null) {
+            keyboardView?.updateCompositionPreview(preview)
+        } else {
+            keyboardView?.updateComposition(context?.composition)
+        }
         // 左侧拼音侧栏：有候选拼音则展示拼音，否则展示自定义符号
         pinyinSideBar?.setPinyinCandidates(pinyinHints)
     }
@@ -597,12 +604,13 @@ class ZiYouInputMethodService : InputMethodService() {
     }
 
     /**
-     * 生成顶部编码区的"当前拼音"单串预览（委托 [PinyinHintProvider]）。
+     * 生成顶部编码区的"当前拼音"单串预览（委托 [PinyinHintProvider]，
+     * 以高亮候选读音为消歧依据、以实际击键数为长度约束）。
      * 非九宫格返回 null，由候选视图沿用 Rime 原始 preedit。
      */
-    private fun buildPinyinPreview(context: ContextProto?, hints: List<String>?): String? {
+    private fun buildPinyinPreview(context: ContextProto?): String? {
         if (currentKeyboardType != KeyboardType.NINE_GRID) return null
-        return PinyinHintProvider.buildPreview(context, hints)
+        return PinyinHintProvider.buildPreview(context)
     }
 
     // ===== Rime消息处理 =====
