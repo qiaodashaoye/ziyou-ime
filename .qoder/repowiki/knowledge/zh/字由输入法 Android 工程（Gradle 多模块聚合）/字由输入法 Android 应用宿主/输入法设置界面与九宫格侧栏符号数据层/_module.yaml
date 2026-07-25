@@ -1,0 +1,12 @@
+schema_version: 1
+module_path: app/ui_components
+title: 输入法设置界面与九宫格侧栏符号数据层
+scope:
+    - app/src/main/java/com/ziyou/ime/ui/
+    - app/src/main/java/com/ziyou/ime/data/
+    - app/src/main/java/com/ziyou/ime/util/
+source_files: []
+depends_on: []
+related_to:
+    - path: app/config_management
+    - path: app/core_rime

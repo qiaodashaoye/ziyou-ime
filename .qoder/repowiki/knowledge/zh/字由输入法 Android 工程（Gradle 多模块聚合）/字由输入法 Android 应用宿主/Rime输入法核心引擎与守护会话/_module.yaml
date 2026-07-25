@@ -1,0 +1,13 @@
+schema_version: 1
+module_path: app/core_rime
+title: Rime输入法核心引擎与守护会话
+scope:
+    - app/src/main/java/com/ziyou/ime/core/
+    - app/src/main/java/com/ziyou/ime/daemon/
+source_files: []
+depends_on: []
+related_to:
+    - path: app/config_management
+    - path: app/ime_service
+    - path: app/jni_bridge
+    - path: app/ui_components

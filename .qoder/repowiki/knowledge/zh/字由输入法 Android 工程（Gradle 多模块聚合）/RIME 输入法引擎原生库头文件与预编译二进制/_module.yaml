@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: native_libs
+title: RIME 输入法引擎原生库头文件与预编译二进制
+scope:
+    - libs/
+source_files: []
+depends_on: []
+related_to:
+    - path: app/jni_bridge
+    - path: librime_prebuilt

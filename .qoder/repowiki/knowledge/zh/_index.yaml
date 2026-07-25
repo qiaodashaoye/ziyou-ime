@@ -1,0 +1,124 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: zh-CN
+branch: main
+nodes_managed: true
+exported_at: "2026-07-25T05:54:39Z"
+modules:
+    "":
+        dir_name: 字由输入法 Android 工程（Gradle 多模块聚合）
+        title: 字由输入法 Android 工程（Gradle 多模块聚合）
+        scope:
+            - README.md
+            - ARCHITECTURE.md
+            - .gitignore
+            - .gitmodules
+            - gradle.properties
+            - build.gradle.kts
+            - settings.gradle.kts
+            - gradlew.bat
+            - gradlew
+        source_files: []
+        children:
+            - app
+            - librime_prebuilt
+            - native_libs
+        depends_on: []
+        related_to: []
+    app:
+        dir_name: 字由输入法 Android 应用宿主
+        title: 字由输入法 Android 应用宿主
+        scope:
+            - app/
+        source_files: []
+        children:
+            - app/config_management
+            - app/core_rime
+            - app/ime_service
+            - app/jni_bridge
+            - app/ui_components
+        depends_on: []
+        related_to: []
+    app/config_management:
+        dir_name: Rime 配置与主题资源管理
+        title: Rime 配置与主题资源管理
+        scope:
+            - app/src/main/java/com/ziyou/ime/config/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: app/core_rime
+            - path: app/ime_service
+            - path: app/ui_components
+    app/core_rime:
+        dir_name: Rime输入法核心引擎与守护会话
+        title: Rime输入法核心引擎与守护会话
+        scope:
+            - app/src/main/java/com/ziyou/ime/core/
+            - app/src/main/java/com/ziyou/ime/daemon/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: app/config_management
+            - path: app/ime_service
+            - path: app/jni_bridge
+            - path: app/ui_components
+    app/ime_service:
+        dir_name: 输入法键盘视图与候选区组件
+        title: 输入法键盘视图与候选区组件
+        scope:
+            - app/src/main/java/com/ziyou/ime/ime/
+            - app/src/main/java/com/ziyou/ime/ZiyouApplication.kt
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: app/config_management
+            - path: app/core_rime
+    app/jni_bridge:
+        dir_name: Rime 输入法 JNI 桥接层
+        title: Rime 输入法 JNI 桥接层
+        scope:
+            - app/src/main/jni/librime_jni/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: app/core_rime
+            - path: native_libs
+    app/ui_components:
+        dir_name: 输入法设置界面与九宫格侧栏符号数据层
+        title: 输入法设置界面与九宫格侧栏符号数据层
+        scope:
+            - app/src/main/java/com/ziyou/ime/ui/
+            - app/src/main/java/com/ziyou/ime/data/
+            - app/src/main/java/com/ziyou/ime/util/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: app/config_management
+            - path: app/core_rime
+    librime_prebuilt:
+        dir_name: librime 预编译库构建模块（Android 静态库打包）
+        title: librime 预编译库构建模块（Android 静态库打包）
+        scope:
+            - librime-prebuilt/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: native_libs
+    native_libs:
+        dir_name: RIME 输入法引擎原生库头文件与预编译二进制
+        title: RIME 输入法引擎原生库头文件与预编译二进制
+        scope:
+            - libs/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: app/jni_bridge
+            - path: librime_prebuilt

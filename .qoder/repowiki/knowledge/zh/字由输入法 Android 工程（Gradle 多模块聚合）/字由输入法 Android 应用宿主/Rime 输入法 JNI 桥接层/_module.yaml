@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: app/jni_bridge
+title: Rime 输入法 JNI 桥接层
+scope:
+    - app/src/main/jni/librime_jni/
+source_files: []
+depends_on: []
+related_to:
+    - path: app/core_rime
+    - path: native_libs
