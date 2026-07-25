@@ -77,7 +77,8 @@ class InputLogicController(
                     Log.d(TAG, "commitText: $text")
                     keyRecordStack.clear()
                 }
-                // 更新候选词和编码区UI
+                // 更新候选词和编码区UI；若引擎已启用 librime-predict，
+                // commit 后的预测词会出现在 context.menu 中随本次刷新一并展示
                 updateUI()
             } else {
                 // Rime未消费，某些键可能需要直接输出
@@ -197,7 +198,11 @@ class InputLogicController(
         }
     }
 
-    /** 从 Rime 获取最新上下文并在主线程刷新 UI。 */
+    /**
+     * 从 Rime 获取最新上下文并在主线程刷新 UI。
+     * 引擎已启用 librime-predict 时，commit 后的预测词位于 context.menu 中，
+     * 经本方法走既有候选渲染与选词路径，无需专用处理。
+     */
     private suspend fun updateUI() {
         try {
             val context: ContextProto? = engine.api.getContext()

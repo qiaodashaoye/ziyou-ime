@@ -16,6 +16,7 @@ import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.core.RimeMessage
 import com.ziyou.ime.daemon.RimeEngine
 import com.ziyou.ime.core.t9.KeyRecordStack
+import com.ziyou.ime.data.AssociationManager
 import com.ziyou.ime.data.SideSymbolRepository
 import com.ziyou.ime.di.AppContainer
 import com.ziyou.ime.level.LevelRepository
@@ -324,6 +325,10 @@ class ZiYouInputMethodService : InputMethodService() {
             }
         }
         val isAscii = rime.api.getOption("ascii_mode")
+        // 引擎级联想（librime-predict）选项联动：与应用层联想总开关同步。
+        // 当前预编译库未启用 predict 模块 / schema 未挂 predictor 时为无害 no-op，
+        // 启用后无需改动即可由同一开关控制引擎预测（选项名见 predictor 源码 "prediction"）
+        rime.api.setOption("prediction", AssociationManager.isEnabled(this))
         val context = rime.api.getContext()
         val pinyinHints = buildPinyinHints(context)
         withContext(Dispatchers.Main) {
@@ -536,7 +541,7 @@ class ZiYouInputMethodService : InputMethodService() {
 
     // ===== 候选词操作（委托 InputLogicController）=====
 
-    /** 处理候选词点击。 */
+    /** 处理候选词点击（含引擎预测词，均经 Rime 选词路径）。 */
     private fun handleCandidateClick(index: Int) = inputLogic.selectCandidate(index)
 
     /** 处理翻页。@param forward true=下一页, false=上一页 */
@@ -567,8 +572,10 @@ class ZiYouInputMethodService : InputMethodService() {
      */
     private fun renderContext(context: ContextProto?) {
         val pinyinHints = buildPinyinHints(context)
-        // 更新候选词视图
-        candidatesView?.updateCandidates(context)
+        // 更新候选词视图；预测态（引擎在 commit 后产生 prediction 候选：菜单非空且
+        // 编码串为空）复用联想强调色，与普通候选词区分；未启用 predict 模块时该分支休眠
+        val predictionMode = context?.menu?.candidates?.isNotEmpty() == true && context.input.isEmpty()
+        candidatesView?.updateCandidates(context, predictionMode)
         // 编码区同源同步：九宫格按候选读音+实际击键还原预览，悬浮层与键盘视图
         // 共用同一串，确保编码区与候选区拼音一致；全键盘回退到 Rime 原始 preedit
         val preview = buildPinyinPreview(context)

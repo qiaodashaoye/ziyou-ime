@@ -19,6 +19,9 @@ object AssetDeployer {
 
     private const val ASSETS_RIME_DIR = "rime"
 
+    /** librime-predict 联想词库文件名（位于 assets 根目录，部署到用户目录供 predictor 加载） */
+    private const val PREDICT_DB = "predict.db"
+
     fun deployIfNeeded(context: Context): Boolean {
         val currentVersion = getAppVersionCode(context)
         val deployedVersion = getDeployedVersion(context)
@@ -74,6 +77,9 @@ object AssetDeployer {
             }
 
             copyAssetsRecursive(context, ASSETS_RIME_DIR, targetDir)
+
+            // 部署 librime-predict 联想词库到用户目录（predictor 默认从 user dir 解析 predict.db）
+            copyAssetFile(context, PREDICT_DB, File(userDir, PREDICT_DB))
 
             saveDeployedVersion(context, versionCode)
             Log.i(TAG, "资源部署完成，版本=$versionCode")

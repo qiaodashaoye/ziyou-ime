@@ -21,6 +21,7 @@ import com.ziyou.ime.core.ContextProto
  * - 横向排列候选词
  * - 点击选择候选词
  * - 支持左右滑动翻页
+ * - 预测模式：引擎联想（librime-predict）在 commit 后产生的预测词以强调色区分显示
  *
  * 注意：编码区（preedit）已分离为独立的 [PreeditOverlayView]，
  * 通过垂直 LinearLayout 堆叠在候选词区域上方。
@@ -50,6 +51,13 @@ class SimpleCandidatesView @JvmOverloads constructor(
     private var candidates: Array<CandidateProto> = emptyArray()
     private var highlightIndex: Int = -1
 
+    /**
+     * 是否处于引擎预测态（librime-predict 在 commit 后产生的 prediction 候选）。
+     * 预测态下所有候选以 [predictionPaint] 强调色绘制；点击路由不受影响
+     * （预测词仍经 Rime selectCandidate 选词）。
+     */
+    private var isPredictionMode = false
+
     // 绘制相关的画笔
     private val candidatePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = sp2px(CANDIDATE_TEXT_SIZE_SP)
@@ -61,6 +69,13 @@ class SimpleCandidatesView @JvmOverloads constructor(
         textSize = sp2px(CANDIDATE_TEXT_SIZE_SP)
         color = Color.parseColor("#4A90D9")
         typeface = Typeface.DEFAULT_BOLD
+    }
+
+    /** 预测词画笔：强调色、常规字重，与普通候选词（默认色）及高亮项（加粗）区分 */
+    private val predictionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp2px(CANDIDATE_TEXT_SIZE_SP)
+        color = Color.parseColor("#4A90D9")
+        typeface = Typeface.DEFAULT
     }
 
     private val bgPaint = Paint().apply {
@@ -133,14 +148,19 @@ class SimpleCandidatesView @JvmOverloads constructor(
         candidatePaint.color = theme.candidateTextColor
         // 选中项仅通过高亮字体颜色表示，不再绘制背景框
         highlightedCandidatePaint.color = theme.candidateHighlightColor
+        // 预测词与高亮项同色但不加粗，整栏统一强调色即代表预测态
+        predictionPaint.color = theme.candidateHighlightColor
         invalidate()
     }
 
     /**
      * 更新候选词数据
      * @param context Rime输入上下文
+     * @param predictionMode 是否为引擎预测态（librime-predict 在 commit 后产生的
+     *        prediction 候选）；为 true 时复用联想强调色整栏绘制，与普通候选区分。
+     *        点击路由不受影响（预测词仍经 Rime selectCandidate 选词）。
      */
-    fun updateCandidates(context: ContextProto?) {
+    fun updateCandidates(context: ContextProto?, predictionMode: Boolean = false) {
         if (context == null) {
             candidates = emptyArray()
             highlightIndex = -1
@@ -148,6 +168,7 @@ class SimpleCandidatesView @JvmOverloads constructor(
             candidates = context.menu?.candidates ?: emptyArray()
             highlightIndex = context.menu?.highlightedCandidateIndex ?: -1
         }
+        isPredictionMode = predictionMode && candidates.isNotEmpty()
         scrollOffset = 0f
         recalculateLayout()
         invalidate()
@@ -201,8 +222,13 @@ class SimpleCandidatesView @JvmOverloads constructor(
             if (i >= candidateRects.size) break
             val rect = candidateRects[i]
 
-            // 选中项仅改变字体颜色（高亮色 + 加粗），不绘制边框/背景；候选词之间也不再绘制竖线分隔符
-            val paint = if (i == highlightIndex) highlightedCandidatePaint else candidatePaint
+            // 选中项仅改变字体颜色（高亮色 + 加粗），不绘制边框/背景；候选词之间也不再绘制竖线分隔符；
+            // 预测态下整栏使用强调色常规字重，与普通候选词区分
+            val paint = when {
+                isPredictionMode -> predictionPaint
+                i == highlightIndex -> highlightedCandidatePaint
+                else -> candidatePaint
+            }
             val textX = rect.left + dp2px(CANDIDATE_PADDING_H_DP.toFloat())
             canvas.drawText(candidates[i].text, textX, textBaseline, paint)
         }

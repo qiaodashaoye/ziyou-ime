@@ -31,11 +31,15 @@ switches:
   - name: ascii_punct
     reset: 0
     states: [ 中文标点, 西文标点 ]
+  - name: prediction
+    reset: 1
+    states: [ 关闭联想, 开启联想 ]
 
 engine:
   processors:
     - ascii_composer
     - recognizer
+    - predictor          # librime-predict：上屏后生成预测候选（须在 key_binder 之前）
     - key_binder
     - speller
     - punctuator
@@ -51,9 +55,18 @@ engine:
   translators:
     - punct_translator
     - script_translator
+    - predict_translator # librime-predict：翻译 prediction 段的预测候选
   filters:
     - simplifier@zh_trad
     - uniquifier
+
+# librime-predict 联想配置（predict.db 由 AssetDeployer 部署到用户目录）
+predictor:
+  db: predict.db
+  # 单次预测候选数（与候选栏容量匹配，避免预测霸屏）
+  max_candidates: 10
+  # 连续联想最大轮数（防无限联想链）
+  max_iterations: 3
 
 speller:
   # 数字键与字母共同构成编码字母表；空格与撇号用于分词

@@ -319,6 +319,24 @@ DictManagerViewModel / DictManagerActivity  Compose 管理界面：分类浏览�
   智能退格解锁尾部拼音还原为数字段。返回 `ReplaceCommand(caretPos, length, replacement)` 供 `RimeApi.replaceKey`。
 - **SideSymbolRepository**（:app，`com.ziyou.ime.data`）：拼音侧栏自定义符号（SharedPreferences + JSON 持久化，默认常用标点）。
 
+#### 联想输入（引擎级，librime-predict）
+联想能力由 **librime-predict** 插件提供（基于 predict.db 的下一词预测）：启用后引擎在 commit 后
+把预测词写入 `context.menu`，经 `InputLogicController.updateUI` → `renderContext` 走既有候选渲染与
+ Rime 选词路径，无需专用 JNI 接口；预测态（菜单非空且编码串为空）在候选栏以强调色整栏绘制区分。
+- **AssociationManager**（:app，`com.ziyou.ime.data`）：联想开关（默认开），由
+  `applyEngineForKeyboard` 映射为 Rime 运行时选项 `prediction`（predictor 的门控选项）。
+- 应用层联想管线（AssociationPipeline / UserBigramModel 等）已按简洁性决策整体移除
+  （演进记录见 [docs/联想功能重构方案.md](docs/联想功能重构方案.md) 第 11 节）。
+- **当前状态：已启用** —— librime-predict 已编入预编译 librime.a（superbuild `WITH_PREDICT=ON`，
+  插件源码位于 `librime-prebuilt/plugins/librime-predict`）；app CMake 同步开启
+  `-DWITH_PREDICT=ON`；t9 / luna_pinyin 两套 schema 已挂 `predictor`（key_binder 前）+
+  `predict_translator` + `prediction` 开关（默认开）与 `predictor` 配置节
+  （max_candidates=10 / max_iterations=3）；官方 data-1.0 版 predict.db（7.2MB）随 assets
+  分发，由 `AssetDeployer` 部署到用户目录（versionCode 升版触发 fullCheck 重部署）。
+- **superbuild 注意项**：外部插件的 OBJECT 目标不继承 Boost:: 目标的传递头文件路径
+  （模块化 Boost 无单一 include 目录），superbuild 已在 add_subdirectory(librime) 后为
+  插件 objs 目标补链 Boost 使用要求，并关闭插件宿主工具（BUILD_TOOLS=OFF）。
+
 ## 数据流
 
 ### 数据流 A：按键到输出（QWERTY / 普通按键）
@@ -390,9 +408,9 @@ JNI 回调经 `SharedFlow.tryEmit()` 线程安全传递；引擎初始化的资�
 | `:core-logic` | `T9PinYinUtilsTest` | 7 | T9↔拼音双向映射、去重保序、非法输入、往返一致性 |
 | `:core-logic` | `KeyRecordStackTest` | 7 | 选词原地替换、多音节偏移、智能退格还原、非法/不匹配 |
 | `:core-logic` | `LevelEngineTest` | 11 | 分段计分/封顶、签到奖励、等级判定与进度、权益解锁 |
-| `:app` | `PinyinHintProviderTest` | 6 | 数字段还原拼音、回退 comment、预览优先高亮候选、空上下文 |
+| `:app` | `PinyinHintProviderTest` | 13 | 数字段还原拼音、回退 comment、预览优先高亮候选、空上下文 |
 
-运行：`./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest`（共 31 用例）。
+运行：`./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest`（共 38 用例）。
 引擎接口化后，涉及引擎的逻辑可通过 `AppContainer.overrideRimeEngine()` 注入 fake 实现进行测试。
 
 ## 关键设计决策

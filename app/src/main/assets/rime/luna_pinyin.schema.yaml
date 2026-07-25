@@ -26,11 +26,15 @@ switches:
   - name: ascii_punct
     states: [ 中文标点, 西文标点 ]
     abbrev: [ '。', '．' ]
+  - name: prediction
+    reset: 1
+    states: [ 关闭联想, 开启联想 ]
 
 engine:
   processors:
     - ascii_composer
     - recognizer
+    - predictor          # librime-predict：上屏后生成预测候选（须在 key_binder 之前）
     - key_binder
     - speller
     - punctuator
@@ -52,10 +56,17 @@ engine:
     - script_translator
     - table_translator@cangjie
     - script_translator@pinyin
+    - predict_translator # librime-predict：翻译 prediction 段的预测候选
   filters:
     - reverse_lookup_filter@cangjie_lookup
     - simplifier@zh_trad
     - uniquifier
+
+# librime-predict 联想配置（predict.db 由 AssetDeployer 部署到用户目录）
+predictor:
+  db: predict.db
+  max_candidates: 10
+  max_iterations: 3
 
 speller:
   alphabet: zyxwvutsrqponmlkjihgfedcba

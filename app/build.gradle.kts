@@ -12,13 +12,23 @@ android {
         applicationId = "com.ziyou.ime"
         minSdk = 24
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.0.2"
+        // versionCode 变更会触发 AssetDeployer 重新部署（schema 变更/predict.db 需随升版生效）
+        versionCode = 4
+        versionName = "1.0.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
+        }
+
+        externalNativeBuild {
+            cmake {
+                // 启用 librime-predict 模块依赖声明（rime_require_module_predict）。
+                // 必须与 librime-prebuilt 侧的 WITH_PREDICT 开关一致：
+                // 库未编入插件时此处开启会链接失败（undefined symbol）
+                arguments("-DWITH_PREDICT=ON")
+            }
         }
     }
 

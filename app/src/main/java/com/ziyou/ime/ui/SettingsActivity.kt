@@ -14,6 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.config.ThemeManager
 import com.ziyou.ime.daemon.RimeSession
+import com.ziyou.ime.data.AssociationManager
 import com.ziyou.ime.data.SideSymbol
 import com.ziyou.ime.data.SideSymbolRepository
 import com.ziyou.ime.core.level.LevelEngine
@@ -150,6 +151,16 @@ class SettingsActivity : AppCompatActivity() {
             startActivity(Intent(this, LevelActivity::class.java))
         }
         rootLayout.addView(levelItem)
+        rootLayout.addView(createDivider())
+
+        // ===== 输入 =====
+        rootLayout.addView(createSectionHeader("输入"))
+        rootLayout.addView(createSwitchItem(
+            title = "中文联想",
+            summary = "上屏后展示引擎预测的联想词（需启用 librime-predict 模块）",
+            checked = AssociationManager.isEnabled(this),
+            onChange = { enabled -> AssociationManager.setEnabled(this, enabled) }
+        ))
         rootLayout.addView(createDivider())
 
         // ===== 九宫格 =====
@@ -473,6 +484,45 @@ class SettingsActivity : AppCompatActivity() {
                 text = " ›"
                 textSize = 18f
                 setTextColor(0xFFBDBDBD.toInt())
+            })
+        }
+    }
+
+    /** 带开关的设置项（标题 + 说明 + 右侧 Switch），用于布尔型开关如中文联想 */
+    private fun createSwitchItem(
+        title: String,
+        summary: String,
+        checked: Boolean,
+        onChange: (Boolean) -> Unit
+    ): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            setPadding(dp(4), dp(12), dp(4), dp(12))
+            gravity = Gravity.CENTER_VERTICAL
+
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                addView(TextView(context).apply {
+                    text = title
+                    textSize = 16f
+                    setTextColor(0xFF212121.toInt())
+                })
+                addView(TextView(context).apply {
+                    text = summary
+                    textSize = 13f
+                    setTextColor(0xFF757575.toInt())
+                    setPadding(0, dp(2), 0, 0)
+                })
+            })
+
+            addView(Switch(context).apply {
+                isChecked = checked
+                setOnCheckedChangeListener { _, isChecked -> onChange(isChecked) }
             })
         }
     }
