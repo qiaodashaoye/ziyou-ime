@@ -48,6 +48,12 @@
             android:exported="false"
             android:label="扩展词库" />
 
+        <!-- 技能插件管理 -->
+        <activity
+            android:name=".ui.SkillManagerActivity"
+            android:exported="false"
+            android:label="技能插件" />
+
         <!-- 等级体系详情 -->
         <activity
             android:name=".ui.LevelActivity"

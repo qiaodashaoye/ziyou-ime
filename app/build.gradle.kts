@@ -101,6 +101,9 @@ dependencies {
     // ===== Preferences =====
     implementation(libs.androidx.preference.ktx)
 
+    // ===== WebView 安全增强（技能插件系统：DOCUMENT_START_SCRIPT 垫片注入）=====
+    implementation(libs.androidx.webkit)
+
     // ===== Debug 工具 =====
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)

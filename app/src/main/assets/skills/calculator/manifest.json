@@ -1,0 +1,13 @@
+{
+  "manifest_version": 1,
+  "id": "com.ziyou.skill.calculator",
+  "name": "计算器",
+  "version": "1.0.0",
+  "min_host_api": 1,
+  "author": "字由官方",
+  "description": "四则运算计算器，结果一键上屏",
+  "icon_text": "🧮",
+  "entry": "index.html",
+  "panel_mode": "embed",
+  "permissions": []
+}

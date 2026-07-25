@@ -86,6 +86,8 @@ object KeyCode {
     const val KEYCODE_SWITCH_NUMBER_MODE = -103
     /** 用于内部标识悬浮/停靠形态切换（游戏悬浮键盘） */
     const val KEYCODE_TOGGLE_FLOATING = -104
+    /** 用于内部标识技能面板开关（技能插件系统） */
+    const val KEYCODE_SKILL_PANEL = -105
 
     /**
      * 将Android KeyEvent的keyCode转换为Rime keysym

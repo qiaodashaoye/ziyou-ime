@@ -269,13 +269,14 @@ class NineGridBottomBarView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : BaseKeyboardView(context, attrs, defStyleAttr) {
 
-    /** 底栏行：中英转换 + 中数切换 + 数字 0 + 空格 + 悬浮切换 + 回车
-     *  总权重保持 4.6 不变（与 forcedUnitWidth 对齐机制兼容），空格让出宽度给「浮」键 */
+    /** 底栏行：中英转换 + 中数切换 + 数字 0 + 空格 + 技能面板 + 悬浮切换 + 回车
+     *  总权重保持 4.6 不变（与 forcedUnitWidth 对齐机制兼容），前四键让出宽度给「技」键 */
     private val bottomRow = listOf(
-        Key("英", KeyCode.KEYCODE_SWITCH_LANGUAGE, 0.8f, isFunctional = true),
-        Key("数", KeyCode.KEYCODE_SWITCH_NUMBER_MODE, 0.8f, isFunctional = true),
-        Key("0", '0'.code, 0.8f),
-        Key("空格", KeyCode.XK_space, 0.9f),
+        Key("英", KeyCode.KEYCODE_SWITCH_LANGUAGE, 0.7f, isFunctional = true),
+        Key("数", KeyCode.KEYCODE_SWITCH_NUMBER_MODE, 0.7f, isFunctional = true),
+        Key("0", '0'.code, 0.7f),
+        Key("空格", KeyCode.XK_space, 0.7f),
+        Key("技", KeyCode.KEYCODE_SKILL_PANEL, 0.5f, isFunctional = true),
         Key("浮", KeyCode.KEYCODE_TOGGLE_FLOATING, 0.5f, isFunctional = true),
         Key("\u23CE", KeyCode.XK_Return, 0.8f, isFunctional = true)
     )
@@ -304,6 +305,10 @@ class NineGridBottomBarView @JvmOverloads constructor(
             // 悬浮/停靠形态切换：交由 Service 重建输入视图
             KeyCode.KEYCODE_TOGGLE_FLOATING -> {
                 onKeyPress?.invoke(KeyCode.KEYCODE_TOGGLE_FLOATING, 0)
+            }
+            // 技能面板开关：交由 Service 装载/关闭技能面板
+            KeyCode.KEYCODE_SKILL_PANEL -> {
+                onKeyPress?.invoke(KeyCode.KEYCODE_SKILL_PANEL, 0)
             }
             else -> {
                 if (handleCommonKey(key)) return

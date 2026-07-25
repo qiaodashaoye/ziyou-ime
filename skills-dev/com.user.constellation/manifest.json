@@ -1,0 +1,14 @@
+{
+  "manifest_version": 1,
+  "id": "com.user.constellation",
+  "name": "星座查询",
+  "version": "1.2",
+  "min_host_api": 2,
+  "author": "字由用户",
+  "description": "输入星座名称查询详细介绍，支持查询历史，结果一键发送",
+  "icon_text": "♈",
+  "entry": "index.html",
+  "panel_mode": "embed",
+  "needs_input": true,
+  "permissions": ["storage"]
+}

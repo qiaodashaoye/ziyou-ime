@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'none'">
+<title>星座查询</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; background: transparent; font-family: sans-serif; }
+  .wrap { display: flex; flex-direction: column; height: 100%; padding: 6px; gap: 5px; }
+
+  /* 输入行：needs_input 路由输入框 + 查询按钮 */
+  .input-row { display: flex; gap: 4px; flex: 0 0 auto; }
+  #sign-input {
+    flex: 1; border: 1px solid rgba(127,127,127,.4); border-radius: 6px;
+    padding: 7px 10px; font-size: 14px; background: rgba(127,127,127,.08);
+    color: inherit; outline: none; caret-color: transparent;
+  }
+  #sign-input.routing { border-color: #7B1FA2; box-shadow: 0 0 0 1px #7B1FA2; }
+  #go {
+    border: none; border-radius: 6px; padding: 0 16px; font-size: 14px;
+    background: #7B1FA2; color: #fff;
+  }
+  #go:active { opacity: .8; }
+
+  /* 查询历史快捷片（storage 持久化） */
+  .history { display: flex; gap: 4px; overflow-x: auto; flex: 0 0 auto; }
+  .history:empty { display: none; }
+  .history button {
+    flex: 0 0 auto; border: none; border-radius: 12px; padding: 4px 12px;
+    font-size: 12px; background: rgba(127,127,127,.15); color: inherit;
+  }
+  .history button:active { background: rgba(127,127,127,.35); }
+
+  /* 结果区：查询后 flex 撑满剩余空间（输入区视觉上"缩回"，为介绍腾位） */
+  #result {
+    flex: 1; border-radius: 8px; padding: 8px 10px; font-size: 14px;
+    line-height: 1.55; background: rgba(127,127,127,.12);
+    overflow-y: auto; white-space: pre-wrap;
+  }
+  #result .title { font-size: 15px; font-weight: bold; margin-bottom: 3px; }
+  #result .err { opacity: .75; }
+
+  /* 发送按钮：仅结果就绪后显示 */
+  #send {
+    flex: 0 0 32px; border: none; border-radius: 6px; font-size: 14px;
+    background: #1976D2; color: #fff; display: none;
+  }
+  #send.show { display: block; }
+  #send:active { opacity: .8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="input-row">
+    <input id="sign-input" placeholder="点此输入星座名，用下方键盘打字" readonly>
+    <button id="go">查询</button>
+  </div>
+  <div class="history" id="history"></div>
+  <div id="result">输入星座名称（如：白羊、狮子座）后点击查询</div>
+  <button id="send">发送到输入框</button>
+</div>
+<script src="script.js"></script>
+</body>
+</html>

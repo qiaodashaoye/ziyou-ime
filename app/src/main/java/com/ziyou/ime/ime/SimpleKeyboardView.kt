@@ -16,7 +16,7 @@ import android.util.AttributeSet
  * [q][w][e][r][t][y][u][i][o][p]
  *  [a][s][d][f][g][h][j][k][l]
  * [⇧] [z][x][c][v][b][n][m] [⌫]
- * [九][中/英][   空格   ][浮][.][↵]
+ * [九][中/英][   空格   ][技][浮][.][↵]
  */
 class SimpleKeyboardView @JvmOverloads constructor(
     context: Context,
@@ -53,7 +53,8 @@ class SimpleKeyboardView @JvmOverloads constructor(
     private val row4 = listOf(
         Key("九", KeyCode.KEYCODE_SWITCH_KEYBOARD, 1.5f, isFunctional = true),
         Key("中", KeyCode.KEYCODE_SWITCH_LANGUAGE, 1.2f, isFunctional = true),
-        Key("空格", KeyCode.XK_space, 3.6f),
+        Key("空格", KeyCode.XK_space, 2.6f),
+        Key("技", KeyCode.KEYCODE_SKILL_PANEL, 1f, isFunctional = true),
         Key("浮", KeyCode.KEYCODE_TOGGLE_FLOATING, 1f, isFunctional = true),
         Key(".", '.'.code, 1f),
         Key("↵", KeyCode.XK_Return, 1.7f, isFunctional = true)
@@ -106,6 +107,9 @@ class SimpleKeyboardView @JvmOverloads constructor(
 
             // 悬浮/停靠形态切换：交由 Service 重建输入视图
             KeyCode.KEYCODE_TOGGLE_FLOATING -> onKeyPress?.invoke(KeyCode.KEYCODE_TOGGLE_FLOATING, 0)
+
+            // 技能面板开关：交由 Service 装载/关闭技能面板
+            KeyCode.KEYCODE_SKILL_PANEL -> onKeyPress?.invoke(KeyCode.KEYCODE_SKILL_PANEL, 0)
 
             else -> {
                 // 中英文切换 / 符号键盘等共用逻辑

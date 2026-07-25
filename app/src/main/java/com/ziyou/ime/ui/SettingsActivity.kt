@@ -189,6 +189,15 @@ class SettingsActivity : AppCompatActivity() {
         ))
         rootLayout.addView(createDivider())
 
+        // ===== 技能插件 =====
+        rootLayout.addView(createSectionHeader("技能"))
+        rootLayout.addView(createSettingItem(
+            title = "技能插件",
+            summary = "管理键盘「技」键唤出的技能，导入 .skill 技能包",
+            onClick = { startActivity(Intent(this, SkillManagerActivity::class.java)) }
+        ))
+        rootLayout.addView(createDivider())
+
         // ===== 数据同步 =====
         rootLayout.addView(createSectionHeader("数据"))
         rootLayout.addView(createSettingItem(

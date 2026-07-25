@@ -1,0 +1,13 @@
+{
+  "manifest_version": 1,
+  "id": "com.ziyou.skill.quote",
+  "name": "每日一言",
+  "version": "1.0.0",
+  "min_host_api": 1,
+  "author": "字由官方",
+  "description": "精选短句卡片，点击即上屏发送",
+  "icon_text": "📜",
+  "entry": "index.html",
+  "panel_mode": "card",
+  "permissions": ["storage"]
+}

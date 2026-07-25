@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'none'">
+<title>计算器</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; background: transparent; font-family: sans-serif; }
+  .calc { display: flex; flex-direction: column; height: 100%; padding: 4px; }
+  #display {
+    flex: 0 0 34px; line-height: 34px; text-align: right; padding: 0 10px;
+    font-size: 20px; background: rgba(127,127,127,.12); border-radius: 6px;
+    overflow: hidden; white-space: nowrap; color: inherit;
+  }
+  .grid { flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 4px; }
+  button {
+    border: none; border-radius: 6px; font-size: 17px;
+    background: rgba(127,127,127,.15); color: inherit;
+  }
+  button:active { background: rgba(127,127,127,.35); }
+  .op { background: rgba(127,127,127,.25); }
+  .send { grid-column: span 2; background: #1976D2; color: #fff; }
+</style>
+</head>
+<body>
+<div class="calc">
+  <div id="display">0</div>
+  <div class="grid">
+    <button class="op" data-k="C">C</button><button class="op" data-k="B">⌫</button>
+    <button class="op" data-k="/">÷</button><button class="op" data-k="*">×</button>
+    <button data-k="7">7</button><button data-k="8">8</button>
+    <button data-k="9">9</button><button class="op" data-k="-">−</button>
+    <button data-k="4">4</button><button data-k="5">5</button>
+    <button data-k="6">6</button><button class="op" data-k="+">+</button>
+    <button data-k="1">1</button><button data-k="2">2</button>
+    <button data-k="3">3</button><button class="op" data-k="=">=</button>
+    <button data-k="0">0</button><button data-k=".">.</button>
+    <button class="send" data-k="S">上屏</button>
+  </div>
+</div>
+<script>
+'use strict';
+var expr = '';
+var display = document.getElementById('display');
+
+function render() { display.textContent = expr === '' ? '0' : expr; }
+
+/* 无 eval 的四则运算求值（CSP 禁 unsafe-eval）：双栈算符优先 */
+function evaluate(input) {
+  var tokens = input.match(/(\d+\.?\d*|[+\-*/])/g);
+  if (!tokens) return null;
+  var values = [], ops = [];
+  var prec = { '+': 1, '-': 1, '*': 2, '/': 2 };
+  function apply() {
+    var op = ops.pop(), b = values.pop(), a = values.pop();
+    if (a === undefined || b === undefined) throw new Error('bad');
+    if (op === '+') values.push(a + b);
+    else if (op === '-') values.push(a - b);
+    else if (op === '*') values.push(a * b);
+    else { if (b === 0) throw new Error('div0'); values.push(a / b); }
+  }
+  var expectNum = true;
+  for (var i = 0; i < tokens.length; i++) {
+    var t = tokens[i];
+    if (prec[t]) {
+      if (expectNum && t === '-') { tokens[i + 1] = '-' + tokens[i + 1]; continue; } // 负号
+      if (expectNum) throw new Error('bad');
+      while (ops.length && prec[ops[ops.length - 1]] >= prec[t]) apply();
+      ops.push(t);
+      expectNum = true;
+    } else {
+      values.push(parseFloat(t));
+      expectNum = false;
+    }
+  }
+  if (expectNum) throw new Error('bad');
+  while (ops.length) apply();
+  var result = values.pop();
+  if (!isFinite(result)) throw new Error('overflow');
+  // 消浮点尾差：最多保留 10 位小数并去尾零
+  return parseFloat(result.toFixed(10)).toString();
+}
+
+function calc() {
+  try {
+    var result = evaluate(expr);
+    if (result !== null) { expr = result; render(); }
+  } catch (e) {
+    display.textContent = '错误';
+    expr = '';
+  }
+}
+
+document.querySelector('.grid').addEventListener('click', function (e) {
+  var k = e.target.getAttribute('data-k');
+  if (!k) return;
+  IMESkill.haptic();
+  if (k === 'C') { expr = ''; render(); }
+  else if (k === 'B') { expr = expr.slice(0, -1); render(); }
+  else if (k === '=') { calc(); }
+  else if (k === 'S') {
+    calc();
+    if (expr !== '') IMESkill.sendText(expr);
+  }
+  else { expr += k; render(); }
+});
+render();
+</script>
+</body>
+</html>

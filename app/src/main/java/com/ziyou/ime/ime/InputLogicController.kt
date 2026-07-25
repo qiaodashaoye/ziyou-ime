@@ -60,6 +60,28 @@ class InputLogicController(
     }
 
     /**
+     * 上屏目标抽象（技能插件系统 Phase 3 输入路由）。
+     *
+     * 默认（[commitTarget] 为 null）直达宿主编辑器 [InputConnection]；
+     * 技能面板申请输入焦点后切到面板目标（文本经 JS 注入面板输入框）。
+     * Rime 编码/候选/选词全链路不变，仅最后一步 commit 落点不同。
+     */
+    interface CommitTarget {
+        /** 提交文本到目标 */
+        fun commit(text: CharSequence)
+
+        /** 退格（Rime 无编码可删时的直接删字） */
+        fun deleteBackward()
+    }
+
+    /**
+     * 非空时上屏文本改道注入该目标（技能面板输入框）；null = 默认宿主编辑器。
+     * 仅在主线程读写（技能面板开关与 Bridge 均在主线程）。
+     */
+    @Volatile
+    var commitTarget: CommitTarget? = null
+
+    /**
      * 核心按键处理：将按键发送给 Rime 引擎并处理返回结果。
      * 被 Rime 消费则取 commit 文本上屏 + 刷新 UI；未消费则退格删字符或可打印字符直接上屏。
      */
@@ -83,10 +105,15 @@ class InputLogicController(
             } else {
                 // Rime未消费，某些键可能需要直接输出
                 when {
-                    // 退格键：Rime无编码可删时，直接删除编辑器中的字符
+                    // 退格键：Rime无编码可删时，直接删除目标（编辑器/技能面板）中的字符
                     keyCode == KeyCode.XK_BackSpace -> {
-                        callbacks.currentInputConnection()?.deleteSurroundingText(1, 0)
-                        Log.d(TAG, "直接删除: deleteSurroundingText(1, 0)")
+                        val target = commitTarget
+                        if (target != null) {
+                            target.deleteBackward()
+                        } else {
+                            callbacks.currentInputConnection()?.deleteSurroundingText(1, 0)
+                        }
+                        Log.d(TAG, "直接删除: deleteBackward (target=${target != null})")
                     }
                     // 可打印字符且Rime未处理，直接提交
                     keyCode in 0x20..0x7E && mask == 0 -> {
@@ -187,11 +214,16 @@ class InputLogicController(
     }
 
     /**
-     * 统一的文本上屏出口：提交到编辑器并做等级计分埋点。
-     * 计分仅统计 Unicode 码点数（脱敏，不触碰内容）；处于输入热路径，
-     * [LevelStats.onCommit] 内部仅做 O(1) 内存自增，达阈值才后台异步落盘。
+     * 统一的文本上屏出口：按 [commitTarget] 路由到技能面板或宿主编辑器。
+     * 编辑器路径做等级计分埋点（仅统计 Unicode 码点数，脱敏不触碰内容）；
+     * 面板路径不计分（文本未真正发送给应用）。
      */
     private fun commitAndCount(text: CharSequence) {
+        val target = commitTarget
+        if (target != null) {
+            target.commit(text)
+            return
+        }
         callbacks.currentInputConnection()?.commitText(text, 1)
         if (text.isNotEmpty()) {
             LevelStats.onCommit(Character.codePointCount(text, 0, text.length))

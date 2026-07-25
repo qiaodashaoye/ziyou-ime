@@ -1,0 +1,15 @@
+{
+  "manifest_version": 1,
+  "id": "com.ziyou.skill.weather",
+  "name": "天气查询",
+  "version": "1.1.0",
+  "min_host_api": 2,
+  "author": "字由官方",
+  "description": "输入或选择城市查询实时天气，结果一键发送",
+  "icon_text": "🌤",
+  "entry": "index.html",
+  "panel_mode": "card",
+  "needs_input": true,
+  "permissions": ["network", "storage"],
+  "network_domains": ["wttr.in"]
+}

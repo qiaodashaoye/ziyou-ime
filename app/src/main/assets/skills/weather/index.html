@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'none'">
+<title>天气</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; background: transparent; font-family: sans-serif; }
+  .wrap { display: flex; flex-direction: column; height: 100%; padding: 6px; gap: 6px; }
+  .input-row { display: flex; gap: 4px; }
+  #city {
+    flex: 1; border: 1px solid rgba(127,127,127,.4); border-radius: 6px;
+    padding: 8px 10px; font-size: 15px; background: rgba(127,127,127,.08); color: inherit;
+    outline: none; caret-color: transparent;
+  }
+  #city.routing { border-color: #1976D2; box-shadow: 0 0 0 1px #1976D2; }
+  .input-row button {
+    border: none; border-radius: 6px; padding: 0 16px; font-size: 14px;
+    background: #1976D2; color: #fff;
+  }
+  .chips { display: flex; gap: 4px; overflow-x: auto; }
+  .chips button { flex: 0 0 auto; border: none; border-radius: 12px; padding: 5px 12px;
+                  font-size: 13px; background: rgba(127,127,127,.15); color: inherit; }
+  .chips button:active { background: rgba(127,127,127,.35); }
+  #result { flex: 1; border-radius: 8px; padding: 8px 12px; font-size: 15px;
+            line-height: 1.5; background: rgba(127,127,127,.12); overflow-y: auto; }
+  .hint { font-size: 11px; opacity: .55; margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <!-- 自定义城市输入：点击后经 input.requestFocus 把键盘上屏文本路由进本输入框 -->
+  <div class="input-row">
+    <input id="city" placeholder="点此输入城市，用下方键盘打字" readonly>
+    <button id="go">查询</button>
+  </div>
+  <div class="chips" id="chips"></div>
+  <div id="result">输入或选择城市查询实时天气</div>
+</div>
+<script>
+'use strict';
+var PRESETS = ['北京', '上海', '广州', '深圳', '杭州', '成都', '武汉', '西安'];
+var cityInput = document.getElementById('city');
+var resultEl = document.getElementById('result');
+var lastText = null;
+
+// ── 输入路由（needs_input 分栏布局下键盘保持可用）──
+// readonly 阻止 WebView 自身的假光标/系统焦点行为；真实输入全部由宿主注入，
+// 垫片按 value + 光标位置插入（readonly 不影响脚本写 value）。
+cityInput.addEventListener('click', function () {
+  IMESkill.input.requestFocus('city').then(function () {
+    cityInput.classList.add('routing');   // 视觉焦点态：键盘文本正路由到本框
+  }).catch(function (e) {
+    resultEl.textContent = '输入路由不可用：' + e.message;
+  });
+});
+
+function releaseRouting() {
+  cityInput.classList.remove('routing');
+  IMESkill.input.releaseFocus();
+}
+
+// ── 预设城市快捷片 ──
+PRESETS.forEach(function (city) {
+  var btn = document.createElement('button');
+  btn.textContent = city;
+  btn.addEventListener('click', function () {
+    IMESkill.haptic();
+    cityInput.value = city;
+    releaseRouting();
+    query(city);
+  });
+  document.getElementById('chips').appendChild(btn);
+});
+
+document.getElementById('go').addEventListener('click', function () {
+  IMESkill.haptic();
+  releaseRouting();
+  var city = cityInput.value.trim();
+  if (city) query(city);
+});
+
+async function query(city) {
+  resultEl.textContent = '查询中…';
+  lastText = null;
+  IMESkill.storage.set('last_city', city);
+  try {
+    // wttr.in 支持中文城市名；format=3 返回单行 "北京: ⛅️ +11°C"（必须走宿主代理）
+    var resp = await IMESkill.fetch(
+      'https://wttr.in/' + encodeURIComponent(city) + '?format=3&m');
+    if (resp.status !== 200) throw new Error('HTTP ' + resp.status);
+    lastText = resp.body.trim();
+    resultEl.innerHTML = '';
+    var line = document.createElement('div');
+    line.textContent = lastText;               // 用 textContent，勿拼 HTML（防注入）
+    var hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.textContent = '点击发送到聊天框';
+    resultEl.appendChild(line);
+    resultEl.appendChild(hint);
+  } catch (e) {
+    resultEl.textContent = '查询失败：' + e.message;
+  }
+}
+
+// 点击结果 → 上屏（宿主会先自动复位输入路由，确保文本直达聊天框并收起面板）
+resultEl.addEventListener('click', function () {
+  if (lastText) IMESkill.sendText(lastText);
+});
+
+// 恢复上次查询的城市
+IMESkill.storage.get('last_city').then(function (saved) {
+  if (saved) {
+    cityInput.value = saved;
+    query(saved);
+  }
+}).catch(function () { });
+</script>
+</body>
+</html>
