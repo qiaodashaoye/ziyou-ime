@@ -110,6 +110,20 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
     /** preedit 编码文本（编码区已移至候选栏，此处保留以兼容调用方） */
     protected var compositionText: String? = null
 
+    /**
+     * 全局缩放因子（悬浮模式用）。影响按键高度/间距/圆角/内边距与文字大小，
+     * 按键宽度随容器自适应无需缩放。默认 1.0，停靠模式零影响。
+     */
+    var scaleFactor: Float = 1f
+        set(value) {
+            if (field != value) {
+                field = value
+                applyScale()
+                requestLayout()
+                invalidate()
+            }
+        }
+
     /** 当前主题（默认取用户已保存的主题） */
     protected var theme: KeyboardTheme = ThemeManager.getCurrentTheme(context)
 
@@ -196,6 +210,23 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
         isHapticFeedbackEnabled = true
         rebuildPaints()
     }
+
+    // ===== 缩放 =====
+
+    /** 按当前 [scaleFactor] 重算尺寸缓存与文字画笔（dp2px/sp2px 已含因子） */
+    private fun applyScale() {
+        keyHeight = dp2px(KEY_HEIGHT_DP.toFloat())
+        keyGap = dp2px(KEY_GAP_DP.toFloat())
+        keyRadius = dp2px(KEY_RADIUS_DP)
+        keyboardPadding = dp2px(KEYBOARD_PADDING_DP.toFloat())
+        keyTextPaint.textSize = sp2px(KEY_TEXT_SIZE_SP)
+        funcTextPaint.textSize = sp2px(FUNC_TEXT_SIZE_SP)
+        accentTextPaint.textSize = sp2px(FUNC_TEXT_SIZE_SP)
+        onScaleChanged()
+    }
+
+    /** 缩放因子变更回调：子类在此同步自有画笔（如九宫格数字/字母画笔）的文字大小 */
+    protected open fun onScaleChanged() {}
 
     // ===== 主题 =====
 
@@ -461,8 +492,9 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
 
     // ===== 工具 =====
 
-    protected fun dp2px(dp: Float): Float = dp * resources.displayMetrics.density
-    protected fun sp2px(sp: Float): Float = sp * resources.displayMetrics.scaledDensity
+    // 单位换算已叠加缩放因子：悬浮模式下基类与子类的所有 dp/sp 尺寸统一缩放
+    protected fun dp2px(dp: Float): Float = dp * resources.displayMetrics.density * scaleFactor
+    protected fun sp2px(sp: Float): Float = sp * resources.displayMetrics.scaledDensity * scaleFactor
 
     private fun fillPaint() = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
 

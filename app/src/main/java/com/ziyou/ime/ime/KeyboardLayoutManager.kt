@@ -46,21 +46,42 @@ class KeyboardLayoutManager(
     }
 
     /**
-     * 安装指定类型的键盘到容器，完成回调绑定、主题与布局组装。
+     * 安装指定类型的键盘到容器，完成回调绑定、主题、缩放与布局组装。
      *
-     * 九宫格布局在键盘左侧挂载 [PinyinSideBarView]（`侧栏 : 网格 ≈ 18 : 82` 权重），
+     * 停靠形态下九宫格在键盘左侧挂载 [PinyinSideBarView]（`侧栏 : 网格 ≈ 18 : 82` 权重），
      * 下方挂载全宽 [NineGridBottomBarView]，并在布局完成后同步底栏按键宽度与网格一致。
+     *
+     * 悬浮形态（[floating]=true）下九宫格改用内部完整 4 行布局（含底栏行），
+     * 不挂侧栏与独立底栏，保持悬浮面板紧凑；[scale] 为悬浮统一缩放因子。
      */
-    fun install(container: FrameLayout, type: KeyboardType): Installed {
+    fun install(
+        container: FrameLayout,
+        type: KeyboardType,
+        floating: Boolean = false,
+        scale: Float = 1f
+    ): Installed {
         val theme = ThemeManager.getCurrentTheme(context)
         val view = createKeyboardView(type).apply {
             applyTheme(theme)
+            scaleFactor = scale
             onKeyPress = { keyCode, mask -> callbacks.onKeyPress(keyCode, mask) }
             onSwitchKeyboard = { target -> callbacks.onSwitchKeyboard(target) }
             onSwitchToQwertyEnglish = { callbacks.onSwitchToQwertyEnglish() }
             onComposingPreview = { preview -> callbacks.onComposingPreview(preview) }
         }
         container.removeAllViews()
+
+        // 悬浮形态的九宫格：内部 4 行完整布局（含底栏行），无侧栏/独立底栏，
+        // 拼音消歧仍可经候选栏完成（首版简化，窄版侧栏留待二期）
+        if (floating && type == KeyboardType.NINE_GRID) {
+            (view as NineGridKeyboardView).setGridRowCount(4)
+            view.layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            )
+            container.addView(view)
+            return Installed(view, null, null)
+        }
 
         if (type != KeyboardType.NINE_GRID) {
             view.layoutParams = FrameLayout.LayoutParams(

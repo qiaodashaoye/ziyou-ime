@@ -36,6 +36,20 @@ class PreeditOverlayView @JvmOverloads constructor(
     /** 当前显示的编码文本 */
     private var displayText: String? = null
 
+    /**
+     * 全局缩放因子（悬浮模式用）：同步缩小视图高度与编码字号，
+     * 与键盘/候选视图的 scaleFactor 保持一致。默认 1.0，停靠模式零影响。
+     */
+    var scaleFactor: Float = 1f
+        set(value) {
+            if (field != value) {
+                field = value
+                textPaint.textSize = sp2px(TEXT_SIZE_SP)
+                requestLayout()
+                invalidate()
+            }
+        }
+
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = sp2px(TEXT_SIZE_SP)
         color = Color.parseColor("#666666")
@@ -88,9 +102,9 @@ class PreeditOverlayView @JvmOverloads constructor(
         canvas.drawText(text, dp2px(PADDING_H_DP.toFloat()), baseline, textPaint)
     }
 
-    // ===== 单位转换工具 =====
+    // ===== 单位转换工具（已叠加缩放因子，悬浮模式下尺寸统一缩放） =====
 
-    private fun dp2px(dp: Float): Float = dp * resources.displayMetrics.density
+    private fun dp2px(dp: Float): Float = dp * resources.displayMetrics.density * scaleFactor
 
-    private fun sp2px(sp: Float): Float = sp * resources.displayMetrics.scaledDensity
+    private fun sp2px(sp: Float): Float = sp * resources.displayMetrics.scaledDensity * scaleFactor
 }

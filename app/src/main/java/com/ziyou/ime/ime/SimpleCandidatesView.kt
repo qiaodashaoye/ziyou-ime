@@ -47,6 +47,24 @@ class SimpleCandidatesView @JvmOverloads constructor(
     /** 翻页回调：true=下一页, false=上一页 */
     var onPageChange: ((forward: Boolean) -> Unit)? = null
 
+    /**
+     * 全局缩放因子（悬浮模式用）：同步缩小视图高度与候选词字号，
+     * 与键盘视图的 scaleFactor 保持一致。默认 1.0，停靠模式零影响。
+     */
+    var scaleFactor: Float = 1f
+        set(value) {
+            if (field != value) {
+                field = value
+                candidatePaint.textSize = sp2px(CANDIDATE_TEXT_SIZE_SP)
+                highlightedCandidatePaint.textSize = sp2px(CANDIDATE_TEXT_SIZE_SP)
+                predictionPaint.textSize = sp2px(CANDIDATE_TEXT_SIZE_SP)
+                minimumHeight = dp2px(VIEW_HEIGHT_DP.toFloat()).toInt()
+                recalculateLayout()
+                requestLayout()
+                invalidate()
+            }
+        }
+
     // 候选词数据
     private var candidates: Array<CandidateProto> = emptyArray()
     private var highlightIndex: Int = -1
@@ -248,9 +266,9 @@ class SimpleCandidatesView @JvmOverloads constructor(
         return 0f
     }
 
-    // ===== 单位转换工具 =====
+    // ===== 单位转换工具（已叠加缩放因子，悬浮模式下尺寸统一缩放） =====
 
-    private fun dp2px(dp: Float): Float = dp * resources.displayMetrics.density
+    private fun dp2px(dp: Float): Float = dp * resources.displayMetrics.density * scaleFactor
 
-    private fun sp2px(sp: Float): Float = sp * resources.displayMetrics.scaledDensity
+    private fun sp2px(sp: Float): Float = sp * resources.displayMetrics.scaledDensity * scaleFactor
 }

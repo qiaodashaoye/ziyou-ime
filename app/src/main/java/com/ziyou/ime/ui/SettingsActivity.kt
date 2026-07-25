@@ -12,6 +12,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.ziyou.ime.config.AssetDeployer
+import com.ziyou.ime.config.DisplayModeManager
 import com.ziyou.ime.config.ThemeManager
 import com.ziyou.ime.daemon.RimeSession
 import com.ziyou.ime.data.AssociationManager
@@ -160,6 +161,22 @@ class SettingsActivity : AppCompatActivity() {
             summary = "上屏后展示引擎预测的联想词（需启用 librime-predict 模块）",
             checked = AssociationManager.isEnabled(this),
             onChange = { enabled -> AssociationManager.setEnabled(this, enabled) }
+        ))
+        rootLayout.addView(createDivider())
+
+        // ===== 悬浮键盘（游戏场景） =====
+        rootLayout.addView(createSectionHeader("悬浮键盘"))
+        rootLayout.addView(createSwitchItem(
+            title = "悬浮键盘模式",
+            summary = "键盘缩小为可拖拽的悬浮面板，面板外触摸穿透给应用（也可经键盘上的「浮」键切换）",
+            checked = DisplayModeManager.isFloatingEnabled(this),
+            onChange = { enabled -> DisplayModeManager.setFloatingEnabled(this, enabled) }
+        ))
+        rootLayout.addView(createSwitchItem(
+            title = "横屏自动悬浮",
+            summary = "横屏输入（如游戏内聊天）时自动切换为悬浮键盘",
+            checked = DisplayModeManager.isAutoFloatInLandscape(this),
+            onChange = { enabled -> DisplayModeManager.setAutoFloatInLandscape(this, enabled) }
         ))
         rootLayout.addView(createDivider())
 

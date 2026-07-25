@@ -1,6 +1,8 @@
 package com.ziyou.ime.ime
 
 import android.content.Intent
+import android.content.res.Configuration
+import android.graphics.Rect
 import android.inputmethodservice.InputMethodService
 import android.os.SystemClock
 import android.util.Log
@@ -11,9 +13,11 @@ import android.view.inputmethod.InputConnection
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import com.ziyou.ime.config.AssetDeployer
+import com.ziyou.ime.config.DisplayModeManager
 import com.ziyou.ime.config.ThemeManager
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.core.RimeMessage
+import com.ziyou.ime.core.floating.FloatingPanelGeometry
 import com.ziyou.ime.daemon.RimeEngine
 import com.ziyou.ime.core.t9.KeyRecordStack
 import com.ziyou.ime.data.AssociationManager
@@ -71,6 +75,19 @@ class ZiYouInputMethodService : InputMethodService() {
 
     /** 当前键盘布局类型 */
     private var currentKeyboardType: KeyboardType = KeyboardType.QWERTY
+
+    /** 当前显示形态（停靠 / 悬浮），与键盘布局正交 */
+    private var currentDisplayMode: DisplayMode = DisplayMode.DOCKED
+
+    /**
+     * 本次服务生命周期内的手动形态覆盖。
+     * 用户经「浮」键/停靠按钮手动切换后优先于「横屏自动悬浮」开关，
+     * 避免手动停靠后下个输入会话又被自动切回悬浮。
+     */
+    private var manualModeOverride: DisplayMode? = null
+
+    /** 悬浮形态的根容器（仅 FLOATING 下非空），供 onComputeInsets 裁剪触摸区域 */
+    private var floatingContainer: FloatingPanelContainer? = null
 
     /** 进入九宫格（T9）前的方案 id，用于退出时恢复 */
     private var schemeBeforeT9: String? = null
@@ -153,14 +170,27 @@ class ZiYouInputMethodService : InputMethodService() {
      * 候选词列表 [SimpleCandidatesView] 在下方独立滚动，实现编码区与候选词的职责分离。
      * 不使用 onCreateCandidatesView()——该 API 的系统级显隐控制不可靠，
      * 将候选词放在 onCreateInputView() 内可确保始终可见。
+     *
+     * 显示形态（[DisplayMode]）在此解析：FLOATING 时内容被包裹进
+     * [FloatingPanelContainer] 悬浮面板，面板外触摸经 onComputeInsets 裁剪后穿透。
      */
     override fun onCreateInputView(): View {
         Log.d(TAG, "onCreateInputView")
+        currentDisplayMode = resolveDisplayMode()
+        return buildInputView(currentDisplayMode)
+    }
 
+    /**
+     * 按显示形态构建完整输入视图（候选容器 + 键盘容器，FLOATING 时外套悬浮面板）。
+     * 形态切换（[switchDisplayMode]）时也经本方法重建，与 onCreateInputView 同源。
+     */
+    private fun buildInputView(mode: DisplayMode): View {
         val theme = ThemeManager.getCurrentTheme(this)
+        // 悬浮形态下键盘/候选/编码区统一缩放，停靠形态保持 1.0 零影响
+        val scale = if (mode == DisplayMode.FLOATING) DisplayModeManager.FLOATING_SCALE else 1f
 
-        // 创建根容器：垂直LinearLayout
-        val rootLayout = LinearLayout(this).apply {
+        // 内容根容器：垂直 LinearLayout（停靠形态直接作为输入视图根）
+        val contentLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -182,6 +212,7 @@ class ZiYouInputMethodService : InputMethodService() {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
+            scaleFactor = scale
             applyTheme(theme)
         }
         candidatesContainer.addView(preeditOverlay)
@@ -191,13 +222,14 @@ class ZiYouInputMethodService : InputMethodService() {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
+            scaleFactor = scale
             onCandidateClick = { index -> handleCandidateClick(index) }
             onPageChange = { forward -> handlePageChange(forward) }
             applyTheme(theme)
         }
         candidatesContainer.addView(candidatesView)
 
-        rootLayout.addView(candidatesContainer)
+        contentLayout.addView(candidatesContainer)
 
         // 键盘容器（底部）：承载可切换的键盘视图
         keyboardContainer = FrameLayout(this).apply {
@@ -206,14 +238,98 @@ class ZiYouInputMethodService : InputMethodService() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
         }
-        rootLayout.addView(keyboardContainer)
+        contentLayout.addView(keyboardContainer)
 
-        // 按上次保存的布局创建键盘
+        // 按上次保存的布局创建键盘（installKeyboard 内部按 currentDisplayMode 适配悬浮）
         currentKeyboardType = loadKeyboardType()
         installKeyboard(currentKeyboardType)
 
-        return rootLayout
+        // 悬浮形态：内容包裹进悬浮面板容器（拖拽/位置持久化/停靠按钮）
+        return if (mode == DisplayMode.FLOATING) {
+            FloatingPanelContainer(this, contentLayout, theme).also { container ->
+                container.onRequestDock = { switchDisplayMode(DisplayMode.DOCKED) }
+                floatingContainer = container
+            }
+        } else {
+            floatingContainer = null
+            contentLayout
+        }
     }
+
+    // ===== 显示形态（停靠 / 悬浮） =====
+
+    /**
+     * 解析当前应生效的显示形态：
+     * 手动覆盖（本次服务生命周期内） > 悬浮总开关 > 横屏自动悬浮。
+     */
+    private fun resolveDisplayMode(): DisplayMode {
+        manualModeOverride?.let { return it }
+        val landscape =
+            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val floating = DisplayModeManager.isFloatingEnabled(this) ||
+            (landscape && DisplayModeManager.isAutoFloatInLandscape(this))
+        return if (floating) DisplayMode.FLOATING else DisplayMode.DOCKED
+    }
+
+    /**
+     * 切换显示形态：重建输入视图并持久化开关。
+     * 仅重建视图层，Rime 编码/方案/ascii_mode 等引擎状态不受影响，
+     * 重建后经 applyEngineForKeyboard 把状态回写到新视图。
+     */
+    private fun switchDisplayMode(target: DisplayMode) {
+        if (target == currentDisplayMode) return
+        keyboardView?.resetInputState()
+        manualModeOverride = target
+        DisplayModeManager.setFloatingEnabled(this, target == DisplayMode.FLOATING)
+        currentDisplayMode = target
+        setInputView(buildInputView(target))
+        serviceScope.launch {
+            try {
+                if (!awaitEngineReady(KEY_ENGINE_READY_TIMEOUT_MS)) return@launch
+                applyEngineForKeyboard(currentKeyboardType)
+            } catch (e: Exception) {
+                Log.w(TAG, "切换显示形态后同步状态异常: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 悬浮形态的窗口 insets：内容 inset 压到容器底部（宿主应用视键盘高度为 0，
+     * 游戏画面不被顶起），触摸区域裁剪为悬浮面板矩形，面板外触摸穿透给下层应用。
+     * 拖动中的 translation 位移会触发绘制遍历，系统随之重新回调本方法，
+     * 触摸区域与面板位置实时同步。几何计算委托 [FloatingPanelGeometry]（纯逻辑可单测）。
+     */
+    override fun onComputeInsets(outInsets: Insets) {
+        super.onComputeInsets(outInsets)
+        if (currentDisplayMode != DisplayMode.FLOATING) return
+        val container = floatingContainer ?: return
+        val panelRect = Rect()
+        // 面板尚未完成布局时回退默认 insets，避免空触摸区域吞掉所有触摸
+        if (!container.getPanelRectInWindow(panelRect)) return
+        val containerLoc = IntArray(2)
+        container.getLocationInWindow(containerLoc)
+        val spec = FloatingPanelGeometry.computeInsets(
+            containerTopInWindow = containerLoc[1],
+            containerHeight = container.height,
+            panelLeftInWindow = panelRect.left,
+            panelTopInWindow = panelRect.top,
+            panelWidth = panelRect.width(),
+            panelHeight = panelRect.height()
+        )
+        outInsets.contentTopInsets = spec.contentTopInset
+        outInsets.visibleTopInsets = spec.contentTopInset
+        outInsets.touchableInsets = Insets.TOUCHABLE_INSETS_REGION
+        outInsets.touchableRegion.set(
+            spec.touchableLeft, spec.touchableTop, spec.touchableRight, spec.touchableBottom
+        )
+    }
+
+    /**
+     * 始终禁用全屏提取模式（extract mode）：
+     * 横屏下系统默认会用全屏输入框替代应用画面，这是游戏内打字体验差的主因；
+     * 悬浮形态必须禁用，停靠形态禁用后横屏也能看到原应用界面（体验修复）。
+     */
+    override fun onEvaluateFullscreenMode(): Boolean = false
 
     // ===== 键盘布局管理 =====
 
@@ -233,11 +349,14 @@ class ZiYouInputMethodService : InputMethodService() {
 
     /**
      * 安装指定类型的键盘到容器，并同步当前视图引用。
-     * 键盘视图创建与九宫格复合布局的组装细节委托 [KeyboardLayoutManager]。
+     * 键盘视图创建与九宫格复合布局的组装细节委托 [KeyboardLayoutManager]；
+     * 悬浮形态下传入 floating 标志与统一缩放因子。
      */
     private fun installKeyboard(type: KeyboardType) {
         val container = keyboardContainer ?: return
-        val installed = keyboardLayoutManager.install(container, type)
+        val floating = currentDisplayMode == DisplayMode.FLOATING
+        val scale = if (floating) DisplayModeManager.FLOATING_SCALE else 1f
+        val installed = keyboardLayoutManager.install(container, type, floating, scale)
         keyboardView = installed.keyboardView
         pinyinSideBar = installed.pinyinSideBar
         nineGridBottomBar = installed.nineGridBottomBar
@@ -371,6 +490,13 @@ class ZiYouInputMethodService : InputMethodService() {
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         Log.d(TAG, "onStartInputView restarting=$restarting")
+
+        // 重新解析显示形态（横屏自动悬浮 / 设置页开关变更），不一致则重建输入视图
+        val resolved = resolveDisplayMode()
+        if (resolved != currentDisplayMode) {
+            currentDisplayMode = resolved
+            setInputView(buildInputView(resolved))
+        }
 
         serviceScope.launch {
             try {
@@ -506,6 +632,16 @@ class ZiYouInputMethodService : InputMethodService() {
                         Log.e(TAG, "切换中数模式异常: ${e.message}", e)
                     }
                 }
+            }
+
+            // 悬浮/停靠形态切换（游戏悬浮键盘）：重建输入视图，引擎状态不受影响
+            KeyCode.KEYCODE_TOGGLE_FLOATING -> {
+                val target = if (currentDisplayMode == DisplayMode.FLOATING) {
+                    DisplayMode.DOCKED
+                } else {
+                    DisplayMode.FLOATING
+                }
+                switchDisplayMode(target)
             }
 
             // 符号键盘切换（暂未实现完整符号键盘）
@@ -691,6 +827,7 @@ class ZiYouInputMethodService : InputMethodService() {
         preeditOverlay = null
         pinyinSideBar = null
         nineGridBottomBar = null
+        floatingContainer = null
         super.onDestroy()
     }
 }

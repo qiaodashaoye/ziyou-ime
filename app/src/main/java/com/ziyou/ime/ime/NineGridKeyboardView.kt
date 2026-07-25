@@ -16,7 +16,7 @@ import com.ziyou.ime.core.CompositionProto
  * [1]      [2 ABC]  [3 DEF]  [⌫]
  * [4 GHI]  [5 JKL]  [6 MNO]  [重输]
  * [7 PQRS] [8 TUV]  [9 WXYZ] [符]
- * [全/中]  [中/数]  [0]      [ 空格 ] [⏎]
+ * [全/中]  [中/数]  [0]  [空格] [浮] [⏎]
  *
  * 其中前三行为标准 T9 数字键网格，逐行读作 123 / 456 / 789。
  * 底栏横跨全宽，包含中英文切换、中文/数字切换、数字 0、空格和换行/确认。
@@ -76,12 +76,14 @@ class NineGridKeyboardView @JvmOverloads constructor(
         Key("符", KeyCode.KEYCODE_SYMBOL, 0.6f, isFunctional = true)
     )
 
-    /** 第 4 行（底栏）：中英转换 + 中数切换 + 数字 0 + 空格 + 换行/确认 */
+    /** 第 4 行（底栏）：中英转换 + 中数切换 + 数字 0 + 空格 + 悬浮切换 + 换行/确认
+     *  （仅悬浮形态下作为内部第 4 行使用；停靠形态由独立的 NineGridBottomBarView 全宽渲染） */
     private val row4 = listOf(
         Key("英", KeyCode.KEYCODE_SWITCH_LANGUAGE, 0.8f, isFunctional = true),
         Key("数", KeyCode.KEYCODE_SWITCH_NUMBER_MODE, 0.8f, isFunctional = true),
         Key("0", '0'.code, 0.8f),
-        Key("空格", KeyCode.XK_space, 1.4f),
+        Key("空格", KeyCode.XK_space, 0.9f),
+        Key("浮", KeyCode.KEYCODE_TOGGLE_FLOATING, 0.5f, isFunctional = true),
         Key("\u23CE", KeyCode.XK_Return, 0.8f, isFunctional = true)
     )
 
@@ -140,6 +142,12 @@ class NineGridKeyboardView @JvmOverloads constructor(
         super.applyTheme(newTheme)
         letterPaint.apply { color = theme.keyTextColor; alpha = 160 }
         digitPaint.color = theme.keyTextColor
+    }
+
+    /** 悬浮缩放时同步九宫格自有画笔（数字/字母）的文字大小 */
+    override fun onScaleChanged() {
+        letterPaint.textSize = sp2px(LETTER_TEXT_SIZE_SP)
+        digitPaint.textSize = sp2px(DIGIT_TEXT_SIZE_SP)
     }
 
     // ===== 显示文本 =====
@@ -205,6 +213,10 @@ class NineGridKeyboardView @JvmOverloads constructor(
             KeyCode.KEYCODE_SWITCH_NUMBER_MODE -> {
                 onKeyPress?.invoke(KeyCode.KEYCODE_SWITCH_NUMBER_MODE, 0)
             }
+            // 悬浮/停靠形态切换：交由 Service 重建输入视图
+            KeyCode.KEYCODE_TOGGLE_FLOATING -> {
+                onKeyPress?.invoke(KeyCode.KEYCODE_TOGGLE_FLOATING, 0)
+            }
             // 重输：发送 Escape 清除当前编码
             ESCAPE_CODE -> sendKey(KeyCode.XK_Escape, 0)
             // 其他功能键（符号、退格、换行等）
@@ -243,7 +255,7 @@ class NineGridKeyboardView @JvmOverloads constructor(
 /**
  * 九宫格底栏视图（全宽单行）。
  *
- * 底栏包含：全键盘切换、中英文切换、数字 0、空格、回车。
+ * 底栏包含：全键盘切换、中英文切换、数字 0、空格、悬浮切换、回车。
  * 与上方 3×3 网格分离为独立视图，以便：
  * - 侧栏高度只匹配上方三行（底部对齐数字键行）
  * - 底栏横跨屏幕全宽，延伸至屏幕最左侧边缘
@@ -257,12 +269,14 @@ class NineGridBottomBarView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : BaseKeyboardView(context, attrs, defStyleAttr) {
 
-    /** 底栏行：中英转换 + 中数切换 + 数字 0 + 空格 + 回车 */
+    /** 底栏行：中英转换 + 中数切换 + 数字 0 + 空格 + 悬浮切换 + 回车
+     *  总权重保持 4.6 不变（与 forcedUnitWidth 对齐机制兼容），空格让出宽度给「浮」键 */
     private val bottomRow = listOf(
         Key("英", KeyCode.KEYCODE_SWITCH_LANGUAGE, 0.8f, isFunctional = true),
         Key("数", KeyCode.KEYCODE_SWITCH_NUMBER_MODE, 0.8f, isFunctional = true),
         Key("0", '0'.code, 0.8f),
-        Key("空格", KeyCode.XK_space, 1.4f),
+        Key("空格", KeyCode.XK_space, 0.9f),
+        Key("浮", KeyCode.KEYCODE_TOGGLE_FLOATING, 0.5f, isFunctional = true),
         Key("\u23CE", KeyCode.XK_Return, 0.8f, isFunctional = true)
     )
 
@@ -286,6 +300,10 @@ class NineGridBottomBarView @JvmOverloads constructor(
             // 避免引擎繁忙（如词库下载后重新部署）时视图与引擎状态错位
             KeyCode.KEYCODE_SWITCH_NUMBER_MODE -> {
                 onKeyPress?.invoke(KeyCode.KEYCODE_SWITCH_NUMBER_MODE, 0)
+            }
+            // 悬浮/停靠形态切换：交由 Service 重建输入视图
+            KeyCode.KEYCODE_TOGGLE_FLOATING -> {
+                onKeyPress?.invoke(KeyCode.KEYCODE_TOGGLE_FLOATING, 0)
             }
             else -> {
                 if (handleCommonKey(key)) return

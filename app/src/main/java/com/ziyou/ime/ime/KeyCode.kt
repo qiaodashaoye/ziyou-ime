@@ -84,6 +84,8 @@ object KeyCode {
     const val KEYCODE_SWITCH_KEYBOARD = -102
     /** 用于内部标识中文/数字模式切换 */
     const val KEYCODE_SWITCH_NUMBER_MODE = -103
+    /** 用于内部标识悬浮/停靠形态切换（游戏悬浮键盘） */
+    const val KEYCODE_TOGGLE_FLOATING = -104
 
     /**
      * 将Android KeyEvent的keyCode转换为Rime keysym
