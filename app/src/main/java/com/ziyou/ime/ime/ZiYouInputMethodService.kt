@@ -11,6 +11,7 @@ import android.view.inputmethod.InputConnection
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.config.DisplayModeManager
 import com.ziyou.ime.config.ThemeManager
@@ -27,6 +28,7 @@ import com.ziyou.ime.level.LevelStats
 import com.ziyou.ime.ui.SettingsActivity
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
+import java.io.File
 
 /**
  * 字由输入法服务主类
@@ -127,17 +129,50 @@ class ZiYouInputMethodService : InputMethodService() {
             inputLogic.commitTarget = target
         }
 
-        override fun onPanelWillOpen() {
-            // 清除活跃编码与候选/编码区展示，避免面板期间残留 preedit/候选
-            keyboardView?.resetInputState()
-            keyRecordStack.clear()
-            renderContext(null)
-            serviceScope.launch {
-                try {
-                    if (rime.initialized) rime.api.clearComposition()
-                } catch (e: Exception) {
-                    Log.w(TAG, "打开技能面板清除编码异常: ${e.message}")
-                }
+        override fun onPanelWillOpen() = clearCompositionForPanel()
+    }
+
+    /** AI 问答面板协调器（面板生命周期与键盘收放编排，与技能面板同一拆分纪律） */
+    private val aiPanels by lazy {
+        AiPanelCoordinator(this, aiPanelHost)
+    }
+
+    /** 提供给 [AiPanelCoordinator] 的宿主能力：容器访问与输入路由切换。 */
+    private val aiPanelHost = object : AiPanelCoordinator.Host {
+        override fun contentLayout(): LinearLayout? = this@ZiYouInputMethodService.contentLayout
+
+        override fun keyboardContainer(): FrameLayout? =
+            this@ZiYouInputMethodService.keyboardContainer
+
+        override fun candidatesContainer(): LinearLayout? =
+            this@ZiYouInputMethodService.candidatesContainer
+
+        override fun keyboardView(): BaseKeyboardView? = this@ZiYouInputMethodService.keyboardView
+
+        override fun setCommitTarget(target: InputLogicController.CommitTarget?) {
+            inputLogic.commitTarget = target
+        }
+
+        override fun commitAnswerToEditor(text: String) = inputLogic.commitDirectToEditor(text)
+
+        override fun commitAnswerImageToEditor(content: CharSequence) = sendAnswerAsImage(content)
+
+        override fun onPanelWillOpen() = clearCompositionForPanel()
+    }
+
+    /**
+     * 面板（技能 / AI 问答）打开前的统一清理：
+     * 清除活跃编码与候选/编码区展示，避免面板期间残留 preedit/候选。
+     */
+    private fun clearCompositionForPanel() {
+        keyboardView?.resetInputState()
+        keyRecordStack.clear()
+        renderContext(null)
+        serviceScope.launch {
+            try {
+                if (rime.initialized) rime.api.clearComposition()
+            } catch (e: Exception) {
+                Log.w(TAG, "打开面板清除编码异常: ${e.message}")
             }
         }
     }
@@ -194,6 +229,8 @@ class ZiYouInputMethodService : InputMethodService() {
     private val inputLogicCallbacks = object : InputLogicController.Callbacks {
         override fun currentInputConnection(): InputConnection? =
             this@ZiYouInputMethodService.currentInputConnection
+
+        override fun currentEditorInfo(): EditorInfo? = currentInputEditorInfo
 
         override fun renderContext(context: ContextProto?) =
             this@ZiYouInputMethodService.renderContext(context)
@@ -261,8 +298,9 @@ class ZiYouInputMethodService : InputMethodService() {
      * 形态切换（[switchDisplayMode]）时也经本方法重建，与 onCreateInputView 同源。
      */
     private fun buildInputView(mode: DisplayMode): View {
-        // 重建前释放技能面板（旧容器即将废弃，WebView 必须显式销毁）
+        // 重建前释放技能/AI面板（旧容器即将废弃，WebView/进行中请求必须显式释放）
         skillPanels.close()
+        aiPanels.close()
         val theme = ThemeManager.getCurrentTheme(this)
         // 悬浮形态下键盘/候选/编码区统一缩放，停靠形态保持 1.0 零影响
         val scale = if (mode == DisplayMode.FLOATING) DisplayModeManager.FLOATING_SCALE else 1f
@@ -581,6 +619,9 @@ class ZiYouInputMethodService : InputMethodService() {
                 Log.w(TAG, "每日签到异常: ${e.message}")
             }
         }
+
+        // 图片选择器返回后编辑器重新获得焦点，此时 InputConnection 可用，提交待发图片
+        commitPendingImageIfAny()
     }
 
     /**
@@ -591,8 +632,9 @@ class ZiYouInputMethodService : InputMethodService() {
         super.onFinishInputView(finishingInput)
         Log.d(TAG, "onFinishInputView")
 
-        // 强制关闭技能面板（销毁 WebView，避免后台常驻内存/定时器）
+        // 强制关闭技能面板（销毁 WebView，避免后台常驻内存/定时器）与 AI 面板
         skillPanels.close()
+        aiPanels.close()
 
         // 丢弃未提交的多击预览并清空编码区
         keyboardView?.resetInputState()
@@ -695,9 +737,16 @@ class ZiYouInputMethodService : InputMethodService() {
                 displayModeCtrl.toggle()
             }
 
-            // 技能面板开关：覆盖/移除键盘区域上的技能面板
+            // 技能面板开关：覆盖/移除键盘区域上的技能面板（与 AI 面板互斥）
             KeyCode.KEYCODE_SKILL_PANEL -> {
+                aiPanels.close()
                 skillPanels.toggle()
+            }
+
+            // AI 问答面板开关：编码区上方展示输入框/答案区（与技能面板互斥）
+            KeyCode.KEYCODE_AI_ASSISTANT -> {
+                skillPanels.close()
+                aiPanels.toggle()
             }
 
             // 收起键盘（候选区按钮栏）
@@ -713,6 +762,18 @@ class ZiYouInputMethodService : InputMethodService() {
             // 循环切换主题（候选区按钮栏）：在已解锁主题间依次切换
             KeyCode.KEYCODE_SWITCH_THEME -> {
                 cycleTheme()
+            }
+
+            // 发送图片（候选区按钮栏）：拉起图片选择器，选完回归后经 commitContent 提交
+            KeyCode.KEYCODE_SEND_IMAGE -> {
+                if (!inputLogic.acceptsImageContent()) {
+                    Toast.makeText(this, "当前输入框不支持发送图片", Toast.LENGTH_SHORT).show()
+                } else {
+                    val intent = Intent(this, ImagePickerActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(intent)
+                }
             }
 
             // 符号键盘开关：记录进入前布局，再次触发（面板内「返回」键）时恢复
@@ -779,6 +840,57 @@ class ZiYouInputMethodService : InputMethodService() {
     }
 
     // ===== UI 渲染 =====
+
+    /**
+     * 将 AI 答案渲染为主题卡片图并经 commitContent 发送到当前输入框（AI 面板「发图」入口）。
+     * 渲染/PNG 压缩在后台线程执行，提交与 Toast 反馈回主线程；面板打开期间
+     * commitTarget 被占用，故经 [InputLogicController.commitImageToEditor] 绕过面板路由直达宿主编辑器。
+     */
+    private fun sendAnswerAsImage(content: CharSequence) {
+        if (!inputLogic.acceptsImageContent()) {
+            Toast.makeText(this, "当前输入框不支持发送图片", Toast.LENGTH_SHORT).show()
+            return
+        }
+        Toast.makeText(this, "正在生成图片…", Toast.LENGTH_SHORT).show()
+        val theme = ThemeManager.getCurrentTheme(this)
+        serviceScope.launch {
+            try {
+                val file = withContext(Dispatchers.Default) {
+                    TextImageRenderer.renderToPng(applicationContext, content, theme)
+                }
+                val uri = FileProvider.getUriForFile(
+                    this@ZiYouInputMethodService, "$packageName.imecontent", file)
+                val ok = inputLogic.commitImageToEditor(uri, "image/png", "AI 答案图片")
+                if (!ok) {
+                    Toast.makeText(this@ZiYouInputMethodService,
+                        "发送图片失败或当前输入框不支持", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "AI 答案转图片失败: ${e.message}", e)
+                Toast.makeText(this@ZiYouInputMethodService, "图片生成失败", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /**
+     * 图片选择器返回后提交待发送图片（若有）。
+     * [ImagePickerActivity] 选图并复制到本地后登记到 [ImageCommitBridge]；
+     * 选择器关闭、编辑器重新获焦时本方法取出并经 FileProvider 产生 content:// URI 提交。
+     */
+    private fun commitPendingImageIfAny() {
+        val pending = ImageCommitBridge.take() ?: return
+        val file = File(pending.path)
+        if (!file.exists()) return
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.imecontent", file)
+            val ok = inputLogic.commitImage(uri, pending.mime)
+            if (!ok) {
+                Toast.makeText(this, "发送图片失败或当前输入框不支持", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "提交图片异常: ${e.message}", e)
+        }
+    }
 
     /**
      * 根据最新 Rime 上下文刷新候选词、编码区与拼音侧栏（在主线程调用）。
@@ -943,8 +1055,9 @@ class ZiYouInputMethodService : InputMethodService() {
 
     override fun onDestroy() {
         Log.i(TAG, "InputMethodService onDestroy")
-        // 释放技能面板（销毁 WebView）
+        // 释放技能面板（销毁 WebView）与 AI 面板（取消进行中请求）
         skillPanels.close()
+        aiPanels.close()
         // 服务销毁前落盘剩余的上屏计分
         LevelStats.flush()
         // 取消所有协程

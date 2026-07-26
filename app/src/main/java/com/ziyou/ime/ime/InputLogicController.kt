@@ -1,7 +1,13 @@
 package com.ziyou.ime.ime
 
+import android.content.ClipDescription
+import android.net.Uri
 import android.util.Log
+import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
+import androidx.core.view.inputmethod.EditorInfoCompat
+import androidx.core.view.inputmethod.InputConnectionCompat
+import androidx.core.view.inputmethod.InputContentInfoCompat
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.daemon.RimeEngine
 import com.ziyou.ime.core.t9.KeyRecordStack
@@ -52,10 +58,13 @@ class InputLogicController(
      */
     private val inputMutex = Mutex()
 
-    /** 控制器需要 Service 提供的能力：编辑器连接与主线程 UI 渲染。 */
+    /** 控制器需要 Service 提供的能力：编辑器连接、编辑器信息与主线程 UI 渲染。 */
     interface Callbacks {
         /** 当前编辑器输入连接（上屏 / 删除字符用）。 */
         fun currentInputConnection(): InputConnection?
+
+        /** 当前编辑器信息（commitContent 富媒体提交需读取其可接收的 MIME 类型）。 */
+        fun currentEditorInfo(): EditorInfo?
 
         /** 主线程：根据最新 Rime 上下文刷新候选词、编码区与拼音侧栏。 */
         fun renderContext(context: ContextProto?)
@@ -74,6 +83,9 @@ class InputLogicController(
 
         /** 退格（Rime 无编码可删时的直接删字） */
         fun deleteBackward()
+
+        /** 回车（Rime 无编码消费时的回车路由，如 AI 面板触发发送），默认无操作 */
+        fun onEnter() {}
     }
 
     /**
@@ -119,6 +131,12 @@ class InputLogicController(
                             callbacks.currentInputConnection()?.deleteSurroundingText(1, 0)
                         }
                         Log.d(TAG, "直接删除: deleteBackward (target=${target != null})")
+                    }
+                    // 回车键：上屏目标为面板时路由给面板（如 AI 面板触发发送）
+                    keyCode == KeyCode.XK_Return && commitTarget != null -> {
+                        val target = commitTarget
+                        withContext(Dispatchers.Main) { target?.onEnter() }
+                        Log.d(TAG, "回车路由到面板目标")
                     }
                     // 可打印字符且Rime未处理，直接提交
                     keyCode in 0x20..0x7E && mask == 0 -> {
@@ -216,6 +234,75 @@ class InputLogicController(
     fun commitSideSymbol(value: String) {
         if (value.isEmpty()) return
         commitAndCount(value)
+    }
+
+    /**
+     * 直接向宿主编辑器上屏（绕过 [commitTarget] 路由），用于「面板打开期间仍需
+     * 把内容送进真实输入框」的场景，如 AI 答案上屏。仍回调 [commitListeners] 计分。
+     */
+    fun commitDirectToEditor(text: CharSequence) {
+        if (text.isEmpty()) return
+        callbacks.currentInputConnection()?.commitText(text, 1)
+        val codePoints = Character.codePointCount(text, 0, text.length)
+        commitListeners.forEach { it(codePoints) }
+    }
+
+    /**
+     * 当前编辑器是否接受图片富媒体（据此决定“发送图片”是否可用）。
+     * 微信等聊天框会通过 [EditorInfo] 的 contentMimeTypes 声明可接收类型；
+     * 未声明 image 类型时返回 false，避免无效提交。
+     */
+    fun acceptsImageContent(): Boolean {
+        val editorInfo = callbacks.currentEditorInfo() ?: return false
+        val supported = EditorInfoCompat.getContentMimeTypes(editorInfo)
+        return supported.any { mime -> ClipDescription.compareMimeTypes(mime, "image/*") }
+    }
+
+    /**
+     * 向当前编辑器提交一张图片（Commit Content API，Android 7.1+）。
+     *
+     * @param uri 由本应用 FileProvider 暴露的 content:// URI
+     * @param mimeType 如 "image/png" / "image/gif"
+     * @param description 无障碍描述（可空）
+     * @return 是否提交成功（编辑器不支持 / 无连接 / 面板占用焦点时返回 false）
+     *
+     * 注：本方法仅“把图片交给输入框”，是否自动发送、是否弹确认框由接收方（如微信）决定，
+     * 第三方输入法无法绕过接收方的确认逻辑直接发送。
+     */
+    fun commitImage(uri: Uri, mimeType: String, description: CharSequence? = null): Boolean {
+        // 技能/AI 面板占用输入焦点时不走富媒体提交
+        if (commitTarget != null) return false
+        return commitImageInternal(uri, mimeType, description)
+    }
+
+    /**
+     * 直接向宿主编辑器提交图片（绕过 [commitTarget] 路由），用于「面板打开期间仍需
+     * 把图片送进真实输入框」的场景，如 AI 答案转图发送；与 [commitDirectToEditor] 对称。
+     */
+    fun commitImageToEditor(uri: Uri, mimeType: String, description: CharSequence? = null): Boolean =
+        commitImageInternal(uri, mimeType, description)
+
+    /** 富媒体提交内部实现：构造 InputContentInfo 并经 Commit Content API 提交。 */
+    private fun commitImageInternal(uri: Uri, mimeType: String, description: CharSequence?): Boolean {
+        val ic = callbacks.currentInputConnection() ?: return false
+        val editorInfo = callbacks.currentEditorInfo() ?: return false
+        val info = InputContentInfoCompat(
+            uri,
+            ClipDescription(description ?: "image", arrayOf(mimeType)),
+            null
+        )
+        return try {
+            InputConnectionCompat.commitContent(
+                ic,
+                editorInfo,
+                info,
+                InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION,
+                null
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "commitImage异常: ${e.message}", e)
+            false
+        }
     }
 
     /**

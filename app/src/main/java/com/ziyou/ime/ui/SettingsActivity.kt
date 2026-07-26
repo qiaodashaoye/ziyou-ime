@@ -11,6 +11,7 @@ import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.ziyou.ime.ai.AiConfig
 import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.config.DisplayModeManager
 import com.ziyou.ime.config.ThemeManager
@@ -208,6 +209,15 @@ class SettingsActivity : AppCompatActivity() {
             title = "技能插件",
             summary = "管理键盘「技」键唤出的技能，导入 .skill 技能包",
             onClick = { startActivity(Intent(this, SkillManagerActivity::class.java)) }
+        ))
+        rootLayout.addView(createDivider())
+
+        // ===== AI 问答 =====
+        rootLayout.addView(createSectionHeader("AI 问答"))
+        rootLayout.addView(createSettingItem(
+            title = "AI 服务配置",
+            summary = "配置键盘「AI」键问答的服务地址与 API Key（OpenAI 兼容接口）",
+            onClick = { showAiConfigDialog() }
         ))
         rootLayout.addView(createDivider())
 
@@ -434,6 +444,50 @@ class SettingsActivity : AppCompatActivity() {
                 showFavoriteSymbolManager()
             }
             .setNegativeButton("取消") { _, _ -> showFavoriteSymbolManager() }
+            .show()
+    }
+
+    // ===== AI 问答服务配置 =====
+
+    /**
+     * AI 服务配置弹窗：API 地址 / API Key / 模型名三项，
+     * 保存前校验地址必须为 HTTPS（与 AiChatClient 的安全基线一致）。
+     */
+    private fun showAiConfigDialog() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        val urlInput = EditText(this).apply {
+            hint = "API 地址（OpenAI 兼容 chat/completions）"
+            setText(AiConfig.getApiUrl(this@SettingsActivity))
+        }
+        val keyInput = EditText(this).apply {
+            hint = "API Key"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setText(AiConfig.getApiKey(this@SettingsActivity))
+        }
+        val modelInput = EditText(this).apply {
+            hint = "模型名（如 ${AiConfig.DEFAULT_MODEL}）"
+            setText(AiConfig.getModel(this@SettingsActivity))
+        }
+        container.addView(urlInput)
+        container.addView(keyInput)
+        container.addView(modelInput)
+        AlertDialog.Builder(this)
+            .setTitle("AI 服务配置")
+            .setView(container)
+            .setPositiveButton("保存") { _, _ ->
+                val url = urlInput.text.toString().trim()
+                if (!url.startsWith("https://")) {
+                    showToast("API 地址必须以 https:// 开头")
+                    return@setPositiveButton
+                }
+                AiConfig.save(this, url, keyInput.text.toString(), modelInput.text.toString())
+                showToast("AI 服务配置已保存")
+            }
+            .setNegativeButton("取消", null)
             .show()
     }
 

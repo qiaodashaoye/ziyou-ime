@@ -51,7 +51,9 @@ class CandidateToolbarView @JvmOverloads constructor(
     private val buttons = listOf(
         ToolbarButton("设", KeyCode.KEYCODE_OPEN_SETTINGS),
         ToolbarButton("肤", KeyCode.KEYCODE_SWITCH_THEME),
+        ToolbarButton("图", KeyCode.KEYCODE_SEND_IMAGE),
         ToolbarButton("技", KeyCode.KEYCODE_SKILL_PANEL),
+        ToolbarButton("AI", KeyCode.KEYCODE_AI_ASSISTANT),
         ToolbarButton("浮", KeyCode.KEYCODE_TOGGLE_FLOATING),
         ToolbarButton("\u2304", KeyCode.KEYCODE_HIDE_KEYBOARD)
     )
