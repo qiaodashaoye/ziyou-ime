@@ -11,11 +11,13 @@ package com.ziyou.ime.ime
  * 现有 / 规划中的布局：
  * - [QWERTY]     标准全键盘（26 键）
  * - [NINE_GRID]  九宫格（T9，2-9 多字母键 + 多击循环选择）
- * - 后续可扩展：SYMBOL（符号）、HANDWRITING（手写）、CUSTOM（自定义布局）等
+ * - [SYMBOL]     符号键盘（分类导航 + 符号网格，临时面板不持久化）
+ * - 后续可扩展：HANDWRITING（手写）、CUSTOM（自定义布局）等
  */
 enum class KeyboardType {
     QWERTY,
-    NINE_GRID;
+    NINE_GRID,
+    SYMBOL;
 
     companion object {
         /** 按名称安全解析，未知名称回退到 [QWERTY] */

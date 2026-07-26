@@ -18,6 +18,7 @@ import com.ziyou.ime.di.AppContainer
 import com.ziyou.ime.data.AssociationManager
 import com.ziyou.ime.data.SideSymbol
 import com.ziyou.ime.data.SideSymbolRepository
+import com.ziyou.ime.data.SymbolRepository
 import com.ziyou.ime.core.level.LevelEngine
 import com.ziyou.ime.level.LevelRepository
 import kotlinx.coroutines.Dispatchers
@@ -189,6 +190,15 @@ class SettingsActivity : AppCompatActivity() {
             title = "拼音侧栏符号",
             summary = "自定义九宫格左侧拼音栏无候选时的常用符号 / 短语",
             onClick = { showSideSymbolManager() }
+        ))
+        rootLayout.addView(createDivider())
+
+        // ===== 符号键盘 =====
+        rootLayout.addView(createSectionHeader("符号键盘"))
+        rootLayout.addView(createSettingItem(
+            title = "常用符号",
+            summary = "自定义符号键盘「常用」分类的符号（键盘内长按符号也可加入/移除）",
+            onClick = { showFavoriteSymbolManager() }
         ))
         rootLayout.addView(createDivider())
 
@@ -365,6 +375,65 @@ class SettingsActivity : AppCompatActivity() {
                 showSideSymbolManager()
             }
             .setNegativeButton("取消") { _, _ -> showSideSymbolManager() }
+            .show()
+    }
+
+    // ===== 符号键盘常用符号管理 =====
+
+    /**
+     * 常用符号管理入口：列出符号键盘「常用」分类的符号（点击删除），
+     * 并提供添加 / 恢复默认。与拼音侧栏符号管理保持一致的交互风格。
+     */
+    private fun showFavoriteSymbolManager() {
+        val symbols = SymbolRepository.getFavorites(this)
+        AlertDialog.Builder(this)
+            .setTitle("符号键盘常用符号")
+            .setItems(symbols.toTypedArray()) { _, which -> confirmDeleteFavoriteSymbol(symbols[which]) }
+            .setPositiveButton("添加") { _, _ -> showAddFavoriteSymbolDialog() }
+            .setNeutralButton("恢复默认") { _, _ ->
+                SymbolRepository.resetFavorites(this)
+                showToast("已恢复默认常用符号")
+            }
+            .setNegativeButton("关闭", null)
+            .show()
+    }
+
+    /** 添加常用符号：输入要上屏的符号内容 */
+    private fun showAddFavoriteSymbolDialog() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        val symbolInput = EditText(this).apply { hint = "符号内容（如 → 或 °C）" }
+        container.addView(symbolInput)
+        AlertDialog.Builder(this)
+            .setTitle("添加常用符号")
+            .setView(container)
+            .setPositiveButton("保存") { _, _ ->
+                val symbol = symbolInput.text.toString().trim()
+                if (symbol.isEmpty()) {
+                    showToast("符号内容不能为空")
+                    return@setPositiveButton
+                }
+                SymbolRepository.addFavorite(this, symbol)
+                showToast("已添加")
+                showFavoriteSymbolManager()
+            }
+            .setNegativeButton("取消") { _, _ -> showFavoriteSymbolManager() }
+            .show()
+    }
+
+    /** 删除确认 */
+    private fun confirmDeleteFavoriteSymbol(symbol: String) {
+        AlertDialog.Builder(this)
+            .setTitle("移除常用符号")
+            .setMessage("确定从「常用」中移除「$symbol」？")
+            .setPositiveButton("移除") { _, _ ->
+                SymbolRepository.removeFavorite(this, symbol)
+                showToast("已移除")
+                showFavoriteSymbolManager()
+            }
+            .setNegativeButton("取消") { _, _ -> showFavoriteSymbolManager() }
             .show()
     }
 

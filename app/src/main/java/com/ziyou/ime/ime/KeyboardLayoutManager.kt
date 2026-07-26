@@ -43,6 +43,7 @@ class KeyboardLayoutManager(
     fun createKeyboardView(type: KeyboardType): BaseKeyboardView = when (type) {
         KeyboardType.QWERTY -> QwertyKeyboardView(context)
         KeyboardType.NINE_GRID -> NineGridKeyboardView(context)
+        KeyboardType.SYMBOL -> SymbolKeyboardView(context)
     }
 
     /**
@@ -68,6 +69,10 @@ class KeyboardLayoutManager(
             onSwitchKeyboard = { target -> callbacks.onSwitchKeyboard(target) }
             onSwitchToQwertyEnglish = { callbacks.onSwitchToQwertyEnglish() }
             onComposingPreview = { preview -> callbacks.onComposingPreview(preview) }
+        }
+        // 符号键盘：符号点击与侧栏符号同源，经 Service 统一 commit 出口直接上屏
+        if (view is SymbolKeyboardView) {
+            view.onSymbolInput = { value -> callbacks.onSideSymbolInput(value) }
         }
         container.removeAllViews()
 

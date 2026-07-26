@@ -16,7 +16,7 @@ import android.util.AttributeSet
  * [q][w][e][r][t][y][u][i][o][p]
  *  [a][s][d][f][g][h][j][k][l]
  * [⇧] [z][x][c][v][b][n][m] [⌫]
- * [九][中/英][   空格   ][.][↵]
+ * [九][中/英][符][  空格  ][.][↵]
  *
  * 注：技能面板「技」与悬浮切换「浮」已移至候选区按钮栏 [CandidateToolbarView]。
  */
@@ -53,11 +53,12 @@ class QwertyKeyboardView @JvmOverloads constructor(
     )
 
     private val row4 = listOf(
-        Key("九", KeyCode.KEYCODE_SWITCH_KEYBOARD, 1.5f, isFunctional = true),
-        Key("中", KeyCode.KEYCODE_SWITCH_LANGUAGE, 1.2f, isFunctional = true),
-        Key("空格", KeyCode.XK_space, 4.6f),
+        Key("九", KeyCode.KEYCODE_SWITCH_KEYBOARD, 1.4f, isFunctional = true),
+        Key("中", KeyCode.KEYCODE_SWITCH_LANGUAGE, 1.1f, isFunctional = true),
+        Key("符", KeyCode.KEYCODE_SYMBOL, 1.1f, isFunctional = true),
+        Key("空格", KeyCode.XK_space, 3.6f),
         Key(".", '.'.code, 1f),
-        Key("↵", KeyCode.XK_Return, 1.7f, isFunctional = true)
+        Key("↵", KeyCode.XK_Return, 1.8f, isFunctional = true)
     )
 
     override val rows: List<List<Key>> = listOf(row1, row2, row3, row4)

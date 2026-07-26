@@ -20,6 +20,7 @@ import com.ziyou.ime.daemon.RimeEngine
 import com.ziyou.ime.core.t9.KeyRecordStack
 import com.ziyou.ime.data.AssociationManager
 import com.ziyou.ime.data.SideSymbolRepository
+import com.ziyou.ime.data.SymbolRepository
 import com.ziyou.ime.di.AppContainer
 import com.ziyou.ime.level.LevelRepository
 import com.ziyou.ime.level.LevelStats
@@ -150,6 +151,9 @@ class ZiYouInputMethodService : InputMethodService() {
     /** 进入九宫格（T9）前的方案 id，用于退出时恢复 */
     private var schemeBeforeT9: String? = null
 
+    /** 进入符号键盘前的布局类型，用于「返回」键恢复（符号键盘为临时面板） */
+    private var keyboardBeforeSymbol: KeyboardType? = null
+
     /** 候选词视图引用 */
     private var candidatesView: SimpleCandidatesView? = null
 
@@ -203,6 +207,15 @@ class ZiYouInputMethodService : InputMethodService() {
 
         // 初始化等级计分（热路径仅做内存自增，此处仅注入 applicationContext）
         LevelStats.init(applicationContext)
+
+        // 预热符号键盘的 YAML 分类缓存（后台线程，首次切到数学/序号等分类时零 IO）
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                SymbolRepository.preload(applicationContext)
+            } catch (e: Exception) {
+                Log.w(TAG, "预热符号分类缓存失败: ${e.message}")
+            }
+        }
 
         // 初始化Rime引擎（如果还未初始化）
         serviceScope.launch {
@@ -475,6 +488,12 @@ class ZiYouInputMethodService : InputMethodService() {
                     pendingEnglishMode = false
                 }
             }
+            KeyboardType.SYMBOL -> {
+                // 符号键盘为临时面板：清除活跃编码避免残留 preedit，
+                // 方案与 ascii_mode 保持不变，「返回」后无感恢复原键盘状态
+                rime.api.clearComposition()
+                keyRecordStack.clear()
+            }
         }
         val isAscii = rime.api.getOption("ascii_mode")
         // 引擎级联想（librime-predict）选项联动：与应用层联想总开关同步。
@@ -512,6 +531,8 @@ class ZiYouInputMethodService : InputMethodService() {
     }
 
     private fun saveKeyboardType(type: KeyboardType) {
+        // 符号键盘是临时面板，不持久化；重建输入视图时回到进入前的布局
+        if (type == KeyboardType.SYMBOL) return
         getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit()
             .putString(KEY_KEYBOARD_TYPE, type.name)
             .apply()
@@ -694,9 +715,16 @@ class ZiYouInputMethodService : InputMethodService() {
                 cycleTheme()
             }
 
-            // 符号键盘切换（暂未实现完整符号键盘）
+            // 符号键盘开关：记录进入前布局，再次触发（面板内「返回」键）时恢复
             KeyCode.KEYCODE_SYMBOL -> {
-                Log.d(TAG, "符号键盘切换（待实现）")
+                if (currentKeyboardType == KeyboardType.SYMBOL) {
+                    val restore = keyboardBeforeSymbol ?: KeyboardType.QWERTY
+                    keyboardBeforeSymbol = null
+                    switchKeyboard(restore)
+                } else {
+                    keyboardBeforeSymbol = currentKeyboardType
+                    switchKeyboard(KeyboardType.SYMBOL)
+                }
             }
 
             // 普通按键：发送给Rime引擎
