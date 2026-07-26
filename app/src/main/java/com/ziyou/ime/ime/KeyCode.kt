@@ -88,6 +88,12 @@ object KeyCode {
     const val KEYCODE_TOGGLE_FLOATING = -104
     /** 用于内部标识技能面板开关（技能插件系统） */
     const val KEYCODE_SKILL_PANEL = -105
+    /** 用于内部标识收起键盘（候选区按钮栏） */
+    const val KEYCODE_HIDE_KEYBOARD = -106
+    /** 用于内部标识打开设置页（候选区按钮栏） */
+    const val KEYCODE_OPEN_SETTINGS = -107
+    /** 用于内部标识循环切换主题（候选区按钮栏） */
+    const val KEYCODE_SWITCH_THEME = -108
 
     /**
      * 将Android KeyEvent的keyCode转换为Rime keysym

@@ -21,7 +21,7 @@
 │   ├ InputLogicController（Rime 交互 / 上屏计分 / 刷新 UI）              │
 │   ├ KeyboardLayoutManager（键盘视图装载 / 复合布局组装）               │
 │   └ PinyinHintProvider（九宫格拼音提示/预览，纯逻辑）                   │
-│  键盘视图: BaseKeyboardView → SimpleKeyboardView / NineGridKeyboardView │
+│  键盘视图: BaseKeyboardView → QwertyKeyboardView / NineGridKeyboardView │
 │  候选/编码: SimpleCandidatesView · PreeditOverlayView · PinyinSideBar   │
 ├──────────────────────────────────────────────────────────────────────┤
 │                          Core 层 + DI                                  │
@@ -253,7 +253,7 @@ onDestroy()
 - **BaseKeyboardView**（抽象基类）：基于「行 × 相对宽度」的布局模型，负责 Canvas 绘制（背景/圆角/阴影/文字）、
   触摸高亮+触觉反馈、主题着色、统一回调（`onKeyPress` / `onSwitchKeyboard` / `onComposingPreview` / `onSwitchToQwertyEnglish`）。
   子类只需提供 `rows` 布局与 `handleKeyUp`。
-- **SimpleKeyboardView**（QWERTY）：标准 4 行，第二行半键缩进，Shift 三态（OFF/ONCE/LOCKED）大小写，一键切九宫格。
+- **QwertyKeyboardView**（QWERTY）：标准 4 行，第二行半键缩进，Shift 三态（OFF/ONCE/LOCKED）大小写，一键切九宫格。
 - **NineGridKeyboardView**（九宫格 T9）：`keyHeightMultiplier=1.3`，前三行为 3×3 数字键网格 + 右侧功能列
   （退格/重输/符）；字母键单击发送对应数字键给 Rime 由 T9 方案消歧，「重输」发送 Escape。
 - **NineGridBottomBarView**：从九宫格剥离的**全宽底栏**（中英转换/中数切换/0/空格/回车），
@@ -267,7 +267,7 @@ onDestroy()
 
 #### 键盘布局管理
 ```
-createKeyboardView(type):  QWERTY→SimpleKeyboardView, NINE_GRID→NineGridKeyboardView（已移入 KeyboardLayoutManager）
+createKeyboardView(type):  QWERTY→QwertyKeyboardView, NINE_GRID→NineGridKeyboardView（已移入 KeyboardLayoutManager）
 installKeyboard(type):     委托 KeyboardLayoutManager.install() 组装视图（九宫格 [侧栏 : 网格 ≈ 18:82] + 全宽底栏），并回收其返回的视图引用
 switchKeyboard(type):      重建视图 + 保存偏好 + 清预览 + 异步 applyEngineForKeyboard
 applyEngineForKeyboard:    九宫格→切 t9 方案并保证中文模式；QWERTY→恢复进入前方案，处理 pendingEnglishMode
@@ -341,7 +341,7 @@ DictManagerViewModel / DictManagerActivity  Compose 管理界面：分类浏览�
 
 ### 数据流 A：按键到输出（QWERTY / 普通按键）
 ```
-1. 触摸软键盘  SimpleKeyboardView.onTouchEvent()
+1. 触摸软键盘  QwertyKeyboardView.onTouchEvent()
 2. 回调 IME    onKeyPress(keyCode, mask) → handleSoftKeyPress()
 3. 委托控制器  serviceScope.launch { inputLogic.processKey(keyCode, mask) }
 4. 调度到线程  AppContainer.rimeEngine.api.processKey() → SimpleRimeImpl → dispatcher.dispatch { RimeNative.processRimeKey() }

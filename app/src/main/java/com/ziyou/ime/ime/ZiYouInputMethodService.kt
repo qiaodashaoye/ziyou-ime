@@ -109,6 +109,9 @@ class ZiYouInputMethodService : InputMethodService() {
     /** 候选词视图引用 */
     private var candidatesView: SimpleCandidatesView? = null
 
+    /** 候选区功能按钮栏引用（与编码区+候选词列表整体叠放，无候选词时显示） */
+    private var candidateToolbar: CandidateToolbarView? = null
+
     /** 编码区视图引用（固定在候选词列表上方） */
     private var preeditOverlay: PreeditOverlayView? = null
 
@@ -234,7 +237,6 @@ class ZiYouInputMethodService : InputMethodService() {
             scaleFactor = scale
             applyTheme(theme)
         }
-        candidatesArea.addView(preeditOverlay)
 
         candidatesView = SimpleCandidatesView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -246,7 +248,39 @@ class ZiYouInputMethodService : InputMethodService() {
             onPageChange = { forward -> handlePageChange(forward) }
             applyTheme(theme)
         }
-        candidatesArea.addView(candidatesView)
+
+        // 编码区 + 候选词列表垂直堆叠，作为一个整体与按钮栏叠放
+        val textArea = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            )
+            addView(preeditOverlay)
+            addView(candidatesView)
+        }
+
+        // 候选区功能按钮栏：与「编码区 + 候选词列表」整体叠放（FrameLayout 覆盖，
+        // 高度为二者总和），无候选词时显示按钮栏，有候选词时隐藏（见 updateToolbarVisibility）
+        candidateToolbar = CandidateToolbarView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            )
+            scaleFactor = scale
+            onButtonClick = { keyCode -> handleSoftKeyPress(keyCode, 0) }
+            applyTheme(theme)
+        }
+
+        val candidatesStack = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            addView(textArea)
+            addView(candidateToolbar)
+        }
+        candidatesArea.addView(candidatesStack)
 
         root.addView(candidatesArea)
 
@@ -474,6 +508,7 @@ class ZiYouInputMethodService : InputMethodService() {
         withContext(Dispatchers.Main) {
             keyboardView?.isChineseMode = !isAscii
             candidatesView?.updateCandidates(context)
+            updateToolbarVisibility(context)
             // 编码区同源同步：九宫格按候选读音+实际击键还原预览，悬浮层与键盘视图
             // 共用同一串；全键盘回退到 Rime 原始 preedit
             val preview = buildPinyinPreview(context)
@@ -671,6 +706,21 @@ class ZiYouInputMethodService : InputMethodService() {
             // 技能面板开关：覆盖/移除键盘区域上的技能面板
             KeyCode.KEYCODE_SKILL_PANEL -> {
                 if (skillPanel != null) closeSkillPanel() else openSkillPanel()
+            }
+
+            // 收起键盘（候选区按钮栏）
+            KeyCode.KEYCODE_HIDE_KEYBOARD -> {
+                requestHideSelf(0)
+            }
+
+            // 打开设置页（候选区按钮栏）
+            KeyCode.KEYCODE_OPEN_SETTINGS -> {
+                openSettings()
+            }
+
+            // 循环切换主题（候选区按钮栏）：在已解锁主题间依次切换
+            KeyCode.KEYCODE_SWITCH_THEME -> {
+                cycleTheme()
             }
 
             // 符号键盘切换（暂未实现完整符号键盘）
@@ -887,6 +937,8 @@ class ZiYouInputMethodService : InputMethodService() {
         // 编码串为空）复用联想强调色，与普通候选词区分；未启用 predict 模块时该分支休眠
         val predictionMode = context?.menu?.candidates?.isNotEmpty() == true && context.input.isEmpty()
         candidatesView?.updateCandidates(context, predictionMode)
+        // 无候选词且无活跃编码时显示候选区功能按钮栏
+        updateToolbarVisibility(context)
         // 编码区同源同步：九宫格按候选读音+实际击键还原预览，悬浮层与键盘视图
         // 共用同一串，确保编码区与候选区拼音一致；全键盘回退到 Rime 原始 preedit
         val preview = buildPinyinPreview(context)
@@ -898,6 +950,53 @@ class ZiYouInputMethodService : InputMethodService() {
         }
         // 左侧拼音侧栏：有候选拼音则展示拼音，否则展示自定义符号
         pinyinSideBar?.setPinyinCandidates(pinyinHints)
+    }
+
+    /**
+     * 同步候选区功能按钮栏显隐（在主线程调用）：
+     * 无候选词且无活跃编码时显示按钮栏，否则隐藏让位给编码区与候选词列表。
+     * 按钮栏高度等于二者总高叠放，切换仅改 visibility，无高度跳动。
+     */
+    private fun updateToolbarVisibility(context: ContextProto?) {
+        val idle = context?.menu?.candidates.isNullOrEmpty() &&
+            context?.input.isNullOrEmpty()
+        candidateToolbar?.visibility = if (idle) View.VISIBLE else View.GONE
+    }
+
+    /**
+     * 打开设置页（候选区按钮栏入口）。
+     */
+    private fun openSettings() {
+        val intent = Intent(this, SettingsActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
+    }
+
+    /**
+     * 在已解锁主题间循环切换（候选区按钮栏入口）。
+     * 切换后重建输入视图套用新主题（与形态切换同源路径），
+     * 并重同步引擎状态到新视图；引擎编码/方案不受影响。
+     */
+    private fun cycleTheme() {
+        val unlocked = ThemeManager.getUnlockedThemeNames(this)
+        if (unlocked.size < 2) {
+            Toast.makeText(this, "暂无其他已解锁主题", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val current = ThemeManager.getCurrentThemeName(this)
+        val next = unlocked[(unlocked.indexOf(current) + 1) % unlocked.size]
+        if (!ThemeManager.setTheme(this, next)) return
+        keyboardView?.resetInputState()
+        setInputView(buildInputView(currentDisplayMode))
+        serviceScope.launch {
+            try {
+                if (!awaitEngineReady(KEY_ENGINE_READY_TIMEOUT_MS)) return@launch
+                applyEngineForKeyboard(currentKeyboardType)
+            } catch (e: Exception) {
+                Log.w(TAG, "切换主题后同步状态异常: ${e.message}")
+            }
+        }
     }
 
     /**
@@ -1003,6 +1102,7 @@ class ZiYouInputMethodService : InputMethodService() {
         contentLayout = null
         candidatesContainer = null
         candidatesView = null
+        candidateToolbar = null
         preeditOverlay = null
         pinyinSideBar = null
         nineGridBottomBar = null

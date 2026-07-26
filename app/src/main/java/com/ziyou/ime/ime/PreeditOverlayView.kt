@@ -29,8 +29,10 @@ class PreeditOverlayView @JvmOverloads constructor(
         private const val TEXT_SIZE_SP = 12f
         /** 水平内边距（dp） */
         private const val PADDING_H_DP = 12
-        /** 默认视图高度（dp），紧凑显示以减少垂直空间占用 */
-        private const val VIEW_HEIGHT_DP = 24
+        /** 默认视图高度（dp）：仅保留 12sp 文本上下各约 2dp 的紧凑内边距，
+         *  避免编码区自身留白过大、与下方候选词区产生视觉间隙；
+         *  对模块内开放供 [CandidateToolbarView] 计算候选区总高 */
+        internal const val VIEW_HEIGHT_DP = 18
     }
 
     /** 当前显示的编码文本 */

@@ -2,6 +2,7 @@ package com.ziyou.ime.ui
 
 import android.net.Uri
 import android.os.Bundle
+import android.content.Intent
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -63,7 +64,7 @@ class SkillManagerActivity : AppCompatActivity() {
             setPadding(dp(16), dp(16), dp(16), dp(16))
         }
 
-        // 顶部操作行：本地导入 / URL 导入
+        // 顶部操作行：本地导入 / URL 导入 / 开发文档
         val actionRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         actionRow.addView(Button(this).apply {
             text = "导入 .skill 文件"
@@ -73,11 +74,17 @@ class SkillManagerActivity : AppCompatActivity() {
             text = "从 URL 导入"
             setOnClickListener { showUrlImportDialog() }
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        actionRow.addView(Button(this).apply {
+            text = "开发文档"
+            setOnClickListener {
+                startActivity(Intent(this@SkillManagerActivity, SkillDevGuideActivity::class.java))
+            }
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(actionRow)
 
         root.addView(TextView(this).apply {
             text = "第三方技能由作者负责，导入前请确认来源可信；技能运行在受限沙箱中，" +
-                "权限与网络域名以安装时确认的清单为准。"
+                "权限与网络域名以安装时确认的清单为准。想开发自己的技能？点「开发文档」查看完整指南。"
             textSize = 12f
             setTextColor(0xFF757575.toInt())
             setPadding(dp(4), dp(4), dp(4), dp(8))

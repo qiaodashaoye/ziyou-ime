@@ -75,6 +75,36 @@ android {
     }
 }
 
+// ===== 技能开发指南同步进 assets（单一来源：docs/，构建时自动拷贝，供 App 内文档页展示）=====
+
+/** 把仓库根 docs/技能插件开发指南.md 拷为 assets/docs/skill_dev_guide.md（ASCII 文件名避免编码问题） */
+abstract class SyncSkillDevGuideTask : DefaultTask() {
+    @get:InputFile
+    abstract val guideFile: RegularFileProperty
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun sync() {
+        val destDir = outputDir.get().asFile.resolve("docs").apply { mkdirs() }
+        guideFile.get().asFile.copyTo(destDir.resolve("skill_dev_guide.md"), overwrite = true)
+    }
+}
+
+val syncSkillDevGuide = tasks.register<SyncSkillDevGuideTask>("syncSkillDevGuide") {
+    guideFile.set(rootProject.file("docs/技能插件开发指南.md"))
+    outputDir.set(layout.buildDirectory.dir("generated/skillDocsAssets"))
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(
+            syncSkillDevGuide, SyncSkillDevGuideTask::outputDir
+        )
+    }
+}
+
 dependencies {
 
     // ===== 内部模块：纯逻辑层（无 Android UI / 无 JNI 依赖）=====

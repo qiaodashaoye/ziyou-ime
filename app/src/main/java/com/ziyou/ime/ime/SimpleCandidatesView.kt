@@ -33,8 +33,9 @@ class SimpleCandidatesView @JvmOverloads constructor(
 ) : View(context, attrs, defStyleAttr) {
 
     companion object {
-        /** 视图高度（dp），紧凑显示以减少垂直空间占用 */
-        private const val VIEW_HEIGHT_DP = 32
+        /** 视图高度（dp），紧凑显示以减少垂直空间占用；
+         *  对模块内开放供 [CandidateToolbarView] 计算候选区总高 */
+        internal const val VIEW_HEIGHT_DP = 32
         /** 候选词字体大小（sp） */
         private const val CANDIDATE_TEXT_SIZE_SP = 16f
         /** 候选词水平内边距（dp） */

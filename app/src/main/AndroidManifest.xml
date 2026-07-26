@@ -54,6 +54,12 @@
             android:exported="false"
             android:label="技能插件" />
 
+        <!-- 技能开发文档 -->
+        <activity
+            android:name=".ui.SkillDevGuideActivity"
+            android:exported="false"
+            android:label="技能开发文档" />
+
         <!-- 等级体系详情 -->
         <activity
             android:name=".ui.LevelActivity"

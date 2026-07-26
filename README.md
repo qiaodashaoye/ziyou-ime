@@ -274,7 +274,7 @@ ziyou-ime/
 │       │   │   ├── KeyboardLayoutManager.kt # 键盘视图装载器（复合布局组装）
 │       │   │   ├── PinyinHintProvider.kt   # 九宫格拼音提示/预览纯逻辑
 │       │   │   ├── BaseKeyboardView.kt    # 键盘视图基类（Canvas 绘制/触摸/主题）
-│       │   │   ├── SimpleKeyboardView.kt  # QWERTY 全键盘
+│       │   │   ├── QwertyKeyboardView.kt  # QWERTY 全键盘
 │       │   │   ├── NineGridKeyboardView.kt # 九宫格 T9 键盘 + 全宽底栏
 │       │   │   ├── PinyinSideBarView.kt   # 九宫格拼音/符号侧栏
 │       │   │   ├── SimpleCandidatesView.kt # 候选词横条

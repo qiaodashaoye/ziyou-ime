@@ -41,7 +41,7 @@ class KeyboardLayoutManager(
 
     /** 根据类型创建键盘视图。新增键盘类型时仅需在此登记。 */
     fun createKeyboardView(type: KeyboardType): BaseKeyboardView = when (type) {
-        KeyboardType.QWERTY -> SimpleKeyboardView(context)
+        KeyboardType.QWERTY -> QwertyKeyboardView(context)
         KeyboardType.NINE_GRID -> NineGridKeyboardView(context)
     }
 
