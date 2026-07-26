@@ -2,9 +2,7 @@ package com.ziyou.ime.daemon
 
 import android.content.Context
 import android.util.Log
-import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.core.*
-import com.ziyou.ime.dict.DictManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -49,6 +47,13 @@ object RimeSession : RimeEngine {
     private var dispatcher: RimeDispatcher? = null
     private var rimeApi: SimpleRimeImpl? = null
     private var sessionScope: CoroutineScope? = null
+
+    /**
+     * 引擎启动前的部署步骤（资源部署、词库注入等），由组合根
+     * [com.ziyou.ime.di.AppContainer.install] 装配；daemon 层不直接依赖业务模块。
+     */
+    @Volatile
+    var deploySteps: List<RimeDeployStep> = emptyList()
 
     @Volatile
     private var isInitialized = false
@@ -97,15 +102,11 @@ object RimeSession : RimeEngine {
         // Dispatchers.Main 上发起本挂起函数，若直接执行会阻塞主线程（首次安装/升级时
         // 需递归复制整包 assets，有 ANR 风险），故显式切到 IO 线程执行。
         withContext(Dispatchers.IO) {
-            // 第一步：部署资源文件（首次安装/升级时从 assets 复制到内部存储）
-            Log.i(TAG, "部署 Rime 资源文件...")
-            AssetDeployer.deployIfNeeded(context)
-            Log.i(TAG, "资源文件部署完成")
-
-            // 第二步：注入已启用的扩展词库到主词库文件
-            // AssetDeployer 可能覆盖了 luna_pinyin.dict.yaml，需要重新追加扩展词库引用
-            DictManager.regenerateMainDict(context)
-            Log.i(TAG, "扩展词库注入完成")
+            // 按组合根装配顺序执行部署步骤（资源部署 → 扩展词库注入）
+            deploySteps.forEach { step ->
+                step.beforeStartup(context)
+            }
+            Log.i(TAG, "部署步骤执行完成（共 ${deploySteps.size} 步）")
 
             // 准备目录
             ensureDirectories(getSharedDataDir(context), getUserDataDir(context))
@@ -183,14 +184,14 @@ object RimeSession : RimeEngine {
 
     /**
      * 重新部署 RIME 引擎（词库变更后调用）
-     * 关闭当前引擎 → 重新生成主词库 → 以 fullCheck 模式重启
+     * 关闭当前引擎 → 重新执行部署步骤 → 以 fullCheck 模式重启
      */
     override suspend fun redeploy(context: Context) {
         lifecycleMutex.withLock {
             Log.i(TAG, "开始重新部署 RIME 引擎")
             // 关闭当前引擎（doDestroy 在未初始化时安全早返回）
             doDestroy()
-            // 以 fullCheck 模式重新启动（doInitialize 内部已在 IO 线程重新注入扩展词库并部署资源）
+            // 以 fullCheck 模式重新启动（doInitialize 内部已在 IO 线程重新执行部署步骤）
             doInitialize(context, fullCheck = true)
             Log.i(TAG, "RIME 引擎重新部署完成")
         }

@@ -5,10 +5,12 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.ziyou.ime.dict.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 扩展词库管理 ViewModel
@@ -60,10 +62,14 @@ class DictManagerViewModel(application: Application) : AndroidViewModel(applicat
         refreshCatalog()
     }
 
-    /** 加载本地已安装词库 */
+    /** 加载本地已安装词库（磁盘读在 IO 线程，避免 init/刷新时阻塞主线程） */
     private fun loadInstalledDicts() {
-        val context = getApplication<Application>()
-        _installedDicts.value = DictManager.getInstalledDicts(context)
+        viewModelScope.launch {
+            val context = getApplication<Application>()
+            _installedDicts.value = withContext(Dispatchers.IO) {
+                DictManager.getInstalledDicts(context)
+            }
+        }
     }
 
     /** 刷新远程词库目录 */
@@ -73,9 +79,11 @@ class DictManagerViewModel(application: Application) : AndroidViewModel(applicat
             val catalog = DictDownloader.fetchCatalog()
             if (catalog != null) {
                 _catalogState.value = CatalogState.Success(catalog)
-                // 检查更新
+                // 检查更新（需读安装记录文件，切 IO 线程）
                 val context = getApplication<Application>()
-                _updatableIds.value = DictManager.checkUpdates(context, catalog).toSet()
+                _updatableIds.value = withContext(Dispatchers.IO) {
+                    DictManager.checkUpdates(context, catalog).toSet()
+                }
             } else {
                 _catalogState.value = CatalogState.Error("无法连接词库服务器，请检查网络")
             }
@@ -169,8 +177,8 @@ class DictManagerViewModel(application: Application) : AndroidViewModel(applicat
         _deployState.value = DeployState.Deploying
         try {
             val context = getApplication<Application>()
-            // 通过 RimeSession 重新部署引擎
-            com.ziyou.ime.daemon.RimeSession.redeploy(context)
+            // 经 DI 容器重新部署引擎（部署步骤由组合根装配）
+            com.ziyou.ime.di.AppContainer.rimeEngine.redeploy(context)
             _deployState.value = DeployState.Done
             Log.i(TAG, "RIME 重部署完成")
         } catch (e: Exception) {
@@ -201,8 +209,10 @@ class DictManagerViewModel(application: Application) : AndroidViewModel(applicat
 
             val context = getApplication<Application>()
             val preview = if (isInstalled(info.id)) {
-                // 已安装：读取本地文件
-                DictManager.readLocalDictPreview(context, info.id, info)
+                // 已安装：读取本地文件（IO 线程）
+                withContext(Dispatchers.IO) {
+                    DictManager.readLocalDictPreview(context, info.id, info)
+                }
             } else {
                 // 未安装：从远程下载预览
                 DictDownloader.fetchDictPreview(info)

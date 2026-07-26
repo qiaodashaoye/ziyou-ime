@@ -6,7 +6,6 @@ import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.daemon.RimeEngine
 import com.ziyou.ime.core.t9.KeyRecordStack
 import com.ziyou.ime.core.t9.ReplaceCommand
-import com.ziyou.ime.level.LevelStats
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -25,6 +24,8 @@ import kotlinx.coroutines.withContext
  * - [scope]：Service 协程作用域（`Dispatchers.Main`），控制器内部按需切到 Rime 线程 / 回到主线程。
  * - [keyRecordStack]：与 Service 共享的九宫格状态机（选词/退格需同步清理与替换）。
  * - [callbacks]：向 Service 反向获取 [InputConnection] 与执行主线程 UI 渲染。
+ * - [commitListeners]：编辑器路径上屏后的横切监听（如等级计分），由组合根装配注入，
+ *   本类不再硬编码依赖具体业务单例；回调参数为脱敏的 Unicode 码点数。
  *
  * 线程模型与原实现一致：`engine.api.*` 为挂起调用（自动切到 Rime 线程），
  * UI 渲染经 [Callbacks.renderContext] 在主线程执行。
@@ -33,7 +34,8 @@ class InputLogicController(
     private val engine: RimeEngine,
     private val scope: CoroutineScope,
     private val keyRecordStack: KeyRecordStack,
-    private val callbacks: Callbacks
+    private val callbacks: Callbacks,
+    private val commitListeners: List<(codePoints: Int) -> Unit> = emptyList()
 ) {
 
     companion object {
@@ -84,24 +86,27 @@ class InputLogicController(
     /**
      * 核心按键处理：将按键发送给 Rime 引擎并处理返回结果。
      * 被 Rime 消费则取 commit 文本上屏 + 刷新 UI；未消费则退格删字符或可打印字符直接上屏。
+     * 热路径走 [RimeApi.processKeyBulk]：processKey/getCommit/getContext 单次引擎调度完成，
+     * 相比逐个调用减少 2 次主线程↔Rime 线程往返与 2 次 JNI 跨界。
      */
     suspend fun processKey(keyCode: Int, mask: Int) = inputMutex.withLock {
         try {
-            val consumed = engine.api.processKey(keyCode, mask)
-            Log.d(TAG, "processKey($keyCode, $mask) -> consumed=$consumed")
+            val result = engine.api.processKeyBulk(keyCode, mask)
+            Log.d(TAG, "processKey($keyCode, $mask) -> consumed=${result.consumed}")
 
-            if (consumed) {
+            if (result.consumed) {
                 // Rime消费了这个按键，检查是否有commit文本
-                val commit = engine.api.getCommit()
-                commit?.text?.let { text ->
+                result.commit?.text?.let { text ->
                     // 将文本提交到当前编辑器
                     commitAndCount(text)
                     Log.d(TAG, "commitText: $text")
                     keyRecordStack.clear()
                 }
-                // 更新候选词和编码区UI；若引擎已启用 librime-predict，
-                // commit 后的预测词会出现在 context.menu 中随本次刷新一并展示
-                updateUI()
+                // 用随批量结果返回的上下文刷新候选词与编码区UI；若引擎已启用
+                // librime-predict，commit 后的预测词会出现在 context.menu 中随本次刷新一并展示
+                withContext(Dispatchers.Main) {
+                    callbacks.renderContext(result.context)
+                }
             } else {
                 // Rime未消费，某些键可能需要直接输出
                 when {
@@ -215,8 +220,8 @@ class InputLogicController(
 
     /**
      * 统一的文本上屏出口：按 [commitTarget] 路由到技能面板或宿主编辑器。
-     * 编辑器路径做等级计分埋点（仅统计 Unicode 码点数，脱敏不触碰内容）；
-     * 面板路径不计分（文本未真正发送给应用）。
+     * 编辑器路径回调 [commitListeners]（如等级计分，仅传递脱敏码点数不触碰内容）；
+     * 面板路径不回调（文本未真正发送给应用）。
      */
     private fun commitAndCount(text: CharSequence) {
         val target = commitTarget
@@ -226,7 +231,8 @@ class InputLogicController(
         }
         callbacks.currentInputConnection()?.commitText(text, 1)
         if (text.isNotEmpty()) {
-            LevelStats.onCommit(Character.codePointCount(text, 0, text.length))
+            val codePoints = Character.codePointCount(text, 0, text.length)
+            commitListeners.forEach { it(codePoints) }
         }
     }
 

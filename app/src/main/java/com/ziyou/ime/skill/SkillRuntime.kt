@@ -7,6 +7,7 @@ import android.util.Log
 import com.ziyou.ime.core.skill.SkillPermission
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -14,6 +15,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
+import java.net.IDN
 import java.net.URL
 import java.util.Locale
 
@@ -92,8 +94,12 @@ class SkillRuntime(
         fun setImeExpanded(expanded: Boolean)
     }
 
-    /** 运行时协程域：fetch 等异步能力；面板关闭时整体取消 */
+    /** 运行时协程域：fetch / storage 等异步能力；面板关闭时整体取消 */
     private val runtimeScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    /** storage 专属串行 IO 调度器：磁盘读写移出主线程，且保证 set/remove 提交顺序 */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val storageContext = Dispatchers.IO.limitedParallelism(1)
 
     /** fetch 频控：最近一分钟内的请求时间戳 */
     private val fetchTimestamps = ArrayDeque<Long>()
@@ -117,6 +123,10 @@ class SkillRuntime(
     fun handle(method: String, params: JSONObject, complete: (Result<String?>) -> Unit) {
         if (method == "fetch") {
             handleFetch(params, complete)
+            return
+        }
+        if (method.startsWith("storage.")) {
+            handleStorage(method, params, complete)
             return
         }
         // 其余方法均为同步能力，立即完成
@@ -165,28 +175,6 @@ class SkillRuntime(
             null
         }
 
-        "storage.get" -> {
-            requirePermission(SkillPermission.STORAGE)
-            val value = loadStorage().opt(requireKey(params))
-            if (value == null) "null" else JSONObject.quote(value.toString())
-        }
-
-        "storage.set" -> {
-            requirePermission(SkillPermission.STORAGE)
-            val store = loadStorage()
-            store.put(requireKey(params), params.optString("value"))
-            saveStorage(store)
-            null
-        }
-
-        "storage.remove" -> {
-            requirePermission(SkillPermission.STORAGE)
-            val store = loadStorage()
-            store.remove(requireKey(params))
-            saveStorage(store)
-            null
-        }
-
         "clipboard.read" -> {
             requirePermission(SkillPermission.CLIPBOARD_READ)
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -220,6 +208,49 @@ class SkillRuntime(
         else -> throw SkillApiException("未知方法: $method")
     }
 
+    // ===== storage（异步：磁盘读写不占主线程）=====
+
+    /**
+     * storage 三方法统一异步处理：权限/参数校验在主线程即时失败，
+     * 文件读写在 [storageContext]（单并发 IO）串行执行后切回主线程交付。
+     * runtimeScope 为主线程顺序启动协程 + 单并发调度器 FIFO，提交顺序得以保持。
+     */
+    private fun handleStorage(method: String, params: JSONObject, complete: (Result<String?>) -> Unit) {
+        val key = runCatching {
+            requirePermission(SkillPermission.STORAGE)
+            requireKey(params)
+        }.getOrElse {
+            complete(Result.failure(it))
+            return
+        }
+        runtimeScope.launch {
+            val result = withContext(storageContext) {
+                runCatching {
+                    when (method) {
+                        "storage.get" -> {
+                            val value = loadStorage().opt(key)
+                            if (value == null) "null" else JSONObject.quote(value.toString())
+                        }
+                        "storage.set" -> {
+                            val store = loadStorage()
+                            store.put(key, params.optString("value"))
+                            saveStorage(store)
+                            null
+                        }
+                        "storage.remove" -> {
+                            val store = loadStorage()
+                            store.remove(key)
+                            saveStorage(store)
+                            null
+                        }
+                        else -> throw SkillApiException("未知方法: $method")
+                    }
+                }
+            }
+            complete(result)
+        }
+    }
+
     // ===== fetch 代理（Phase 2）=====
 
     /**
@@ -236,7 +267,9 @@ class SkillRuntime(
                 throw SkillApiException("非法 URL")
             }
             if (url.protocol != "https") throw SkillApiException("仅允许 HTTPS 请求")
-            if (url.host !in skill.manifest.networkDomains) {
+            // 白名单比对前归一化：小写 + IDN/punycode，防 "WTTR.IN" / Unicode 同形域名绕过
+            val host = normalizeHost(url.host) ?: throw SkillApiException("非法 URL")
+            if (skill.manifest.networkDomains.none { normalizeHost(it) == host }) {
                 throw SkillApiException("域名不在白名单: ${url.host}")
             }
 
@@ -324,6 +357,16 @@ class SkillRuntime(
     }
 
     // ===== 内部 =====
+
+    /** 域名归一化：IDN 转 ASCII（punycode）+ 统一小写；非法域名返回 null。 */
+    private fun normalizeHost(host: String?): String? {
+        if (host.isNullOrEmpty()) return null
+        return try {
+            IDN.toASCII(host).lowercase(Locale.ROOT)
+        } catch (e: Exception) {
+            null
+        }
+    }
 
     private fun requirePermission(permission: SkillPermission) {
         if (permission !in skill.manifest.permissions) {

@@ -5,12 +5,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.util.Locale
 
 /**
  * 词库下载器
@@ -26,6 +29,22 @@ object DictDownloader {
     /** Gitee 仓库原始文件基础 URL */
     private const val BASE_URL = "https://gitee.com/qiaodashaoye/ziyou-ime-dicts/raw/main"
 
+    /** 下载源域名白名单（与 BASE_URL 同源）：catalog 中的 url 必须命中，
+     *  防目录被篡改后外链投毒（与技能 fetch 代理的白名单基线对齐） */
+    private val ALLOWED_HOSTS = setOf("gitee.com")
+
+    /** catalog.json 响应上限（字节），超出即拒绝（目录必须完整才能解析） */
+    private const val MAX_CATALOG_BYTES = 1L * 1024 * 1024
+
+    /** 单个词库文件下载上限（字节），防恶意 catalog 自报小 size 实际超大文件耗尽磁盘 */
+    private const val MAX_DICT_BYTES = 20L * 1024 * 1024
+
+    /** 远程预览读取上限（字节），超出即截断（预览只需前 N 条词条） */
+    private const val MAX_PREVIEW_BYTES = 1L * 1024 * 1024
+
+    /** 手动跟随重定向的最大跳数（每跳都重新过白名单，防 3xx 逃逸到外域） */
+    private const val MAX_REDIRECTS = 3
+
     /**
      * 拉取远程词库目录
      * @return 解析后的 DictCatalog，失败返回 null
@@ -33,11 +52,7 @@ object DictDownloader {
     suspend fun fetchCatalog(): DictCatalog? = withContext(Dispatchers.IO) {
         var connection: HttpURLConnection? = null
         try {
-            val url = URL("$BASE_URL/catalog.json")
-            connection = url.openConnection() as HttpURLConnection
-            connection.connectTimeout = CONNECT_TIMEOUT
-            connection.readTimeout = READ_TIMEOUT
-            connection.requestMethod = "GET"
+            connection = openTrustedConnection("$BASE_URL/catalog.json")
 
             val responseCode = connection.responseCode
             if (responseCode != HttpURLConnection.HTTP_OK) {
@@ -45,7 +60,9 @@ object DictDownloader {
                 return@withContext null
             }
 
-            val jsonStr = connection.inputStream.bufferedReader().use { it.readText() }
+            val jsonStr = connection.inputStream.use {
+                readBoundedText(it, MAX_CATALOG_BYTES, truncate = false)
+            }
             parseCatalog(jsonStr)
         } catch (e: IOException) {
             Log.e(TAG, "拉取 catalog 网络异常: ${e.message}", e)
@@ -76,17 +93,14 @@ object DictDownloader {
             return@withContext null
         }
         var connection: HttpURLConnection? = null
+        val targetFile = File(targetDir, "${info.id}.dict.yaml")
         try {
             if (!targetDir.exists()) {
                 targetDir.mkdirs()
             }
 
-            val targetFile = File(targetDir, "${info.id}.dict.yaml")
-            val url = URL(info.url)
-            connection = url.openConnection() as HttpURLConnection
-            connection.connectTimeout = CONNECT_TIMEOUT
-            connection.readTimeout = READ_TIMEOUT
-            connection.requestMethod = "GET"
+            // url 来自不可信的 catalog：强制 HTTPS + 域名白名单 + 受控重定向
+            connection = openTrustedConnection(info.url)
 
             val responseCode = connection.responseCode
             if (responseCode != HttpURLConnection.HTTP_OK) {
@@ -104,8 +118,12 @@ object DictDownloader {
                     val buffer = ByteArray(BUFFER_SIZE)
                     var bytesRead: Int
                     while (input.read(buffer).also { bytesRead = it } != -1) {
-                        output.write(buffer, 0, bytesRead)
                         downloadedBytes += bytesRead
+                        // 边读边卡上限：contentLength/catalog.size 均不可信，以实际字节数为准
+                        if (downloadedBytes > MAX_DICT_BYTES) {
+                            throw IOException("词库文件超限（上限 ${MAX_DICT_BYTES / (1024 * 1024)}MB）")
+                        }
+                        output.write(buffer, 0, bytesRead)
                         onProgress?.invoke(downloadedBytes, totalBytes)
                     }
                     output.flush()
@@ -130,9 +148,11 @@ object DictDownloader {
             targetFile
         } catch (e: IOException) {
             Log.e(TAG, "下载词库 ${info.id} 网络异常: ${e.message}", e)
+            targetFile.delete()  // 清理半成品，避免残留损坏文件被后续误用
             null
         } catch (e: Exception) {
             Log.e(TAG, "下载词库 ${info.id} 异常: ${e.message}", e)
+            targetFile.delete()
             null
         } finally {
             connection?.disconnect()
@@ -148,11 +168,8 @@ object DictDownloader {
     suspend fun fetchDictPreview(info: RemoteDictInfo, maxEntries: Int = 50): DictPreview? = withContext(Dispatchers.IO) {
         var connection: HttpURLConnection? = null
         try {
-            val url = URL(info.url)
-            connection = url.openConnection() as HttpURLConnection
-            connection.connectTimeout = CONNECT_TIMEOUT
-            connection.readTimeout = READ_TIMEOUT
-            connection.requestMethod = "GET"
+            // 预览同样受白名单与重定向管控；读取超限即截断（只需前 N 条词条）
+            connection = openTrustedConnection(info.url)
 
             val responseCode = connection.responseCode
             if (responseCode != HttpURLConnection.HTTP_OK) {
@@ -160,7 +177,9 @@ object DictDownloader {
                 return@withContext null
             }
 
-            val content = connection.inputStream.bufferedReader().use { it.readText() }
+            val content = connection.inputStream.use {
+                readBoundedText(it, MAX_PREVIEW_BYTES, truncate = true)
+            }
             val entries = parseDictEntries(content, maxEntries)
             val totalHint = countDictEntries(content)
 
@@ -238,6 +257,66 @@ object DictDownloader {
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
+    // ===== 可信连接（HTTPS + 白名单 + 受控重定向）=====
+
+    /** 校验 URL 可信：强制 HTTPS 且域名命中白名单（小写归一）。 */
+    private fun requireTrustedUrl(spec: String): URL {
+        val url = URL(spec)
+        if (url.protocol != "https") throw IOException("仅允许 HTTPS 下载源: $spec")
+        val host = url.host?.lowercase(Locale.ROOT)
+        if (host !in ALLOWED_HOSTS) throw IOException("下载源域名不在白名单: $host")
+        return url
+    }
+
+    /**
+     * 打开可信连接：禁用自动重定向，手动跟随并对每一跳重新执行白名单校验，
+     * 防止白名单域经 3xx 跳转到任意外域。返回已取得最终响应码的连接，
+     * 调用方负责检查响应码与 disconnect。
+     */
+    private fun openTrustedConnection(spec: String): HttpURLConnection {
+        var url = requireTrustedUrl(spec)
+        repeat(MAX_REDIRECTS + 1) {
+            val connection = url.openConnection() as HttpURLConnection
+            connection.connectTimeout = CONNECT_TIMEOUT
+            connection.readTimeout = READ_TIMEOUT
+            connection.requestMethod = "GET"
+            connection.instanceFollowRedirects = false
+            val code = connection.responseCode
+            if (code !in 300..399) return connection
+            val location = connection.getHeaderField("Location")
+            connection.disconnect()
+            if (location.isNullOrEmpty()) throw IOException("重定向缺少 Location 头")
+            // 相对重定向按当前 URL 解析，绝对重定向重新过白名单
+            url = requireTrustedUrl(URL(url, location).toString())
+        }
+        throw IOException("重定向次数超限（>$MAX_REDIRECTS）")
+    }
+
+    /**
+     * 读取流为 UTF-8 文本，超出 [maxBytes] 时：[truncate]=true 截断返回（预览场景），
+     * 否则抛 [IOException]（catalog 必须完整才能解析）。
+     */
+    private fun readBoundedText(input: InputStream, maxBytes: Long, truncate: Boolean): String {
+        val buffer = ByteArrayOutputStream()
+        val chunk = ByteArray(BUFFER_SIZE)
+        var total = 0L
+        while (true) {
+            val read = input.read(chunk)
+            if (read < 0) break
+            total += read
+            if (total > maxBytes) {
+                if (truncate) {
+                    val keep = read - (total - maxBytes).toInt()
+                    if (keep > 0) buffer.write(chunk, 0, keep)
+                    return buffer.toString(Charsets.UTF_8.name())
+                }
+                throw IOException("响应超限（上限 $maxBytes 字节）")
+            }
+            buffer.write(chunk, 0, read)
+        }
+        return buffer.toString(Charsets.UTF_8.name())
+    }
+
     /** 解析 catalog.json 内容 */
     private fun parseCatalog(jsonStr: String): DictCatalog? {
         return try {
@@ -254,6 +333,13 @@ object DictDownloader {
                     Log.w(TAG, "跳过非法词库 id: $id")
                     continue
                 }
+                // 同理丢弃不可信下载源（非 HTTPS / 域名不在白名单），不进入展示列表
+                val dictUrl = obj.getString("url")
+                val trusted = runCatching { requireTrustedUrl(dictUrl) }.isSuccess
+                if (!trusted) {
+                    Log.w(TAG, "跳过不可信下载源的词库 $id: $dictUrl")
+                    continue
+                }
                 dictionaries.add(
                     RemoteDictInfo(
                         id = id,
@@ -261,7 +347,7 @@ object DictDownloader {
                         category = obj.optString("category", "professional"),
                         description = obj.optString("description", ""),
                         version = obj.optString("version", "1.0.0"),
-                        url = obj.getString("url"),
+                        url = dictUrl,
                         size = obj.optLong("size", 0),
                         author = obj.optString("author", ""),
                         sha256 = obj.optString("sha256", "")

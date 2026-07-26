@@ -328,6 +328,29 @@ Java_com_ziyou_ime_core_RimeNative_processRimeKey(JNIEnv *env,
   return Rime::Instance().processKey(keycode, mask);
 }
 
+// 批量按键处理（热路径）：process_key + get_commit + get_context 合并为单次跨界，
+// 返回 [consumed: Boolean, commit: CommitProto?, context: ContextProto?]；
+// 未消费时后两项为 null（调用方无需刷新 UI）
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_com_ziyou_ime_core_RimeNative_processRimeKeyBulk(
+    JNIEnv *env, jclass /* thiz */, jint keycode, jint mask) {
+  auto &rime = Rime::Instance();
+  bool consumed = rime.processKey(keycode, mask);
+  auto jConsumed = JRef(env, env->NewObject(GlobalRef->Boolean,
+                                            GlobalRef->BooleanInit, consumed));
+  auto result = env->NewObjectArray(3, GlobalRef->Object, nullptr);
+  env->SetObjectArrayElement(result, 0, jConsumed);
+  if (consumed) {
+    auto commit = rime.commit();
+    auto jCommit = JRef(env, rimeCommitToJObject(env, *commit));
+    auto context = rime.context();
+    auto jContext = JRef(env, rimeContextToJObject(env, *context));
+    env->SetObjectArrayElement(result, 1, jCommit);
+    env->SetObjectArrayElement(result, 2, jContext);
+  }
+  return result;
+}
+
 // 提交当前组合
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_ziyou_ime_core_RimeNative_commitRimeComposition(

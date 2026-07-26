@@ -14,7 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.config.DisplayModeManager
 import com.ziyou.ime.config.ThemeManager
-import com.ziyou.ime.daemon.RimeSession
+import com.ziyou.ime.di.AppContainer
 import com.ziyou.ime.data.AssociationManager
 import com.ziyou.ime.data.SideSymbol
 import com.ziyou.ime.data.SideSymbolRepository
@@ -49,12 +49,15 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var themeValueText: TextView
     private lateinit var levelValueText: TextView
 
+    /** Rime 引擎（经 DI 容器获取，依赖接口而非 RimeSession 单例） */
+    private val rime get() = AppContainer.rimeEngine
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(buildSettingsView())
         title = "字由输入法 设置"
 
-        // 通过 RimeSession 统一初始化引擎（异步，避免主线程阻塞和双重初始化）
+        // 经 DI 容器统一初始化引擎（异步，避免主线程阻塞和双重初始化）
         ensureRimeStarted()
 
         // 由输入法侧栏「＋」拉起时，直接弹出侧栏符号管理
@@ -65,22 +68,22 @@ class SettingsActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (RimeSession.initialized) {
+        if (rime.initialized) {
             refreshDisplay()
         }
     }
 
     /**
-     * 通过 RimeSession 统一初始化 Rime 引擎
+     * 经 DI 容器统一初始化 Rime 引擎
      * 避免直接调用 RimeNative（线程不安全）并防止与 IMS 服务双重初始化
      */
     private fun ensureRimeStarted() {
         lifecycleScope.launch {
             try {
-                if (!RimeSession.initialized) {
-                    Log.i(TAG, "SettingsActivity: 开始初始化 RimeSession")
-                    RimeSession.initialize(applicationContext, fullCheck = false)
-                    Log.i(TAG, "SettingsActivity: RimeSession 初始化完成")
+                if (!rime.initialized) {
+                    Log.i(TAG, "SettingsActivity: 开始初始化 Rime 引擎")
+                    rime.initialize(applicationContext, fullCheck = false)
+                    Log.i(TAG, "SettingsActivity: Rime 引擎初始化完成")
                 }
                 // 初始化完成后刷新显示
                 withContext(Dispatchers.Main) {
@@ -248,13 +251,13 @@ class SettingsActivity : AppCompatActivity() {
     private fun showSchemaSelector() {
         lifecycleScope.launch {
             try {
-                val schemas = RimeSession.api.getSchemaList()
+                val schemas = rime.api.getSchemaList()
                 if (schemas.isEmpty()) {
                     showToast("无法获取方案列表，请确保Rime引擎已启动")
                     return@launch
                 }
 
-                val currentSchema = RimeSession.api.getCurrentSchema()
+                val currentSchema = rime.api.getCurrentSchema()
                 val currentIndex = schemas.indexOfFirst { it.schemaId == currentSchema }
                 val schemaNames = schemas.map { it.name }.toTypedArray()
 
@@ -264,7 +267,7 @@ class SettingsActivity : AppCompatActivity() {
                         .setSingleChoiceItems(schemaNames, currentIndex) { dialog, which ->
                             val selectedSchema = schemas[which]
                             lifecycleScope.launch {
-                                RimeSession.api.selectSchema(selectedSchema.schemaId)
+                                rime.api.selectSchema(selectedSchema.schemaId)
                                 withContext(Dispatchers.Main) {
                                     schemaValueText.text = selectedSchema.name
                                     showToast("已切换到: ${selectedSchema.name}")
@@ -369,7 +372,7 @@ class SettingsActivity : AppCompatActivity() {
         showToast("开始同步用户词典...")
         lifecycleScope.launch {
             try {
-                val success = RimeSession.api.syncUserData()
+                val success = rime.api.syncUserData()
                 withContext(Dispatchers.Main) {
                     if (success) {
                         showToast("用户词典同步完成")
@@ -389,16 +392,30 @@ class SettingsActivity : AppCompatActivity() {
     private fun redeployRime() {
         AlertDialog.Builder(this)
             .setTitle("重新部署")
-            .setMessage("将重新部署所有Rime配置文件，可能需要几秒钟。是否继续？")
+            .setMessage("将重新部署所有Rime配置文件并重启引擎，可能需要几秒钟。是否继续？")
             .setPositiveButton("确定") { _, _ ->
                 showToast("开始重新部署...")
-                val success = AssetDeployer.forceDeploy(this)
-                if (success) {
-                    showToast("部署完成，重启输入法后生效")
-                    Log.i(TAG, "重新部署成功")
-                } else {
-                    showToast("部署失败")
-                    Log.e(TAG, "重新部署失败")
+                lifecycleScope.launch {
+                    try {
+                        // 强制重刷 assets（IO 线程，避免主线程递归复制整包资源 ANR）
+                        val deployed = withContext(Dispatchers.IO) {
+                            AssetDeployer.forceDeploy(applicationContext)
+                        }
+                        if (!deployed) {
+                            showToast("部署失败")
+                            return@launch
+                        }
+                        // 经 DI 容器热重启引擎：redeploy 会重新执行组合根装配的部署步骤
+                        // （含扩展词库注入），避免 forceDeploy 覆盖主词库后扩展词库丢失，
+                        // 且无需用户手动重启输入法
+                        rime.redeploy(applicationContext)
+                        showToast("重新部署完成")
+                        refreshDisplay()
+                        Log.i(TAG, "重新部署成功")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "重新部署失败: ${e.message}", e)
+                        showToast("部署失败: ${e.message ?: "未知错误"}")
+                    }
                 }
             }
             .setNegativeButton("取消", null)
@@ -406,11 +423,11 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun refreshDisplay() {
-        if (::schemaValueText.isInitialized && RimeSession.initialized) {
+        if (::schemaValueText.isInitialized && rime.initialized) {
             lifecycleScope.launch {
                 try {
-                    val currentSchema = RimeSession.api.getCurrentSchema()
-                    val schemas = RimeSession.api.getSchemaList()
+                    val currentSchema = rime.api.getCurrentSchema()
+                    val schemas = rime.api.getSchemaList()
                     val schemaName = schemas.firstOrNull { it.schemaId == currentSchema }?.name
                     withContext(Dispatchers.Main) {
                         schemaValueText.text = schemaName ?: "未知方案"

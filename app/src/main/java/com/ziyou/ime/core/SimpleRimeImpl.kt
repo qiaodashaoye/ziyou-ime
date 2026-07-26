@@ -44,6 +44,17 @@ class SimpleRimeImpl(
         }
     }
 
+    override suspend fun processKeyBulk(keycode: Int, mask: Int): KeyEventResult {
+        return dispatcher.dispatch {
+            val raw = RimeNative.processRimeKeyBulk(keycode, mask)
+            KeyEventResult(
+                consumed = raw?.getOrNull(0) as? Boolean ?: false,
+                commit = raw?.getOrNull(1) as? CommitProto,
+                context = raw?.getOrNull(2) as? ContextProto
+            )
+        }
+    }
+
     override suspend fun commitComposition(): Boolean {
         return dispatcher.dispatch {
             RimeNative.commitRimeComposition()

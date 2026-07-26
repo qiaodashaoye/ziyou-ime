@@ -71,6 +71,13 @@ data class ContextProto(
     val caretPos: Int
 )
 
+/** 一次按键的批量处理结果（热路径：单次 JNI 跨界返回三元组） */
+data class KeyEventResult(
+    val consumed: Boolean,
+    val commit: CommitProto?,
+    val context: ContextProto?
+)
+
 /** 输入法状态 */
 data class StatusProto(
     val schemaId: String,

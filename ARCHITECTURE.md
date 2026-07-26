@@ -8,24 +8,29 @@
 字由输入法按 **Gradle 多模块** 组织：`:app`（Android 应用 + JNI/引擎集成 + UI + 业务域持久化）
 与 `:core-logic`（纯 Kotlin 逻辑库，无 Android UI / 无 JNI 依赖）。依赖方向 `:app → :core-logic` 单向、
 由编译器强制。`:app` 内部沿用经典的 **五层引擎栈**（UI → IME → Core → JNI → Engine），
-并横向扩展三个**业务域**（等级体系、扩展词库、九宫格 T9 输入），可复测的纯逻辑下沉到 `:core-logic`：
+并横向扩展四个**业务域**（等级体系、扩展词库、九宫格 T9 输入、技能插件），可复测的纯逻辑下沉到 `:core-logic`：
 
 ```
 ┌───────────────────────────── :app 模块 ──────────────────────────────┐
 │                              UI 层                                     │
 │  SettingsActivity(传统View)  ·  LevelActivity / DictManagerActivity   │
+│  SkillManagerActivity / SkillDevGuideActivity(技能插件管理/开发指南)    │
 │                              (Jetpack Compose Material3)               │
 ├──────────────────────────────────────────────────────────────────────┤
 │                              IME 层                                     │
-│  ZiYouInputMethodService（生命周期 + 视图装配，已变薄）            │
-│   ├ InputLogicController（Rime 交互 / 上屏计分 / 刷新 UI）              │
+│  ZiYouInputMethodService（生命周期 + 视图装配，职责持续外移）        │
+│   ├ InputLogicController（Rime 交互 / 上屏监听 / 刷新 UI）              │
 │   ├ KeyboardLayoutManager（键盘视图装载 / 复合布局组装）               │
-│   └ PinyinHintProvider（九宫格拼音提示/预览，纯逻辑）                   │
+│   ├ PinyinHintProvider（九宫格拼音提示/预览，纯逻辑）                   │
+│   ├ DisplayModeController（停靠/悬浮形态解析、切换与悬浮 insets）      │
+│   └ SkillPanelCoordinator（技能面板生命周期与三态布局编排）           │
 │  键盘视图: BaseKeyboardView → QwertyKeyboardView / NineGridKeyboardView │
 │  候选/编码: SimpleCandidatesView · PreeditOverlayView · PinyinSideBar   │
+│  面板容器: SkillPanelContainer(WebView) · FloatingPanelContainer(悬浮)  │
 ├──────────────────────────────────────────────────────────────────────┤
 │                          Core 层 + DI                                  │
 │  RimeEngine(接口) ← RimeSession(实现)   ·   di/AppContainer(组合根)     │
+│  RimeDeployStep(部署步骤抽象，组合根装配，反转对业务域的依赖)         │
 │  RimeApi · SimpleRimeImpl · RimeDispatcher                             │
 │  RimeMessage · RimeConfig · RimeConfigManager · ThemeManager           │
 ├──────────────────────────────────────────────────────────────────────┤
@@ -41,6 +46,8 @@
 │  纯逻辑（无 Android/JNI 依赖，可独立单元测试）                          │
 │  util/T9PinYinUtils(双向映射) · core/t9/KeyRecordStack(T9 状态机)       │
 │  core/level/LevelEngine(等级计分纯引擎)                                 │
+│  core/skill/*(manifest 校验 · Zip 安全 · 版本比较 · 权限定义)            │
+│  core/floating/FloatingPanelGeometry(悬浮几何) · core/markdown(轻渲染)   │
 └──────────────────────────────────────────────────────────────────────┘
 
       横向业务域（:app 内，复用引擎栈，通过 IME 层与 UI 层接入）
@@ -50,7 +57,9 @@
 │  LevelStats(热路径)  │  DictDownloader     │  T9PinYinUtils*(双向映射)   │
 │  LevelEngine*(计分)  │  DictModels         │  SideSymbolRepository       │
 └────────────────────┴────────────────────┴───────────────────────────┘
-      *标注项已下沉到 :core-logic 模块（纯逻辑）
+      *标注项已下沉到 :core-logic 模块（纯逻辑）；第四个业务域 skill/ 技能插件
+      （SkillManager · SkillBridge · SkillRuntime · SkillPackageInstaller ·
+      SkillWebViewFactory）见下文「技能插件系统」一节，其纯校验逻辑位于 :core-logic 的 core/skill
 ```
 
 **依赖方向**：`:app` → `:core-logic`（单向）；`:app` 内 UI → IME → Core → JNI → Engine（单向向下）。
@@ -70,7 +79,9 @@ librime 不是线程安全的，所有 Rime API 调用必须在同一线程执�
 JNI 层使用 C++ RAII 避免资源泄漏：`SessionHolder`（会话）、`CString`（UTF 字符）、`JRef`（LocalRef）、`JString`（JNI 字符串）。
 
 ### 3. 批量 API 调用
-减少 JNI 跨界次数。`getRimeBulkCandidates()` 一次返回候选词列表、总数与高亮索引，避免多次跨越 JNI 边界。
+减少 JNI 跨界次数。`getRimeBulkCandidates()` 一次返回候选词列表、总数与高亮索引；
+`processRimeKeyBulk()` 把按键热路径的 `processKey + getCommit + getContext` 合并为单次跨界，
+一次按键仅 1 次主线程↔Rime 线程往返与 1 次 JNI 调用（原为 3 次）。
 
 ### 4. 模块条件编译
 通过 CMake `option()` 控制可选模块（Lua、Octagram、Predict、OpenCC）的编译链接，未启用模块不引入依赖，保持最小二进制体积。
@@ -85,6 +96,11 @@ JNI 层使用 C++ RAII 避免资源泄漏：`SessionHolder`（会话）、`CStri
 ### 7. 引擎接口化 + 依赖注入
 引擎能力抽象为 `RimeEngine`（生命周期）与 `RimeApi`（操作）两个接口，生产实现分别为 `RimeSession`（`object`）与 `SimpleRimeImpl`。
 调用方经 `di/AppContainer`（组合根）获取 `RimeEngine`，依赖接口而非全局单例；测试可用 `overrideRimeEngine()` 注入替身。
+组合根另承担两项装配，使依赖方向保持单向：
+- `RimeSession.deploySteps`：引擎启动前的部署步骤（`RimeDeployStep`：资源部署 → 扩展词库注入），
+  daemon 层不再直接 import config/dict 业务模块；
+- `commitListeners`：编辑器路径上屏后的横切监听（如等级计分），输入热路径（InputLogicController）
+  不硬编码业务单例，回调参数仅为脱敏码点数。
 
 ### 8. 纯逻辑模块化
 无 Android/JNI 依赖的纯逻辑（T9 映射、九宫格状态机、等级计分）下沉到独立 `:core-logic` 模块。
@@ -110,7 +126,8 @@ private:
 - **惰性会话**：首次调用时创建 `SessionHolder`，后续复用
 - **环境变量传递路径**：`setenv()` 将 Java 层路径传递给 librime traits
 
-`rime_jni.cc` 共导出 20 个 `RimeNative_*` JNI 函数（对应 `RimeNative.kt` 的 20 个 `external` 声明），
+`rime_jni.cc` 共导出 21 个 `RimeNative_*` JNI 函数（对应 `RimeNative.kt` 的 21 个 `external` 声明，
+含热路径批量函数 `processRimeKeyBulk`），
 另有一个静态回调 `handleRimeMessage` 用于 librime 通知回传。
 
 #### SessionHolder (`session.h`)
@@ -163,6 +180,7 @@ interface RimeApi {
     suspend fun startup(sharedDir, userDir, version, fullCheck); suspend fun shutdown()
     // 输入处理（热路径）
     suspend fun processKey(keycode, mask): Boolean
+    suspend fun processKeyBulk(keycode, mask): KeyEventResult   // 单次跨界返回 (consumed, commit, context)
     suspend fun commitComposition(): Boolean; suspend fun clearComposition()
     suspend fun replaceKey(caretPos, length, replacement): Boolean   // 九宫格拼音消歧关键
     // 状态查询
@@ -188,7 +206,9 @@ interface RimeApi {
 
 #### RimeSession（RimeEngine 生产实现，生命周期单例）
 `daemon/RimeSession.kt`（`object`，实现 `RimeEngine`）统一管理引擎生命周期，供 IME 服务与设置页共用，避免双重初始化：
-- `initialize(context, fullCheck)`：**在 `Dispatchers.IO` 上**部署资源（`AssetDeployer`）→ 注入扩展词库（`DictManager.regenerateMainDict`）→ 启动引擎（带超时保护），避免阻塞主线程
+- `initialize(context, fullCheck)`：**在 `Dispatchers.IO` 上**按序执行 `deploySteps`（由组合根装配：
+  资源部署 `AssetDeployer` → 注入扩展词库 `DictManager.regenerateMainDict`，daemon 层不直接依赖二者）
+  → 启动引擎（带超时保护），避免阻塞主线程
 - `redeploy(context)`：词库变更后重新部署引擎使新词库生效
 - `destroy()`：销毁会话；`api`：`RimeApi` 实例；`messageFlow`：消息流；`initialized`：是否已初始化
 - **生命周期互斥**：`initialize`/`destroy`/`redeploy` 由 `lifecycleMutex` 串行化，`isInitialized` 标记为 `@Volatile`；
@@ -239,15 +259,20 @@ onDestroy()
 ```
 
 #### 输入协作类（从 Service 拆分）
-为使 `ZiYouInputMethodService` 聚焦「Android 生命周期 + 视图装配」，输入相关职责拆分为三个协作类：
-- **InputLogicController**（`ime/InputLogicController.kt`）：核心输入路径。持有 `RimeEngine`、协程作用域与共享的 `KeyRecordStack`，
-  负责 `processKey` / `selectCandidate` / `changePage` / `selectPinyin` / `restorePinyin` / `commitSideSymbol`、上屏计分与 `updateUI`；
+为使 `ZiYouInputMethodService` 聚焦「Android 生命周期 + 视图装配」，输入/形态/面板职责拆分为五个协作类：
+- **InputLogicController**（`ime/InputLogicController.kt`）：核心输入路径。持有 `RimeEngine`、协程作用域、共享的 `KeyRecordStack`
+  与组合根注入的 `commitListeners`，负责 `processKey`（经 `processKeyBulk` 单次跨界）/ `selectCandidate` / `changePage` /
+  `selectPinyin` / `restorePinyin` / `commitSideSymbol` 与 `CommitTarget` 上屏路由；
   通过 `Callbacks` 反向获取 `InputConnection`，并回调 Service 的 `renderContext` 在主线程刷新视图。
 - **KeyboardLayoutManager**（`ime/KeyboardLayoutManager.kt`）：键盘视图创建与九宫格「侧栏 + 三行网格 + 全宽底栏」复合布局组装；
   经 `Callbacks` 上抛按键/切换/侧栏等交互，`install()` 返回构造好的视图引用供 Service 持有。
 - **PinyinHintProvider**（`ime/PinyinHintProvider.kt`）：九宫格拼音候选与编码区预览的纯逻辑（依赖 `ContextProto` 与 `T9PinYinUtils`），可独立单测。
+- **DisplayModeController**（`ime/DisplayModeController.kt`）：停靠/悬浮形态解析（手动覆盖 > 总开关 > 横屏自动）、
+  形态切换与悬浮窗口 insets（几何计算委托 :core-logic 的 `FloatingPanelGeometry`）；经 `Host` 回调 Service 重建视图与重同步引擎。
+- **SkillPanelCoordinator**（`ime/SkillPanelCoordinator.kt`）：技能面板生命周期（打开/关闭/WebView 释放）与三态布局编排
+  （键盘叠层 / 提升挂载 / 收缩态，高度守恒）；经 `Host` 访问容器引用并切换 `commitTarget` 输入路由。
 
-`ZiYouInputMethodService` 由约 822 行降至约 609 行，只保留生命周期回调、视图容器装配、方案/模式切换与消息处理。
+`ZiYouInputMethodService` 只保留生命周期回调、视图容器装配、方案/模式切换与消息处理（具体行数随演进变化，不在此记录）。
 
 #### 键盘视图体系
 - **BaseKeyboardView**（抽象基类）：基于「行 × 相对宽度」的布局模型，负责 Canvas 绘制（背景/圆角/阴影/文字）、
@@ -337,6 +362,34 @@ DictManagerViewModel / DictManagerActivity  Compose 管理界面：分类浏览�
   （模块化 Boost 无单一 include 目录），superbuild 已在 add_subdirectory(librime) 后为
   插件 objs 目标补链 Boost 使用要求，并关闭插件宿主工具（BUILD_TOOLS=OFF）。
 
+#### 技能插件系统 (skill/ + :core-logic/core/skill + assets/skill_runtime)
+基于 WebView 沙箱的可扩展技能面板（计算器/天气/星座等小工具，开发者指南见
+[docs/技能插件开发指南.md](docs/技能插件开发指南.md)）：
+```
+SkillManager          扫描内置（assets/skills）与已安装（files/skills）技能，manifest 校验失败即不展示
+SkillPackageInstaller .skill 包（zip）安装流水线：大小/条目数/Zip Slip/manifest 校验 → 用户确认 → staging 原子替换
+SkillWebViewFactory   安全基线统一收口：资源全量拦截（仅放行包内相对路径）、CSP 注入、
+                      DOM 存储/文件访问全关、渲染进程崩溃隔离；垫片 imeskill.js 经
+                      DOCUMENT_START_SCRIPT 注入，apiVersion 由 HOST_API_VERSION 动态覆写（单一事实源）
+SkillBridge           JS 单入口窄面 Bridge（__IMESkillNative.postMessage），全异步 Promise，异常全量兑底不波及 IME
+SkillRuntime          能力实现层：权限检查、storage（串行 IO 线程读写，限额 1MB）、fetch 代理
+                      （HTTPS + 域名白名单小写/IDN 归一化 + 禁重定向 + 频控/限额）、剪贴板、输入路由
+core/skill/*          纯校验逻辑（:core-logic 可单测）：SkillManifestValidator（含 HOST_API_VERSION）、
+                      ZipEntryValidator、SkillVersionComparator、SkillPermission
+```
+- 面板由 IME 层 `SkillPanelCoordinator` 编排三态布局（键盘叠层 / needs_input 提升挂载 / 收缩态，IME 窗口总高守恒）；
+- 输入路由经 `InputLogicController.CommitTarget` 抽象：面板申请焦点后上屏文本改道注入面板输入框，
+  Rime 编码/候选链路零改动；`sendText` 强制先复位路由再上屏；
+- 安全红线：技能无法读取用户在其他应用的输入内容；渲染进程崩溃不波及 IME 主进程。
+
+#### 悬浮键盘形态 (DisplayMode + FloatingPanelContainer)
+停靠（DOCKED）/ 悬浮（FLOATING）两种显示形态与键盘布局正交，由 IME 层 `DisplayModeController` 管理：
+- 形态解析优先级：手动覆盖（本次服务生命周期） > 悬浮总开关 > 横屏自动悬浮（`DisplayModeManager` 持久化）；
+- 悬浮时内容包裹进 `FloatingPanelContainer`（拖拽/位置持久化/停靠按钮），键盘/候选/编码区统一缩放；
+- 窗口 insets：内容 inset 压到容器底部（宿主应用视键盘高度为 0，游戏画面不被顶起），
+  触摸区域裁剪为面板矩形、面板外穿透；几何计算下沉 :core-logic 的 `FloatingPanelGeometry`（纯逻辑可单测）；
+- 全局禁用全屏提取模式（`onEvaluateFullscreenMode() = false`），横屏下保留原应用画面。
+
 ## 数据流
 
 ### 数据流 A：按键到输出（QWERTY / 普通按键）
@@ -344,13 +397,13 @@ DictManagerViewModel / DictManagerActivity  Compose 管理界面：分类浏览�
 1. 触摸软键盘  QwertyKeyboardView.onTouchEvent()
 2. 回调 IME    onKeyPress(keyCode, mask) → handleSoftKeyPress()
 3. 委托控制器  serviceScope.launch { inputLogic.processKey(keyCode, mask) }
-4. 调度到线程  AppContainer.rimeEngine.api.processKey() → SimpleRimeImpl → dispatcher.dispatch { RimeNative.processRimeKey() }
-5. JNI 调用    Java_..._processRimeKey → Rime::Instance().processKey → rime->process_key(session, keycode, mask)
+4. 单次调度    AppContainer.rimeEngine.api.processKeyBulk() → SimpleRimeImpl → dispatcher.dispatch { RimeNative.processRimeKeyBulk() }
+5. JNI 批量    Java_..._processRimeKeyBulk → process_key → [被消费则同次跨界取 commit + context] → (consumed, commit, context)
 6. 引擎处理    [词典查询/拼音解析/候选生成] → true(消费)/false(未消费)
-7. 取结果      if (consumed) { getCommit()?.text → commitAndCount(text); updateUI() }   # 均在 InputLogicController 内
-               else 退格→deleteSurroundingText / 可打印字符→直接提交
-8. UI 更新     updateUI() → withContext(Main) { callbacks.renderContext(context) }（Service 刷新候选/编码/侧栏）
-9. 计分埋点    commitAndCount → LevelStats.onCommit(codePointCount)  # 仅内存自增，达阈值后台落盘
+7. 取结果      if (consumed) { result.commit?.text → commitAndCount(text)；用 result.context 刷新 UI }
+               else 退格→deleteSurroundingText / 可打印字符→直接提交   # 均在 InputLogicController 内
+8. UI 更新     withContext(Main) { callbacks.renderContext(result.context) }（Service 刷新候选/编码/侧栏）
+9. 上屏监听    commitAndCount → commitListeners（组合根注入，当前为 LevelStats.onCommit 计分，仅内存自增）
 ```
 
 ### 数据流 B：九宫格拼音消歧（多音节组词）
@@ -479,6 +532,7 @@ Rime 只组织光标之前的编码片段。若把选定拼音追加到编码串
 |------|------|--------|
 | `startup()` / `shutdown()` | 启动 / 关闭引擎 | Unit |
 | `processKey(keycode, mask)` | 处理按键 | Boolean(是否消费) |
+| `processKeyBulk(keycode, mask)` | 批量处理按键（热路径，单次跨界） | KeyEventResult(consumed, commit, context) |
 | `commitComposition()` / `clearComposition()` | 提交 / 清除当前编码 | Boolean / Unit |
 | `replaceKey(caretPos, length, replacement)` | 替换编码串片段（九宫格消歧） | Boolean |
 | `getCommit()` / `getContext()` / `getStatus()` | 获取提交文本 / 上下文 / 状态 | Proto? |

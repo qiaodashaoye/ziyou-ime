@@ -11,6 +11,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import com.ziyou.ime.core.skill.SkillManifestValidator
 import com.ziyou.ime.core.skill.ZipEntryValidator
 import java.io.ByteArrayInputStream
 
@@ -139,9 +140,14 @@ object SkillWebViewFactory {
 
     // ===== 内部 =====
 
-    /** 读取垫片脚本；读取失败返回空串（技能仍可渲染，仅 Bridge 不可用并记录错误） */
+    /** 读取垫片脚本并同步 apiVersion 为宏事实源 [SkillManifestValidator.HOST_API_VERSION]
+     *  （正则不命中时保留文件内回退值）；读取失败返回空串（技能仍可渲染，仅 Bridge 不可用并记录错误） */
     private fun loadShim(context: Context): String = try {
         context.assets.open(SHIM_ASSET).bufferedReader().use { it.readText() }
+            .replaceFirst(
+                Regex("""apiVersion:\s*\d+"""),
+                "apiVersion: ${SkillManifestValidator.HOST_API_VERSION}"
+            )
     } catch (e: Exception) {
         Log.e(TAG, "imeskill.js 垫片读取失败: ${e.message}")
         ""

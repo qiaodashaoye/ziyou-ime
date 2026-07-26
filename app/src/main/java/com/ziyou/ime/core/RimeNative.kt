@@ -55,6 +55,13 @@ object RimeNative {
     @JvmStatic
     external fun processRimeKey(keycode: Int, mask: Int): Boolean
 
+    /**
+     * 批量处理按键（热路径）：一次 JNI 跨界完成 processKey + getCommit + getContext。
+     * 返回 [consumed: Boolean, commit: CommitProto?, context: ContextProto?]；未消费时后两项为 null。
+     */
+    @JvmStatic
+    external fun processRimeKeyBulk(keycode: Int, mask: Int): Array<Any?>?
+
     /** 提交当前编码 */
     @JvmStatic
     external fun commitRimeComposition(): Boolean

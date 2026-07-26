@@ -1,16 +1,11 @@
 package com.ziyou.ime.ime
 
 import android.content.Intent
-import android.content.res.Configuration
-import android.graphics.Rect
 import android.inputmethodservice.InputMethodService
 import android.os.SystemClock
-import android.text.InputType
 import android.util.Log
-import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import android.view.View
-import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.widget.FrameLayout
@@ -21,7 +16,6 @@ import com.ziyou.ime.config.DisplayModeManager
 import com.ziyou.ime.config.ThemeManager
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.core.RimeMessage
-import com.ziyou.ime.core.floating.FloatingPanelGeometry
 import com.ziyou.ime.daemon.RimeEngine
 import com.ziyou.ime.core.t9.KeyRecordStack
 import com.ziyou.ime.data.AssociationManager
@@ -80,22 +74,72 @@ class ZiYouInputMethodService : InputMethodService() {
     /** 当前键盘布局类型 */
     private var currentKeyboardType: KeyboardType = KeyboardType.QWERTY
 
-    /** 当前显示形态（停靠 / 悬浮），与键盘布局正交 */
-    private var currentDisplayMode: DisplayMode = DisplayMode.DOCKED
+    /** 显示形态控制器（停靠/悬浮解析、切换与悬浮 insets，从 Service 拆分） */
+    private val displayModeCtrl by lazy {
+        DisplayModeController(this, displayModeHost)
+    }
 
-    /**
-     * 本次服务生命周期内的手动形态覆盖。
-     * 用户经「浮」键/停靠按钮手动切换后优先于「横屏自动悬浮」开关，
-     * 避免手动停靠后下个输入会话又被自动切回悬浮。
-     */
-    private var manualModeOverride: DisplayMode? = null
+    /** 提供给 [DisplayModeController] 的回调：切换前清理 + 切换后重建/重同步。 */
+    private val displayModeHost = object : DisplayModeController.Host {
+        override fun beforeModeSwitch() {
+            keyboardView?.resetInputState()
+        }
 
-    /** 悬浮形态的根容器（仅 FLOATING 下非空），供 onComputeInsets 裁剪触摸区域 */
-    private var floatingContainer: FloatingPanelContainer? = null
+        override fun onModeSwitched(mode: DisplayMode) {
+            setInputView(buildInputView(mode))
+            serviceScope.launch {
+                try {
+                    if (!awaitEngineReady(KEY_ENGINE_READY_TIMEOUT_MS)) return@launch
+                    applyEngineForKeyboard(currentKeyboardType)
+                } catch (e: Exception) {
+                    Log.w(TAG, "切换显示形态后同步状态异常: ${e.message}")
+                }
+            }
+        }
+    }
 
-    /** 技能面板（仅打开时非空；关闭即释放内部 WebView）。
-     *  挂载位置随阶段切换：技能列表/普通技能覆盖键盘区；needs_input 技能提升至编码区上方。 */
-    private var skillPanel: SkillPanelContainer? = null
+    /** 技能面板协调器（面板生命周期与三态布局编排，从 Service 拆分） */
+    private val skillPanels by lazy {
+        SkillPanelCoordinator(this, skillPanelHost)
+    }
+
+    /** 提供给 [SkillPanelCoordinator] 的宿主能力：容器访问、上屏出口与输入路由切换。 */
+    private val skillPanelHost = object : SkillPanelCoordinator.Host {
+        override fun contentLayout(): LinearLayout? = this@ZiYouInputMethodService.contentLayout
+
+        override fun keyboardContainer(): FrameLayout? =
+            this@ZiYouInputMethodService.keyboardContainer
+
+        override fun candidatesContainer(): LinearLayout? =
+            this@ZiYouInputMethodService.candidatesContainer
+
+        override fun isFloatingMode(): Boolean =
+            displayModeCtrl.currentMode == DisplayMode.FLOATING
+
+        override fun currentEditorInfo(): EditorInfo? = currentInputEditorInfo
+
+        override fun keyboardView(): BaseKeyboardView? = this@ZiYouInputMethodService.keyboardView
+
+        override fun commitText(text: String) = inputLogic.commitSideSymbol(text)
+
+        override fun setCommitTarget(target: InputLogicController.CommitTarget?) {
+            inputLogic.commitTarget = target
+        }
+
+        override fun onPanelWillOpen() {
+            // 清除活跃编码与候选/编码区展示，避免面板期间残留 preedit/候选
+            keyboardView?.resetInputState()
+            keyRecordStack.clear()
+            renderContext(null)
+            serviceScope.launch {
+                try {
+                    if (rime.initialized) rime.api.clearComposition()
+                } catch (e: Exception) {
+                    Log.w(TAG, "打开技能面板清除编码异常: ${e.message}")
+                }
+            }
+        }
+    }
 
     /** 输入视图内容根容器（技能面板/编码区/候选/键盘 自上而下堆叠） */
     private var contentLayout: LinearLayout? = null
@@ -134,9 +178,12 @@ class ZiYouInputMethodService : InputMethodService() {
     /** 部署完成后的键盘状态重同步任务（去重：新部署消息到来时取消上一次） */
     private var deploySyncJob: Job? = null
 
-    /** 输入逻辑控制器（与 Rime 交互、上屏、刷新 UI），经 DI 容器获取引擎。 */
+    /** 输入逻辑控制器（与 Rime 交互、上屏、刷新 UI），经 DI 容器获取引擎与上屏监听。 */
     private val inputLogic by lazy {
-        InputLogicController(AppContainer.rimeEngine, serviceScope, keyRecordStack, inputLogicCallbacks)
+        InputLogicController(
+            AppContainer.rimeEngine, serviceScope, keyRecordStack,
+            inputLogicCallbacks, AppContainer.commitListeners
+        )
     }
 
     /** 提供给 [InputLogicController] 的回调：编辑器连接 + 主线程 UI 渲染。 */
@@ -193,8 +240,7 @@ class ZiYouInputMethodService : InputMethodService() {
      */
     override fun onCreateInputView(): View {
         Log.d(TAG, "onCreateInputView")
-        currentDisplayMode = resolveDisplayMode()
-        return buildInputView(currentDisplayMode)
+        return buildInputView(displayModeCtrl.refresh())
     }
 
     /**
@@ -203,7 +249,7 @@ class ZiYouInputMethodService : InputMethodService() {
      */
     private fun buildInputView(mode: DisplayMode): View {
         // 重建前释放技能面板（旧容器即将废弃，WebView 必须显式销毁）
-        closeSkillPanel()
+        skillPanels.close()
         val theme = ThemeManager.getCurrentTheme(this)
         // 悬浮形态下键盘/候选/编码区统一缩放，停靠形态保持 1.0 零影响
         val scale = if (mode == DisplayMode.FLOATING) DisplayModeManager.FLOATING_SCALE else 1f
@@ -297,84 +343,16 @@ class ZiYouInputMethodService : InputMethodService() {
         currentKeyboardType = loadKeyboardType()
         installKeyboard(currentKeyboardType)
 
-        // 悬浮形态：内容包裹进悬浮面板容器（拖拽/位置持久化/停靠按钮）
-        return if (mode == DisplayMode.FLOATING) {
-            FloatingPanelContainer(this, root, theme).also { container ->
-                container.onRequestDock = { switchDisplayMode(DisplayMode.DOCKED) }
-                floatingContainer = container
-            }
-        } else {
-            floatingContainer = null
-            root
-        }
+        // 悬浮形态：内容包裹进悬浮面板容器（拖拽/位置持久化/停靠按钮，委托控制器）
+        return displayModeCtrl.wrapContent(root, mode, theme)
     }
 
-    // ===== 显示形态（停靠 / 悬浮） =====
+    // ===== 显示形态（停靠 / 悬浮，委托 DisplayModeController）=====
 
-    /**
-     * 解析当前应生效的显示形态：
-     * 手动覆盖（本次服务生命周期内） > 悬浮总开关 > 横屏自动悬浮。
-     */
-    private fun resolveDisplayMode(): DisplayMode {
-        manualModeOverride?.let { return it }
-        val landscape =
-            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val floating = DisplayModeManager.isFloatingEnabled(this) ||
-            (landscape && DisplayModeManager.isAutoFloatInLandscape(this))
-        return if (floating) DisplayMode.FLOATING else DisplayMode.DOCKED
-    }
-
-    /**
-     * 切换显示形态：重建输入视图并持久化开关。
-     * 仅重建视图层，Rime 编码/方案/ascii_mode 等引擎状态不受影响，
-     * 重建后经 applyEngineForKeyboard 把状态回写到新视图。
-     */
-    private fun switchDisplayMode(target: DisplayMode) {
-        if (target == currentDisplayMode) return
-        keyboardView?.resetInputState()
-        manualModeOverride = target
-        DisplayModeManager.setFloatingEnabled(this, target == DisplayMode.FLOATING)
-        currentDisplayMode = target
-        setInputView(buildInputView(target))
-        serviceScope.launch {
-            try {
-                if (!awaitEngineReady(KEY_ENGINE_READY_TIMEOUT_MS)) return@launch
-                applyEngineForKeyboard(currentKeyboardType)
-            } catch (e: Exception) {
-                Log.w(TAG, "切换显示形态后同步状态异常: ${e.message}")
-            }
-        }
-    }
-
-    /**
-     * 悬浮形态的窗口 insets：内容 inset 压到容器底部（宿主应用视键盘高度为 0，
-     * 游戏画面不被顶起），触摸区域裁剪为悬浮面板矩形，面板外触摸穿透给下层应用。
-     * 拖动中的 translation 位移会触发绘制遍历，系统随之重新回调本方法，
-     * 触摸区域与面板位置实时同步。几何计算委托 [FloatingPanelGeometry]（纯逻辑可单测）。
-     */
+    /** 悬浮形态的窗口 insets：委托 [DisplayModeController.computeInsets]。 */
     override fun onComputeInsets(outInsets: Insets) {
         super.onComputeInsets(outInsets)
-        if (currentDisplayMode != DisplayMode.FLOATING) return
-        val container = floatingContainer ?: return
-        val panelRect = Rect()
-        // 面板尚未完成布局时回退默认 insets，避免空触摸区域吞掉所有触摸
-        if (!container.getPanelRectInWindow(panelRect)) return
-        val containerLoc = IntArray(2)
-        container.getLocationInWindow(containerLoc)
-        val spec = FloatingPanelGeometry.computeInsets(
-            containerTopInWindow = containerLoc[1],
-            containerHeight = container.height,
-            panelLeftInWindow = panelRect.left,
-            panelTopInWindow = panelRect.top,
-            panelWidth = panelRect.width(),
-            panelHeight = panelRect.height()
-        )
-        outInsets.contentTopInsets = spec.contentTopInset
-        outInsets.visibleTopInsets = spec.contentTopInset
-        outInsets.touchableInsets = Insets.TOUCHABLE_INSETS_REGION
-        outInsets.touchableRegion.set(
-            spec.touchableLeft, spec.touchableTop, spec.touchableRight, spec.touchableBottom
-        )
+        displayModeCtrl.computeInsets(outInsets)
     }
 
     /**
@@ -408,8 +386,8 @@ class ZiYouInputMethodService : InputMethodService() {
     private fun installKeyboard(type: KeyboardType) {
         val container = keyboardContainer ?: return
         // 容器即将被清空重建，先关闭技能面板（释放 WebView，叠层/提升两种挂载均适用）
-        closeSkillPanel()
-        val floating = currentDisplayMode == DisplayMode.FLOATING
+        skillPanels.close()
+        val floating = displayModeCtrl.currentMode == DisplayMode.FLOATING
         val scale = if (floating) DisplayModeManager.FLOATING_SCALE else 1f
         val installed = keyboardLayoutManager.install(container, type, floating, scale)
         keyboardView = installed.keyboardView
@@ -548,9 +526,7 @@ class ZiYouInputMethodService : InputMethodService() {
         Log.d(TAG, "onStartInputView restarting=$restarting")
 
         // 重新解析显示形态（横屏自动悬浮 / 设置页开关变更），不一致则重建输入视图
-        val resolved = resolveDisplayMode()
-        if (resolved != currentDisplayMode) {
-            currentDisplayMode = resolved
+        displayModeCtrl.refreshIfChanged()?.let { resolved ->
             setInputView(buildInputView(resolved))
         }
 
@@ -595,7 +571,7 @@ class ZiYouInputMethodService : InputMethodService() {
         Log.d(TAG, "onFinishInputView")
 
         // 强制关闭技能面板（销毁 WebView，避免后台常驻内存/定时器）
-        closeSkillPanel()
+        skillPanels.close()
 
         // 丢弃未提交的多击预览并清空编码区
         keyboardView?.resetInputState()
@@ -695,17 +671,12 @@ class ZiYouInputMethodService : InputMethodService() {
 
             // 悬浮/停靠形态切换（游戏悬浮键盘）：重建输入视图，引擎状态不受影响
             KeyCode.KEYCODE_TOGGLE_FLOATING -> {
-                val target = if (currentDisplayMode == DisplayMode.FLOATING) {
-                    DisplayMode.DOCKED
-                } else {
-                    DisplayMode.FLOATING
-                }
-                switchDisplayMode(target)
+                displayModeCtrl.toggle()
             }
 
             // 技能面板开关：覆盖/移除键盘区域上的技能面板
             KeyCode.KEYCODE_SKILL_PANEL -> {
-                if (skillPanel != null) closeSkillPanel() else openSkillPanel()
+                skillPanels.toggle()
             }
 
             // 收起键盘（候选区按钮栏）
@@ -752,152 +723,6 @@ class ZiYouInputMethodService : InputMethodService() {
                 }
             }
         }
-    }
-
-    // ===== 技能面板（技能插件系统 Phase 1）=====
-
-    /** 技能面板的宿主能力：上屏走 InputLogicController 统一出口，编辑器信息按需低敏提供。 */
-    private val skillPanelHost = object : SkillPanelContainer.Host {
-        override fun commitText(text: String) = inputLogic.commitSideSymbol(text)
-
-        override fun onRequestClose() = closeSkillPanel()
-
-        override fun editorPackageName(): String? = currentInputEditorInfo?.packageName
-
-        override fun editorInputType(): String =
-            when (currentInputEditorInfo?.inputType?.and(InputType.TYPE_MASK_CLASS)) {
-                InputType.TYPE_CLASS_NUMBER -> "number"
-                InputType.TYPE_CLASS_PHONE -> "phone"
-                InputType.TYPE_CLASS_DATETIME -> "datetime"
-                else -> "text"
-            }
-
-        override fun performHaptic() {
-            keyboardView?.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-        }
-
-        override fun onRequestElevatedLayout(active: Boolean) = setSkillPanelElevated(active)
-
-        override fun onRequestImeExpanded(expanded: Boolean) = setSkillImeExpanded(expanded)
-
-        override fun onInputRoutingChanged(active: Boolean) {
-            // 上屏目标切换：激活时键盘文本改道注入面板输入框（Phase 3 输入路由）
-            inputLogic.commitTarget = if (active) skillPanel?.skillCommitTarget else null
-        }
-    }
-
-    /**
-     * 技能面板提升高度：基准为键盘实测高度（未布局时回退 250dp）乘以比例。
-     */
-    private fun skillPanelHeight(ratio: Float): Int {
-        val base = keyboardContainer?.height?.takeIf { it > 0 }
-            ?: (resources.displayMetrics.density * 250).toInt()
-        return (base * ratio).toInt()
-    }
-
-    /**
-     * 技能面板挂载位置切换：
-     * - elevated=true（needs_input 技能打开）：面板提升至 contentLayout 顶部（编码区上方），
-     *   紧凑高度（键盘 60%），下方键盘/候选/编码区完整可用供路由打字；
-     * - elevated=false（技能列表 / 普通技能）：面板回到键盘叠层（FrameLayout 覆盖，
-     *   高度自然锁定为键盘高度），候选/编码区仍在其上方。
-     * 两种挂载均不动引擎与键盘状态。
-     */
-    private fun setSkillPanelElevated(elevated: Boolean) {
-        val panel = skillPanel ?: return
-        val content = contentLayout ?: return
-        val container = keyboardContainer ?: return
-        // 任何挂载切换前先确保输入法界面完整可见（退出收缩态）
-        container.visibility = View.VISIBLE
-        candidatesContainer?.visibility = View.VISIBLE
-        if (elevated) {
-            if (panel.parent === content) return
-            (panel.parent as? ViewGroup)?.removeView(panel)
-            // 索引 0 = 整个输入视图最顶部（编码区之上）
-            content.addView(panel, 0, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, skillPanelHeight(0.6f)))
-        } else {
-            if (panel.parent === container) return
-            (panel.parent as? ViewGroup)?.removeView(panel)
-            container.addView(panel, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-        }
-    }
-
-    /**
-     * 输入法界面收缩/恢复（needs_input 技能经 ui.setExpanded 触发，expanded 指输入法界面）：
-     * - expanded=false：整个输入法界面收缩——键盘、编码区、候选词区一并缩回（GONE），
-     *   技能面板高度接管二者实测高度之和，IME 窗口总高严格不变，空间全部让给技能内容；
-     * - expanded=true：完整恢复键盘/编码区/候选区与紧凑面板高度
-     *   （input.requestFocus 时由面板自动触发，打字需要完整界面）。
-     * 仅提升挂载（needs_input）下生效；键盘叠层形态面板本就占满键盘区，无收缩语义。
-     * 引擎与键盘状态不受影响（仅 visibility/高度变化）。
-     */
-    private fun setSkillImeExpanded(expanded: Boolean) {
-        val panel = skillPanel ?: return
-        val content = contentLayout ?: return
-        val keyboard = keyboardContainer ?: return
-        val candidates = candidatesContainer ?: return
-        if (panel.parent !== content) return
-        val params = panel.layoutParams as? LinearLayout.LayoutParams ?: return
-        if (!expanded) {
-            if (keyboard.visibility == View.GONE) return
-            // 先取各区实测高度再隐藏，面板接管全部空间，窗口总高不变
-            params.height = skillPanelHeight(0.6f) + keyboard.height + candidates.height
-            keyboard.visibility = View.GONE
-            candidates.visibility = View.GONE
-        } else {
-            if (keyboard.visibility == View.VISIBLE) return
-            keyboard.visibility = View.VISIBLE
-            candidates.visibility = View.VISIBLE
-            params.height = skillPanelHeight(0.6f)
-        }
-        panel.layoutParams = params
-    }
-
-    /**
-     * 打开技能面板：初始以键盘叠层展示技能列表（覆盖键盘区域，候选/编码区保持在上方）；
-     * 选中 needs_input 技能后经 [setSkillPanelElevated] 提升至编码区上方。
-     * 键盘视图不移除——关闭面板即恢复，零状态丢失。
-     * 打开前清除活跃编码，避免面板期间残留 preedit/候选。
-     * 悬浮形态窄面板下 WebView 不可用（方案 §10），暂不开放。
-     */
-    private fun openSkillPanel() {
-        if (skillPanel != null) return
-        if (currentDisplayMode == DisplayMode.FLOATING) {
-            Toast.makeText(this, "悬浮键盘暂不支持技能面板", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val container = keyboardContainer ?: return
-        // 清除活跃编码与候选/编码区展示
-        keyboardView?.resetInputState()
-        keyRecordStack.clear()
-        renderContext(null)
-        serviceScope.launch {
-            try {
-                if (rime.initialized) rime.api.clearComposition()
-            } catch (e: Exception) {
-                Log.w(TAG, "打开技能面板清除编码异常: ${e.message}")
-            }
-        }
-        val panel = SkillPanelContainer(this, ThemeManager.getCurrentTheme(this), skillPanelHost)
-        // 初始挂载：键盘叠层（技能列表阶段覆盖键盘区域）
-        container.addView(panel, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-        skillPanel = panel
-    }
-
-    /** 关闭技能面板：释放 WebView/Bridge、复位上屏路由与键盘可见性，并从容器移除（幂等）。 */
-    private fun closeSkillPanel() {
-        val panel = skillPanel ?: return
-        skillPanel = null
-        panel.release()
-        // release 内部已回调复位，但彼时 skillPanel 已置空导致回调短路，
-        // 此处显式兜底：恢复键盘/候选/编码区可见（收缩态遗留）与上屏目标
-        keyboardContainer?.visibility = View.VISIBLE
-        candidatesContainer?.visibility = View.VISIBLE
-        inputLogic.commitTarget = null
-        (panel.parent as? ViewGroup)?.removeView(panel)
     }
 
     // ===== 候选词操作（委托 InputLogicController）=====
@@ -988,7 +813,7 @@ class ZiYouInputMethodService : InputMethodService() {
         val next = unlocked[(unlocked.indexOf(current) + 1) % unlocked.size]
         if (!ThemeManager.setTheme(this, next)) return
         keyboardView?.resetInputState()
-        setInputView(buildInputView(currentDisplayMode))
+        setInputView(buildInputView(displayModeCtrl.currentMode))
         serviceScope.launch {
             try {
                 if (!awaitEngineReady(KEY_ENGINE_READY_TIMEOUT_MS)) return@launch
@@ -1091,7 +916,7 @@ class ZiYouInputMethodService : InputMethodService() {
     override fun onDestroy() {
         Log.i(TAG, "InputMethodService onDestroy")
         // 释放技能面板（销毁 WebView）
-        closeSkillPanel()
+        skillPanels.close()
         // 服务销毁前落盘剩余的上屏计分
         LevelStats.flush()
         // 取消所有协程
@@ -1106,7 +931,7 @@ class ZiYouInputMethodService : InputMethodService() {
         preeditOverlay = null
         pinyinSideBar = null
         nineGridBottomBar = null
-        floatingContainer = null
+        displayModeCtrl.release()
         super.onDestroy()
     }
 }

@@ -113,18 +113,20 @@ object DictManager {
 
     /**
      * 安装词库：下载 + 记录 + 重新生成主词库
+     * 整体在 IO 线程执行：下载后的安装记录读写与主词库重写均为磁盘 IO，
+     * 不得回到调用方上下文（通常是主线程的 viewModelScope）执行。
      * @return 是否成功
      */
     suspend fun installDict(
         context: Context,
         info: RemoteDictInfo,
         onProgress: ((Long, Long) -> Unit)? = null
-    ): Boolean {
+    ): Boolean = withContext(Dispatchers.IO) {
         val extDir = getExtDictsDir(context)
         val file = DictDownloader.downloadDict(info, extDir, onProgress)
         if (file == null) {
             Log.e(TAG, "下载词库 ${info.id} 失败")
-            return false
+            return@withContext false
         }
 
         // 更新安装记录
@@ -144,7 +146,7 @@ object DictManager {
         regenerateMainDict(context)
 
         Log.i(TAG, "词库 ${info.id} 安装成功")
-        return true
+        true
     }
 
     /**

@@ -81,11 +81,28 @@ object SkillPackageInstaller {
         }
     }
 
-    /** 第二阶段：用户确认后解压安装（staging 目录就绪后原子替换旧目录）。 */
+    /**
+     * 第二阶段：用户确认后解压安装（备份-替换两段式，升级失败可回滚）。
+     *
+     * 顺序：解压到 staging → 旧版本目录移至 .backup_<id>（而非直接删除）→
+     * staging 重命名就位 → 成功后才删备份；就位失败则把备份恢复回去，
+     * 避免「旧版已删、新版未装」的非原子窗口把升级变成卸载。
+     * （.backup_/.staging_ 隐藏目录均被 SkillManager 扫描过滤，残留不影响列表）
+     */
     fun commit(context: Context, pending: PendingInstall) {
-        val installDir = File(SkillManager.installRoot(context), pending.manifest.id)
-        val stagingDir = File(SkillManager.installRoot(context), ".staging_${pending.manifest.id}")
+        val root = SkillManager.installRoot(context)
+        val installDir = File(root, pending.manifest.id)
+        val stagingDir = File(root, ".staging_${pending.manifest.id}")
+        val backupDir = File(root, ".backup_${pending.manifest.id}")
         try {
+            // 磁盘空间预检：解压膨胀余量按包体 4 倍 + 1MB 估算，不足即早失败，
+            // 避免解压中途写盘失败留下半成品
+            root.mkdirs()
+            val required = pending.packageFile.length() * 4 + 1024 * 1024
+            if (root.usableSpace in 1 until required) {
+                throw IllegalStateException("存储空间不足，无法安装技能")
+            }
+
             stagingDir.deleteRecursively()
             stagingDir.mkdirs()
             ZipFile(pending.packageFile).use { zip ->
@@ -102,12 +119,24 @@ object SkillPackageInstaller {
                     }
                 }
             }
-            installDir.deleteRecursively()
-            if (!stagingDir.renameTo(installDir)) {
-                throw IllegalStateException("安装目录写入失败")
+
+            // 旧版本移至备份位（而非删除），为就位失败保留回滚点
+            backupDir.deleteRecursively()
+            if (installDir.exists() && !installDir.renameTo(backupDir)) {
+                throw IllegalStateException("无法移出旧版本目录，安装中止（旧版本未受影响）")
             }
+            if (!stagingDir.renameTo(installDir)) {
+                // 就位失败：恢复旧版本，升级降级为无副作用失败
+                val rolledBack = backupDir.renameTo(installDir)
+                throw IllegalStateException(
+                    if (rolledBack) "安装目录写入失败，已恢复旧版本"
+                    else "安装目录写入失败，旧版本保留在 ${backupDir.name}"
+                )
+            }
+            backupDir.deleteRecursively()
             Log.i(TAG, "技能安装完成: ${pending.manifest.id} v${pending.manifest.version}")
         } finally {
+            // 注意：不在此删 backupDir——回滚失败时它是旧版本的唯一副本
             stagingDir.deleteRecursively()
             pending.packageFile.delete()
         }

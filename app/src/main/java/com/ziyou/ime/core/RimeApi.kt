@@ -28,6 +28,17 @@ interface RimeApi {
     /** 处理按键，返回是否被引擎消费 */
     suspend fun processKey(keycode: Int, mask: Int): Boolean
 
+    /**
+     * 批量处理按键（热路径）：把 processKey + getCommit + getContext 合并为单次引擎调度，
+     * 减少线程往返与 JNI 跨界次数。未被消费时 commit/context 为 null。
+     * 接口默认实现按三次调用组合（便于 fake/测试），生产实现单次跨界。
+     */
+    suspend fun processKeyBulk(keycode: Int, mask: Int): KeyEventResult {
+        val consumed = processKey(keycode, mask)
+        if (!consumed) return KeyEventResult(consumed = false, commit = null, context = null)
+        return KeyEventResult(consumed = true, commit = getCommit(), context = getContext())
+    }
+
     /** 提交当前编码区内容 */
     suspend fun commitComposition(): Boolean
 

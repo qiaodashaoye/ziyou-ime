@@ -71,7 +71,9 @@
   };
 
   window.IMESkill = {
-    /** 宿主 Bridge API 版本（manifest.min_host_api 协商用）：v2 增 fetch/clipboard/input */
+    /** 宿主 Bridge API 版本（manifest.min_host_api 协商用）。
+     *  单一事实源为宿主 SkillManifestValidator.HOST_API_VERSION，
+     *  注入时由 SkillWebViewFactory 自动覆写此处字面量（此值仅为回退）。 */
     apiVersion: 2,
 
     /** 文本上屏并关闭面板 */
