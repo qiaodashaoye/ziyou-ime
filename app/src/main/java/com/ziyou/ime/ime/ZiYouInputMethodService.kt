@@ -1,6 +1,7 @@
 package com.ziyou.ime.ime
 
 import android.content.Intent
+import android.graphics.Bitmap
 import android.inputmethodservice.InputMethodService
 import android.os.SystemClock
 import android.util.Log
@@ -160,8 +161,31 @@ class ZiYouInputMethodService : InputMethodService() {
         override fun onPanelWillOpen() = clearCompositionForPanel()
     }
 
+    /** 涂鸦画板面板协调器（面板生命周期与键盘收放编排，与 AI/技能面板同一拆分纪律） */
+    private val doodlePanels by lazy {
+        DoodlePanelCoordinator(this, doodlePanelHost)
+    }
+
+    /** 提供给 [DoodlePanelCoordinator] 的宿主能力：容器访问与图片发送出口。 */
+    private val doodlePanelHost = object : DoodlePanelCoordinator.Host {
+        override fun contentLayout(): LinearLayout? = this@ZiYouInputMethodService.contentLayout
+
+        override fun keyboardContainer(): FrameLayout? =
+            this@ZiYouInputMethodService.keyboardContainer
+
+        override fun candidatesContainer(): LinearLayout? =
+            this@ZiYouInputMethodService.candidatesContainer
+
+        override fun keyboardView(): BaseKeyboardView? = this@ZiYouInputMethodService.keyboardView
+
+        override fun sendDoodleImage(snapshot: Bitmap) =
+            sendDoodleAsImage(snapshot)
+
+        override fun onPanelWillOpen() = clearCompositionForPanel()
+    }
+
     /**
-     * 面板（技能 / AI 问答）打开前的统一清理：
+     * 面板（技能 / AI 问答 / 涂鸦画板）打开前的统一清理：
      * 清除活跃编码与候选/编码区展示，避免面板期间残留 preedit/候选。
      */
     private fun clearCompositionForPanel() {
@@ -298,9 +322,10 @@ class ZiYouInputMethodService : InputMethodService() {
      * 形态切换（[switchDisplayMode]）时也经本方法重建，与 onCreateInputView 同源。
      */
     private fun buildInputView(mode: DisplayMode): View {
-        // 重建前释放技能/AI面板（旧容器即将废弃，WebView/进行中请求必须显式释放）
+        // 重建前释放技能/AI/涂鸦面板（旧容器即将废弃，WebView/进行中请求/离屏 bitmap 必须显式释放）
         skillPanels.close()
         aiPanels.close()
+        doodlePanels.close()
         val theme = ThemeManager.getCurrentTheme(this)
         // 悬浮形态下键盘/候选/编码区统一缩放，停靠形态保持 1.0 零影响
         val scale = if (mode == DisplayMode.FLOATING) DisplayModeManager.FLOATING_SCALE else 1f
@@ -632,9 +657,10 @@ class ZiYouInputMethodService : InputMethodService() {
         super.onFinishInputView(finishingInput)
         Log.d(TAG, "onFinishInputView")
 
-        // 强制关闭技能面板（销毁 WebView，避免后台常驻内存/定时器）与 AI 面板
+        // 强制关闭技能面板（销毁 WebView，避免后台常驻内存/定时器）与 AI/涂鸦面板
         skillPanels.close()
         aiPanels.close()
+        doodlePanels.close()
 
         // 丢弃未提交的多击预览并清空编码区
         keyboardView?.resetInputState()
@@ -737,16 +763,30 @@ class ZiYouInputMethodService : InputMethodService() {
                 displayModeCtrl.toggle()
             }
 
-            // 技能面板开关：覆盖/移除键盘区域上的技能面板（与 AI 面板互斥）
+            // 技能面板开关：覆盖/移除键盘区域上的技能面板（与 AI/涂鸦面板互斥）
             KeyCode.KEYCODE_SKILL_PANEL -> {
                 aiPanels.close()
+                doodlePanels.close()
                 skillPanels.toggle()
             }
 
-            // AI 问答面板开关：编码区上方展示输入框/答案区（与技能面板互斥）
+            // AI 问答面板开关：编码区上方展示输入框/答案区（与技能/涂鸦面板互斥）
             KeyCode.KEYCODE_AI_ASSISTANT -> {
                 skillPanels.close()
+                doodlePanels.close()
                 aiPanels.toggle()
+            }
+
+            // 涂鸦画板开关：收起键盘展示画布（与技能/AI 面板互斥）；
+            // 编辑器不收图片时直接拦截，不开面板
+            KeyCode.KEYCODE_DOODLE_PANEL -> {
+                if (!doodlePanels.isOpen && !inputLogic.acceptsImageContent()) {
+                    Toast.makeText(this, "当前输入框不支持发送图片", Toast.LENGTH_SHORT).show()
+                } else {
+                    skillPanels.close()
+                    aiPanels.close()
+                    doodlePanels.toggle()
+                }
             }
 
             // 收起键盘（候选区按钮栏）
@@ -867,6 +907,44 @@ class ZiYouInputMethodService : InputMethodService() {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "AI 答案转图片失败: ${e.message}", e)
+                Toast.makeText(this@ZiYouInputMethodService, "图片生成失败", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /**
+     * 将涂鸦快照导出为 PNG 并经 commitContent 发送到当前输入框（涂鸦面板「发送」入口）。
+     * 合成/PNG 压缩在后台线程执行，提交与 Toast 反馈回主线程；遵循面板期间直达宿主
+     * 编辑器的路由纪律，经 [InputLogicController.commitImageToEditor] 提交；
+     * 快照所有权在本方法，导出完成后 recycle；发送成功后自动关闭面板。
+     */
+    private fun sendDoodleAsImage(snapshot: Bitmap) {
+        if (!inputLogic.acceptsImageContent()) {
+            snapshot.recycle()
+            Toast.makeText(this, "当前输入框不支持发送图片", Toast.LENGTH_SHORT).show()
+            return
+        }
+        Toast.makeText(this, "正在生成图片…", Toast.LENGTH_SHORT).show()
+        serviceScope.launch {
+            try {
+                val file = withContext(Dispatchers.Default) {
+                    try {
+                        DoodleImageExporter.exportToPng(applicationContext, snapshot)
+                    } finally {
+                        snapshot.recycle()
+                    }
+                }
+                val uri = FileProvider.getUriForFile(
+                    this@ZiYouInputMethodService, "$packageName.imecontent", file)
+                val ok = inputLogic.commitImageToEditor(uri, "image/png", "涂鸦图片")
+                if (ok) {
+                    doodlePanels.close()
+                } else {
+                    Toast.makeText(this@ZiYouInputMethodService,
+                        "发送图片失败或当前输入框不支持", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "涂鸦转图片失败: ${e.message}", e)
                 Toast.makeText(this@ZiYouInputMethodService, "图片生成失败", Toast.LENGTH_SHORT).show()
             }
         }
