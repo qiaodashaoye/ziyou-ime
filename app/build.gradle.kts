@@ -73,6 +73,13 @@ android {
             useLegacyPackaging = false
         }
     }
+
+    testOptions {
+        unitTests {
+            // Android 桩方法返回默认值而非抛出 "not mocked" 异常
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 // ===== 技能开发指南同步进 assets（单一来源：docs/，构建时自动拷贝，供 App 内文档页展示）=====
@@ -140,6 +147,8 @@ dependencies {
 
     // ===== 单元测试 =====
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.mockk)
 
     // ===== 仪器化测试 =====
     androidTestImplementation(platform(libs.androidx.compose.bom))

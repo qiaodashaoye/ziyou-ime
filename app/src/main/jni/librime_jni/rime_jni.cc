@@ -242,7 +242,13 @@ class Rime {
       try {
         auto newSession = std::make_shared<SessionHolder>();
         session_ = newSession;
+      } catch (const std::exception &e) {
+        __android_log_print(ANDROID_LOG_ERROR, "RimeJNI",
+                            "Rime session creation failed: %s", e.what());
+        session_ = nullptr;
       } catch (...) {
+        __android_log_print(ANDROID_LOG_ERROR, "RimeJNI",
+                            "Rime session creation failed: unknown exception");
         session_ = nullptr;
       }
     }

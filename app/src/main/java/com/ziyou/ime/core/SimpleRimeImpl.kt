@@ -13,6 +13,18 @@ class SimpleRimeImpl(
 
     companion object {
         private const val TAG = "SimpleRimeImpl"
+
+        /**
+         * 解析 JNI 层 processRimeKeyBulk 返回的原生数组为 [KeyEventResult]。
+         *
+         * 提取为伴生方法以便单元测试覆盖解析逻辑（无需加载 native 库）。
+         * 数组格式：[consumed: Boolean, commit: CommitProto?, context: ContextProto?]
+         */
+        internal fun parseBulkResult(raw: Array<Any?>?): KeyEventResult = KeyEventResult(
+            consumed = raw?.getOrNull(0) as? Boolean ?: false,
+            commit = raw?.getOrNull(1) as? CommitProto,
+            context = raw?.getOrNull(2) as? ContextProto
+        )
     }
 
     // ===== 生命周期 =====
@@ -47,11 +59,7 @@ class SimpleRimeImpl(
     override suspend fun processKeyBulk(keycode: Int, mask: Int): KeyEventResult {
         return dispatcher.dispatch {
             val raw = RimeNative.processRimeKeyBulk(keycode, mask)
-            KeyEventResult(
-                consumed = raw?.getOrNull(0) as? Boolean ?: false,
-                commit = raw?.getOrNull(1) as? CommitProto,
-                context = raw?.getOrNull(2) as? ContextProto
-            )
+            parseBulkResult(raw)
         }
     }
 
