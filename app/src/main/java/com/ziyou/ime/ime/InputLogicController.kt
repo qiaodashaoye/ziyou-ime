@@ -9,6 +9,7 @@ import androidx.core.view.inputmethod.EditorInfoCompat
 import androidx.core.view.inputmethod.InputConnectionCompat
 import androidx.core.view.inputmethod.InputContentInfoCompat
 import com.ziyou.ime.core.ContextProto
+import com.ziyou.ime.core.CandidateProto
 import com.ziyou.ime.daemon.RimeEngine
 import com.ziyou.ime.core.t9.KeyRecordStack
 import com.ziyou.ime.core.t9.ReplaceCommand
@@ -151,20 +152,38 @@ class InputLogicController(
         }
     }
 
-    /** 处理候选词点击：选词、取 commit 上屏、刷新 UI。 */
+    /**
+     * 处理候选词点击：选词、取 commit 上屏、刷新 UI。
+     *
+     * 分段确认（主流输入法行为）：所选候选仅覆盖编码前缀时（如 nihao 选“你”），
+     * 引擎无 commit，但内部已确认该段（preedit 变为“你hao”，候选切到下一段）。
+     * 此时需把所选候选的注音音节同步进九宫格状态机（[KeyRecordStack.confirmLeading]），
+     * 否则后续侧栏选拼音的替换偏移会错位；同步失败则整栈 clear 降级。
+     */
     fun selectCandidate(index: Int) {
         scope.launch {
             inputMutex.withLock {
                 try {
+                    // 选词前取所选候选的注音（comment），供分段确认后同步状态机
+                    val selected = engine.api.getContext()?.menu?.candidates?.getOrNull(index)
                     val success = engine.api.selectCandidate(index)
                     Log.d(TAG, "selectCandidate($index) -> $success")
 
                     if (success) {
                         val commit = engine.api.getCommit()
-                        commit?.text?.let { text ->
+                        val text = commit?.text
+                        if (text != null) {
                             commitAndCount(text)
                             Log.d(TAG, "候选词提交: $text")
                             keyRecordStack.clear()
+                        } else {
+                            // 分段确认后立即补发 End：Navigator 消费后调用 BeginEditing 给已选段
+                            // 打上 kSelectedBeforeEditing 标记。否则 express_editor 的首个退格
+                            // 会走 ReopenPreviousSelection 撤销刚确认的选择而非删字，导致
+                            // 退格重打/智能退格的删字计数与引擎实际行为错位（栈-引擎失配）。
+                            engine.api.processKey(KeyCode.XK_End, 0)
+                            // 无 commit = 分段确认，同步九宫格状态机（全键盘栈为空，天然跳过）
+                            withContext(Dispatchers.Main) { syncStackAfterPartialSelect(selected) }
                         }
                         updateUI()
                     }
@@ -172,6 +191,24 @@ class InputLogicController(
                     Log.e(TAG, "选择候选词异常: ${e.message}", e)
                 }
             }
+        }
+    }
+
+    /**
+     * 分段确认后同步状态机（主线程）：按所选候选的注音音节合并栈头为确认段；
+     * 注音缺失或与击键不匹配时整栈 clear 降级（宁可降级不可错位）。
+     */
+    private fun syncStackAfterPartialSelect(candidate: CandidateProto?) {
+        if (keyRecordStack.isEmpty()) return
+        val syllables = candidate?.comment?.trim()
+            ?.split('\'', ' ')
+            ?.filter { seg -> seg.isNotEmpty() && seg.all { it.isLetter() } }
+            .orEmpty()
+        val synced = candidate != null && syllables.isNotEmpty() &&
+            keyRecordStack.confirmLeading(candidate.text, syllables)
+        if (!synced) {
+            Log.w(TAG, "分段确认同步失败，清栈降级 (comment=${candidate?.comment})")
+            keyRecordStack.clear()
         }
     }
 
@@ -197,6 +234,9 @@ class InputLogicController(
      *
      * 调用方应已在主线程同步执行 [KeyRecordStack.pushPinyinSelectAction] 得到 [command]，
      * 以保证与退格等其他栈操作的时序一致。
+     *
+     * 注：引擎存在已确认段时禁走本路径（replaceKey 底层 set_input 会清空确认段），
+     * 改走 [retypeUnconfirmed]，由调用方按 [KeyRecordStack.hasConfirmed] 路由。
      */
     fun selectPinyin(command: ReplaceCommand) {
         scope.launch {
@@ -225,6 +265,75 @@ class InputLogicController(
                     updateUI()
                 } catch (e: Exception) {
                     Log.e(TAG, "restorePinyin异常: ${e.message}", e)
+                }
+            }
+        }
+    }
+
+    /**
+     * 安全删除末位未确认原始键（引擎存在已确认段时替代普通 BackSpace）。
+     *
+     * express_editor 的 BackSpace = RevertLastEdit，其 PopInput 后会调用
+     * ReopenPreviousSegment：删掉**最后一个**未确认键时，引擎重组会在已确认段后
+     * 补空段，Trim 弹掉空段后尾段恰为已确认段（kSelected），会被 Reopen 作废
+     * （length 为原始整段跨度，original_end_pos != caret → kVoid），导致已确认
+     * 汉字被打回数字候选态（kSelectedBeforeEditing 标记只保护 ReopenPreviousSelection
+     * 分支，管不到这里）。改用与 [retypeUnconfirmed] 同源的无 Reopen 序列：
+     * End 归位 → KP_Left 左移一格 → Delete 前向删除。
+     *
+     * 调用方（Service 退格分支）应已同步弹出栈尾未确认键；仅在
+     * [KeyRecordStack.hasConfirmed] 为 true 时路由到本方法。
+     */
+    fun deleteUnconfirmedBackward() {
+        scope.launch {
+            inputMutex.withLock {
+                try {
+                    engine.api.processKey(KeyCode.XK_End, 0)
+                    engine.api.processKey(KeyCode.XK_KP_Left, 0)
+                    engine.api.processKey(KeyCode.XK_Delete, 0)
+                    updateUI()
+                } catch (e: Exception) {
+                    Log.e(TAG, "deleteUnconfirmedBackward异常: ${e.message}", e)
+                }
+            }
+        }
+    }
+
+    /**
+     * 「退格重打」：引擎存在已确认段时替代 replaceKey 的编码更新路径。
+     *
+     * replaceKey 底层 set_input 会清空引擎内全部已确认段（已确认的“你”会被打回拼音）；
+     * 本方法改用逐键方式更新未确认部分，引擎已确认前缀全程保留。
+     *
+     * 删除必须用「KP_Left 定位 + Delete 前向删」而**不能用 BackSpace**：
+     * express_editor 的 BackSpace = RevertLastEdit，其 PopInput 后会调用
+     * ReopenPreviousSegment——删到确认边界时 Trim 弹掉空尾段后，尾段恰为
+     * 已确认段（kSelected），会被 Reopen 作废（length 为原始整段跨度，
+     * original_end_pos != caret → kVoid），导致已确认汉字被打回候选态；
+     * 而 Delete（DeleteChar → DeleteInput）全程无任何 Reopen 逻辑。
+     * KP_Left 经 Navigator::LeftByChar 精确按字符左移（Stacked 布局下
+     * selector 不绑定 KP_Left，不会被截胡），且 BeginMove 顺带维护编辑标记。
+     *
+     * 非热路径，持 [inputMutex] 串行执行，末尾一次性刷 UI。
+     *
+     * @param deleteCount 待删除的未确认原始键数（重打前 [KeyRecordStack.unconfirmedRawChars] 长度）
+     * @param retype      重打后的未确认编码串（重打后 [KeyRecordStack.unconfirmedRawChars]）
+     */
+    fun retypeUnconfirmed(deleteCount: Int, retype: String) {
+        scope.launch {
+            inputMutex.withLock {
+                try {
+                    // 光标归位到编码串末尾（常规流程下已在末尾，防御性归位，
+                    // 保证后续 KP_Left 计数以末尾为基准）
+                    engine.api.processKey(KeyCode.XK_End, 0)
+                    // 光标精确左移到确认边界，再前向删除全部未确认原始键
+                    repeat(deleteCount) { engine.api.processKey(KeyCode.XK_KP_Left, 0) }
+                    repeat(deleteCount) { engine.api.processKey(KeyCode.XK_Delete, 0) }
+                    // 删除后光标正好在编码串末尾（确认边界），逐键重打新串
+                    for (ch in retype) engine.api.processKey(ch.code, 0)
+                    updateUI()
+                } catch (e: Exception) {
+                    Log.e(TAG, "retypeUnconfirmed异常: ${e.message}", e)
                 }
             }
         }

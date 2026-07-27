@@ -1,6 +1,7 @@
 package com.ziyou.ime.ime
 
 import com.ziyou.ime.core.CandidateProto
+import com.ziyou.ime.core.CompositionProto
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.core.MenuProto
 import org.junit.Assert.assertEquals
@@ -12,7 +13,7 @@ import org.junit.Test
  * [PinyinHintProvider] 纯逻辑回归测试。
  *
  * 覆盖：从数字输入串还原候选拼音、回退到候选 comment、
- * 预览与高亮候选读音同源且长度匹配实际击键、空上下文边界。
+ * 预览与高亮候选读音同源且长度匹配实际击键、分段确认后的汉字前缀展示、空上下文边界。
  */
 class PinyinHintProviderTest {
 
@@ -22,7 +23,9 @@ class PinyinHintProviderTest {
     private fun context(
         input: String,
         candidates: List<CandidateProto> = emptyList(),
-        highlighted: Int = 0
+        highlighted: Int = 0,
+        preedit: String? = null,
+        selStartCodePoints: Int = 0
     ): ContextProto {
         val menu = if (candidates.isEmpty()) null else MenuProto(
             pageSize = candidates.size,
@@ -33,7 +36,19 @@ class PinyinHintProviderTest {
             selectKeys = "",
             selectLabels = emptyArray()
         )
-        return ContextProto(composition = null, menu = menu, input = input, caretPos = input.length)
+        // 与 JNI 层（utf8::unchecked::distance）一致：各偏移均按 Unicode 码点计
+        val composition = preedit?.let {
+            val codePoints = it.codePointCount(0, it.length)
+            CompositionProto(
+                length = codePoints,
+                cursorPos = codePoints,
+                selStart = selStartCodePoints,
+                selEnd = codePoints,
+                preedit = it,
+                commitTextPreview = null
+            )
+        }
+        return ContextProto(composition = composition, menu = menu, input = input, caretPos = input.length)
     }
 
     @Test
@@ -149,5 +164,76 @@ class PinyinHintProviderTest {
     fun buildPreview_emptyInput_returnsNull() {
         assertNull(PinyinHintProvider.buildPreview(context(input = "")))
         assertNull(PinyinHintProvider.buildPreview(null))
+    }
+
+    // ===== 分段确认（部分选词）=====
+
+    @Test
+    fun buildPreview_partialConfirm_showsHanziPrefixPlusRemainingPinyin() {
+        // nihao 击键 64426，选“你”分段确认：preedit "你426"、selStart=1（码点偏移），
+        // 状态机已确认原始键 2 个（ni=64），候选已切到 hao 段 → 编码区展示 你hao
+        val ctx = context(
+            input = "64426",
+            candidates = listOf(candidate("好", "hao")),
+            preedit = "你426",
+            selStartCodePoints = 1
+        )
+        assertEquals("你hao", PinyinHintProvider.buildPreview(ctx, confirmedRawLength = 2))
+    }
+
+    @Test
+    fun buildPreview_partialConfirm_multiHanziPrefix_noMojibake() {
+        // 乱码回归：多字确认前缀（码点偏移 2）必须按码点切分，
+        // 若误当字节/字符偏移会截断多字节汉字产生 �
+        // 击键 64426+94（ni hao 已确认，94 是 xia=942 的前缀 → 截断展示 xi）
+        val ctx = context(
+            input = "6442694",
+            candidates = listOf(candidate("下", "xia")),
+            preedit = "你好94",
+            selStartCodePoints = 2
+        )
+        val preview = PinyinHintProvider.buildPreview(ctx, confirmedRawLength = 5)
+        assertEquals("你好xi", preview)
+        assertTrue(!preview!!.contains('\uFFFD'))
+    }
+
+    @Test
+    fun buildPreview_partialConfirmWithoutTrustedOffset_returnsNull() {
+        // 引擎存在确认段但状态机降级（无可信确认偏移）→ 返回 null 回退 Rime 原始 preedit
+        val ctx = context(input = "64426", preedit = "你426", selStartCodePoints = 1)
+        assertNull(PinyinHintProvider.buildPreview(ctx))
+    }
+
+    @Test
+    fun buildPreview_noConfirm_zeroSelStartKeepsLegacyBehavior() {
+        // 未分段确认（selStart=0）时行为与无 composition 完全一致
+        val ctx = context(
+            input = "48",
+            candidates = listOf(candidate("乎", "hu")),
+            preedit = "48",
+            selStartCodePoints = 0
+        )
+        assertEquals("hu", PinyinHintProvider.buildPreview(ctx))
+    }
+
+    @Test
+    fun buildHints_partialConfirm_targetsFirstUnconfirmedSegment() {
+        // 分段确认后侧栏提示必须针对未确认段 426（hao 等），而非已确认的 64
+        val ctx = context(input = "64426", preedit = "你426", selStartCodePoints = 1)
+        val hints = PinyinHintProvider.buildHints(ctx, confirmedRawLength = 2)
+        assertTrue(hints != null && hints.contains("hao"))
+        assertTrue(hints != null && !hints.contains("ni"))
+    }
+
+    @Test
+    fun buildHints_partialConfirmWithoutTrustedOffset_fallsBackToComments() {
+        // 降级态：不从原始串取数字段（会错指已确认段），回退到候选 comment
+        val ctx = context(
+            input = "64426",
+            candidates = listOf(candidate("好", "hao")),
+            preedit = "你426",
+            selStartCodePoints = 1
+        )
+        assertEquals(listOf("hao"), PinyinHintProvider.buildHints(ctx))
     }
 }

@@ -94,6 +94,10 @@ class Rime {
 
   void clearComposition() { rime->clear_composition(session()); }
 
+  // 替换编码串指定区间（九宫格拼音消歧）。
+  // 注意：set_input 会重建整个 composition，引擎内经 select_candidate 分段确认的
+  // 段落会全部丢失（已确认汉字被打回拼音）。存在确认段时禁止调用本方法，
+  // 由 Kotlin 层（InputLogicController 改走「退格重打」路径）保证。
   bool replaceKey(int caretPos, int length, const char* replacement) {
     auto s = session();
     auto input = rime->get_input(s);

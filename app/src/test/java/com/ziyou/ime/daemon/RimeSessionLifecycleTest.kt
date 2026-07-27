@@ -6,6 +6,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -33,6 +34,10 @@ import java.nio.file.Files
  * 后者的超时行为由 [com.ziyou.ime.core.RimeDispatcherTest] 覆盖。
  *
  * 注意：[RimeSession] 是 object 单例，测试间通过反射重置内部状态保证隔离。
+ * 走 initialize/redeploy 真实链路的用例使用 [runBlocking] 而非 [runTest]：
+ * doInitialize 的 withTimeoutOrNull(120s) 在 runTest 虚拟时间下会瞬时触发，
+ * 与真实 RimeDispatcher 线程上抛出的 UnsatisfiedLinkError 竞速，偶发走进
+ * “超时也标记已初始化”分支导致断言失败（偶发挂掉全量回归）。
  */
 class RimeSessionLifecycleTest {
 
@@ -67,7 +72,7 @@ class RimeSessionLifecycleTest {
     // ===== 初始化失败（native 库不可用）=====
 
     @Test
-    fun initialize_nativeLibNotLoaded_throwsAndStaysUninitialized() = runTest {
+    fun initialize_nativeLibNotLoaded_throwsAndStaysUninitialized() = runBlocking<Unit> {
         // 测试环境中 RimeNative.isLoaded == false（无 native 库）
         RimeSession.deploySteps = emptyList()
 
@@ -82,7 +87,7 @@ class RimeSessionLifecycleTest {
     // ===== deploySteps 执行 =====
 
     @Test
-    fun initialize_executesDeployStepsBeforeFailure() = runTest {
+    fun initialize_executesDeployStepsBeforeFailure() = runBlocking<Unit> {
         var stepExecuted = false
         RimeSession.deploySteps = listOf(RimeDeployStep { stepExecuted = true })
 
@@ -94,7 +99,7 @@ class RimeSessionLifecycleTest {
     }
 
     @Test
-    fun initialize_executesMultipleDeployStepsInOrder() = runTest {
+    fun initialize_executesMultipleDeployStepsInOrder() = runBlocking<Unit> {
         val executionOrder = mutableListOf<Int>()
         RimeSession.deploySteps = listOf(
             RimeDeployStep { executionOrder.add(1) },
@@ -110,7 +115,7 @@ class RimeSessionLifecycleTest {
     // ===== 重新部署 =====
 
     @Test
-    fun redeploy_reexecutesDeploySteps() = runTest {
+    fun redeploy_reexecutesDeploySteps() = runBlocking<Unit> {
         var stepCount = 0
         RimeSession.deploySteps = listOf(RimeDeployStep { stepCount++ })
 
@@ -122,7 +127,7 @@ class RimeSessionLifecycleTest {
     }
 
     @Test
-    fun redeploy_doesNotRequirePriorInit() = runTest {
+    fun redeploy_doesNotRequirePriorInit() = runBlocking<Unit> {
         // 未初始化状态下调用 redeploy 应安全（doDestroy 空操作 + doInitialize）
         val exception = runCatching {
             RimeSession.redeploy(mockContext())

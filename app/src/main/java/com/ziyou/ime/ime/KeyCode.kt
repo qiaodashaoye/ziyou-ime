@@ -44,6 +44,8 @@ object KeyCode {
     const val XK_Page_Down = 0xff56
     /** End键 */
     const val XK_End = 0xff57
+    /** 小键盘左方向键（Navigator 按字符精确左移，供退格重打定位确认边界） */
+    const val XK_KP_Left = 0xff96
 
     // 修饰键 Keysym (用于独立发送修饰键时)
     /** 左Shift */

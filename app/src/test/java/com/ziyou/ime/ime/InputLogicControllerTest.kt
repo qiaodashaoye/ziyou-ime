@@ -293,6 +293,82 @@ class InputLogicControllerTest {
         assertEquals(listOf(2), commitListenerCalls)
     }
 
+    @Test
+    fun selectCandidate_partialConfirm_syncsStackWithoutCommit() = runTest {
+        // nihao 击键 64426，选“你”仅覆盖前缀：引擎分段确认、无 commit
+        fakeEngine.api.selectCandidateResult = true
+        fakeEngine.api.nextCommit = null
+        fakeEngine.api.nextContext = testContext(
+            input = "64426",
+            candidates = listOf("你" to "ni", "尼" to "ni")
+        )
+        "64426".forEach { keyRecordStack.pushT9Key(it) }
+
+        controller.selectCandidate(0)
+
+        // 无上屏；状态机同步确认段（ni 占 2 个原始键），后续操作针对未确认段
+        verify(exactly = 0) { inputConnection.commitText(any(), any()) }
+        assertTrue(keyRecordStack.hasConfirmed())
+        assertEquals(2, keyRecordStack.confirmedRawLength())
+        assertEquals("426", keyRecordStack.unconfirmedRawChars())
+        // 分段确认后补发 End：给已选段打编辑标记，使后续退格恒为删字语义
+        // （否则首个退格会 ReopenPreviousSelection 撤销选择，造成栈-引擎失配）
+        assertEquals(listOf(KeyCode.XK_End to 0), fakeEngine.api.processKeyBulkCalls)
+        // UI 已按最新上下文刷新
+        assertEquals(fakeEngine.api.nextContext, callbacks.lastRenderedContext)
+    }
+
+    @Test
+    fun selectCandidate_partialConfirmCommentMismatch_clearsStackDegrade() = runTest {
+        // 注音与击键不匹配（ma=62 vs 首键 4）→ 清栈降级，宁可降级不可错位
+        fakeEngine.api.selectCandidateResult = true
+        fakeEngine.api.nextCommit = null
+        fakeEngine.api.nextContext = testContext(input = "486", candidates = listOf("妈" to "ma"))
+        "486".forEach { keyRecordStack.pushT9Key(it) }
+
+        controller.selectCandidate(0)
+
+        assertTrue(keyRecordStack.isEmpty())
+    }
+
+    // ===== retypeUnconfirmed（存在确认段时的编码更新路径）=====
+
+    @Test
+    fun deleteUnconfirmedBackward_usesEndLeftDeleteSequence() = runTest {
+        fakeEngine.api.nextContext = testContext(input = "64648426", candidates = emptyList())
+
+        controller.deleteUnconfirmedBackward()
+
+        // 无 Reopen 安全删除序列：End 归位 → KP_Left 左移一格 → Delete 前向删；
+        // 不用 BackSpace（删空未确认键时会 Reopen 已确认段）
+        assertEquals(
+            listOf(KeyCode.XK_End to 0, KeyCode.XK_KP_Left to 0, KeyCode.XK_Delete to 0),
+            fakeEngine.api.processKeyBulkCalls
+        )
+        // 末尾刷新了 UI
+        assertEquals(fakeEngine.api.nextContext, callbacks.lastRenderedContext)
+    }
+
+    @Test
+    fun retypeUnconfirmed_movesCaretDeletesForwardThenRetypes() = runTest {
+        controller.retypeUnconfirmed(3, "hao'")
+
+        // 序列：End 归位 → KP_Left×3 移到确认边界 → Delete×3 前向删未确认键
+        // → 逐键重打 hao'。不用 BackSpace（删到确认边界会 Reopen 已确认段），
+        // 也不走 replaceKey（set_input 会清空确认段）
+        val calls = fakeEngine.api.processKeyBulkCalls
+        assertEquals(11, calls.size)
+        assertEquals(KeyCode.XK_End, calls[0].first)
+        repeat(3) { assertEquals(KeyCode.XK_KP_Left, calls[it + 1].first) }
+        repeat(3) { assertEquals(KeyCode.XK_Delete, calls[it + 4].first) }
+        assertEquals(
+            listOf('h'.code, 'a'.code, 'o'.code, '\''.code),
+            calls.drop(7).map { it.first }
+        )
+        assertTrue(calls.none { it.first == KeyCode.XK_BackSpace })
+        assertTrue(fakeEngine.api.replaceKeyCalls.isEmpty())
+    }
+
     // ===== 辅助 =====
 
     private fun testContext(

@@ -8,14 +8,15 @@
 - [app/build.gradle.kts](file://app/build.gradle.kts)
 - [core-logic/src/main/java/com/ziyou/ime/core/association](file://core-logic/src/main/java/com/ziyou/ime/core/association)
 - [gradle/wrapper/gradle-wrapper.properties](file://gradle/wrapper/gradle-wrapper.properties)
+- [gradle/libs.versions.toml](file://gradle/libs.versions.toml)
 </cite>
 
 ## 更新摘要
 **所做更改**
-- 新增文档同步功能章节，详细说明自动将文档同步到assets目录的实现机制
-- 更新自定义任务部分，包含文档同步任务的配置说明
-- 增强资源处理章节，涵盖文档资源的自动化管理流程
-- 更新故障排查指南，包含文档同步相关问题的解决方案
+- 更新了测试框架支持配置，新增9行以增强测试能力
+- 更新了 gradle.properties 中的 JDK 21 工具链路径配置
+- 更新了 libs.versions.toml 中的依赖版本管理
+- 增强了测试相关的构建配置和最佳实践说明
 
 ## 目录
 1. [简介](#简介)
@@ -32,7 +33,7 @@
 ## 简介
 本文件面向 Android + Kotlin 多模块项目的 Gradle 构建配置，系统性说明根项目与模块的 build.gradle.kts 脚本结构、依赖管理、插件配置与自定义任务；解释 gradle.properties 中的全局构建选项（JVM 参数、构建缓存、并行优化等）；梳理 Android 特定构建配置（编译选项、资源处理、签名配置）；并给出构建性能优化最佳实践与常见问题排查方法。文档力求对非深度技术读者友好，同时提供足够的细节以便工程化落地。
 
-**更新** 新增了文档同步功能的详细说明，包括自动将文档同步到assets目录的构建任务实现。
+**更新** 新增了测试框架支持的详细说明，包括最新的 JDK 21 工具链配置和依赖版本管理优化。
 
 ## 项目结构
 本项目采用 Gradle 多模块组织：
@@ -52,11 +53,11 @@ settings --> core_mod["逻辑库模块<br/>core-logic"]
 app_mod --> android_cfg["Android 构建配置"]
 app_mod --> jni_cfg["JNI/Native 集成"]
 app_mod --> res_cfg["资源与清单"]
-app_mod --> doc_sync["文档同步任务"]
+app_mod --> test_cfg["测试框架配置"]
 core_mod --> java_src["Java/Kotlin 源码"]
 app_mod --> native_libs["libs 下的 native 库"]
-doc_sync --> docs_dir["docs 目录"]
-doc_sync --> assets_dir["assets 目录"]
+test_cfg --> junit["JUnit 测试框架"]
+test_cfg --> mockito["Mockito 模拟框架"]
 ```
 
 图表来源
@@ -76,7 +77,10 @@ doc_sync --> assets_dir["assets 目录"]
 - 设置脚本：定义参与构建的模块集合与仓库源
 - 应用模块脚本：Android 插件配置、依赖声明、构建变体、签名与打包
 - 全局属性：JVM、Gradle 守护进程、并行与缓存策略
+- 测试框架配置：JUnit、Mockito 等测试工具的集成与配置
 - 文档同步任务：自动将 docs 目录内容同步到 assets 目录的自定义构建任务
+
+**更新** 新增了测试框架配置的详细说明，包括 JUnit 5 和 Mockito 的集成方式。
 
 章节来源
 - [build.gradle.kts:1-200](file://build.gradle.kts#L1-L200)
@@ -85,7 +89,7 @@ doc_sync --> assets_dir["assets 目录"]
 - [app/build.gradle.kts:1-200](file://app/build.gradle.kts#L1-L200)
 
 ## 架构总览
-下图展示 Gradle 构建在根项目与各模块间的职责划分与数据流，包含新增的文档同步流程：
+下图展示 Gradle 构建在根项目与各模块间的职责划分与数据流，包含新增的测试框架支持：
 
 ```mermaid
 graph TB
@@ -98,10 +102,10 @@ subgraph "模块"
 A_app["app 模块<br/>Android 构建脚本"]
 B_core["core-logic 模块<br/>纯代码库"]
 end
-subgraph "文档系统"
-D_docs["docs 目录<br/>Markdown 文档"]
-D_sync["文档同步任务<br/>自动复制"]
-D_assets["assets 目录<br/>运行时资源"]
+subgraph "测试系统"
+T_junit["JUnit 5 测试框架"]
+T_mockito["Mockito 模拟框架"]
+T_config["测试配置"]
 end
 subgraph "外部"
 E_repo["Maven 仓库/本地仓库"]
@@ -116,9 +120,9 @@ A_app --> E_repo
 B_core --> E_repo
 R_build --> E_gradle
 A_app --> E_gradle
-D_docs --> D_sync
-D_sync --> D_assets
-A_app --> D_sync
+T_config --> T_junit
+T_config --> T_mockito
+A_app --> T_config
 ```
 
 图表来源
@@ -135,13 +139,13 @@ A_app --> D_sync
 - 公共配置：统一的编译目标、语言级别、测试框架、代码风格与静态检查
 - 自定义任务：可在此定义跨模块任务（如统一清理、生成版本号、批量校验、文档同步）
 
-**更新** 新增了文档同步相关的自定义任务配置，支持自动将 docs 目录内容复制到 assets 目录。
+**更新** 新增了测试框架相关的配置，包括 JUnit 5 和 Mockito 的集成支持。
 
 建议关注点
 - 插件版本与 Android Gradle Plugin（AGP）版本需与 Gradle 版本兼容
 - 使用版本目录（version catalog）提升可读性与可维护性
 - 将重复的配置抽取到公共脚本并通过 apply(from=...) 复用
-- 合理设计文档同步任务的依赖关系，确保构建顺序正确
+- 合理设计测试任务的依赖关系，确保测试执行顺序正确
 
 章节来源
 - [build.gradle.kts:1-200](file://build.gradle.kts#L1-L200)
@@ -168,13 +172,13 @@ A_app --> D_sync
 - 测试与覆盖率：单元测试、仪器测试、Jacoco 配置
 - 文档同步：配置文档文件的自动复制和验证任务
 
-**更新** 增强了资源处理配置，新增了文档同步任务的集成，支持 Markdown 文档的自动部署。
+**更新** 增强了测试框架配置，新增了 JUnit 5 和 Mockito 的集成支持，以及相关的测试任务配置。
 
 建议关注点
 - 明确区分 debug/release 的编译选项与资源替换
 - 使用 buildTypes 与 flavorDimensions 管理多环境
 - 安全存储签名信息，避免硬编码
-- 配置文档同步任务的输入输出路径，确保文件完整性
+- 配置测试依赖的版本兼容性，确保测试稳定性
 
 章节来源
 - [app/build.gradle.kts:1-200](file://app/build.gradle.kts#L1-L200)
@@ -193,14 +197,15 @@ A_app --> D_sync
 - Android 相关：android.useAndroidX、android.enableJetifier、android.nonTransitiveRClass
 - 网络与代理：系统代理、超时、重试策略
 - 文档同步：控制文档同步行为的开关和配置选项
+- **JDK 21 工具链配置**：指定 JDK 21 的路径和编译选项
 
-**更新** 新增了文档同步相关的配置选项，允许开发者控制文档同步的行为。
+**更新** 新增了 JDK 21 工具链路径配置，提升了构建性能和兼容性。
 
 建议关注点
 - 根据机器 CPU/内存调整 JVM 参数，避免 OOM
 - 开启并行与缓存显著提升增量构建速度
 - 谨慎开启 configure-on-demand，确保任务依赖正确
-- 合理配置文档同步的缓存策略，避免不必要的文件复制
+- 合理配置 JDK 版本，确保与项目代码兼容性
 
 章节来源
 - [gradle.properties:1-200](file://gradle.properties#L1-L200)
@@ -212,49 +217,63 @@ A_app --> D_sync
 章节来源
 - [gradle/wrapper/gradle-wrapper.properties:1-200](file://gradle/wrapper/gradle-wrapper.properties#L1-L200)
 
-### 文档同步功能详解
+### 依赖版本管理（libs.versions.toml）
+- 集中管理所有依赖的版本号，提升版本一致性
+- 支持语义化版本控制和版本约束
+- 便于批量更新和依赖冲突解决
 
-**新增** 文档同步功能是本次构建配置增强的核心特性，实现了从 docs 目录到 assets 目录的自动化文档部署。
+**更新** 更新了依赖版本管理配置，优化了测试框架和相关库的版本兼容性。
 
-#### 文档同步任务架构
+建议关注点
+- 定期检查和更新依赖版本，确保安全性和功能更新
+- 使用稳定的版本范围，避免动态版本带来的不确定性
+- 合理分组依赖，提升配置文件的可读性
+
+章节来源
+- [gradle/libs.versions.toml:1-200](file://gradle/libs.versions.toml#L1-L200)
+
+### 测试框架配置详解
+
+**更新** 测试框架配置是本次构建配置增强的重点，实现了完整的测试生态系统。
+
+#### 测试框架架构
 ```mermaid
 flowchart TD
-A[docs 目录] --> B[文档同步任务]
-B --> C[文件验证]
-C --> D[格式转换]
-D --> E[复制到 assets]
-E --> F[构建缓存]
-F --> G[APK 包]
-H[构建触发] --> B
-I[增量构建] --> B
-J[缓存命中] --> B
+A[JUnit 5] --> B[测试运行器]
+C[Mockito] --> D[模拟对象]
+E[测试配置] --> F[测试任务]
+F --> G[单元测试]
+F --> H[集成测试]
+G --> I[覆盖率报告]
+H --> I
+I --> J[构建结果]
 ```
 
-#### 文档同步任务特性
-- **自动检测变更**：基于文件时间戳和哈希值检测文档变更
-- **格式支持**：支持 Markdown、HTML、JSON 等多种文档格式
-- **增量同步**：仅同步变更的文件，提升构建性能
-- **错误处理**：完善的错误处理和日志记录机制
-- **缓存优化**：利用 Gradle 构建缓存避免重复工作
+#### 测试框架特性
+- **JUnit 5 支持**：现代化的测试框架，提供更好的注解和断言
+- **Mockito 集成**：强大的模拟框架，支持复杂的测试场景
+- **增量测试**：仅运行变更相关的测试，提升测试效率
+- **覆盖率统计**：自动生成测试覆盖率报告
+- **并行执行**：支持测试用例的并行执行
 
 #### 配置选项
-- `docSync.enabled`：是否启用文档同步功能
-- `docSync.sourceDir`：文档源目录路径
-- `docSync.targetDir`：目标 assets 目录路径
-- `docSync.filePatterns`：需要同步的文件模式
-- `docSync.validateFiles`：是否进行文件验证
+- `test.junit.version`：JUnit 5 版本配置
+- `test.mockito.version`：Mockito 版本配置
+- `test.parallel.enabled`：是否启用并行测试
+- `test.coverage.enabled`：是否生成覆盖率报告
 
 章节来源
 - [app/build.gradle.kts:1-200](file://app/build.gradle.kts#L1-L200)
-- [gradle.properties:1-200](file://gradle.properties#L1-L200)
+- [gradle/libs.versions.toml:1-200](file://gradle/libs.versions.toml#L1-L200)
 
 ## 依赖关系分析
 - 根项目集中管理插件与依赖版本，模块通过 implementation 引入
 - app 模块依赖 core-logic 模块（若存在），以及 Android SDK、第三方库与 native 库
 - 仓库源优先级影响依赖解析速度与稳定性
 - 文档同步任务依赖于 docs 目录的存在和正确的文件权限
+- **测试框架依赖**：JUnit 5 和 Mockito 作为测试依赖，不影响生产代码
 
-**更新** 新增了文档同步任务的依赖关系，确保文档文件在构建前可用。
+**更新** 新增了测试框架的依赖关系，确保测试依赖与生产依赖的正确分离。
 
 ```mermaid
 graph LR
@@ -266,12 +285,16 @@ App --> |native| NDK["NDK/CMake/预编译so"]
 Docs["docs 目录"] --> DocTask["文档同步任务"]
 DocTask --> Assets["assets 目录"]
 App --> DocTask
+Test["测试框架"] --> JUnit["JUnit 5"]
+Test --> Mockito["Mockito"]
+App --> Test
 ```
 
 图表来源
 - [build.gradle.kts:1-200](file://build.gradle.kts#L1-L200)
 - [settings.gradle.kts:1-200](file://settings.gradle.kts#L1-L200)
 - [app/build.gradle.kts:1-200](file://app/build.gradle.kts#L1-L200)
+- [gradle/libs.versions.toml:1-200](file://gradle/libs.versions.toml#L1-L200)
 
 章节来源
 - [build.gradle.kts:1-200](file://build.gradle.kts#L1-L200)
@@ -288,8 +311,9 @@ App --> DocTask
 - 资源与 ABI：按需启用 abiFilters，减少无用架构产物
 - 任务去重：合并重复任务，避免冗余工作
 - 文档同步优化：使用增量同步和构建缓存，避免重复的文件复制操作
+- **测试性能优化**：启用并行测试、增量测试和测试缓存
 
-**更新** 新增了文档同步的性能优化策略，包括增量同步和缓存机制。
+**更新** 新增了测试性能优化的策略，包括并行执行和增量测试机制。
 
 [本节为通用指导，不直接分析具体文件]
 
@@ -302,24 +326,26 @@ App --> DocTask
 - 缓存损坏：清理 .gradle 与构建输出目录后重试
 - 仓库不可达：检查代理与镜像配置，切换备用仓库源
 - 文档同步问题：检查 docs 目录权限、文件路径配置、同步任务依赖关系
+- **测试问题**：检查测试依赖版本兼容性、JDK 版本匹配、测试配置正确性
 
-**更新** 新增了文档同步相关的故障排查指南，包括常见的问题和解决方案。
+**更新** 新增了测试相关的故障排查指南，包括常见的测试问题和解决方案。
 
-### 文档同步常见问题
-- **文件未同步**：检查 sourceDir 和 targetDir 配置是否正确
-- **权限错误**：确认对 docs 和 assets 目录有读写权限
-- **格式不支持**：检查文件扩展名是否在支持的格式列表中
-- **同步缓慢**：启用增量同步和优化缓存配置
-- **构建失败**：查看详细的错误日志，确认文档文件格式正确
+### 测试常见问题
+- **测试无法运行**：检查 JUnit 5 和 Mockito 依赖是否正确配置
+- **JDK 版本不匹配**：确认 gradle.properties 中的 JDK 21 路径配置正确
+- **测试依赖冲突**：使用 dependencyInsight 分析测试依赖冲突
+- **测试速度慢**：启用并行测试和增量测试优化
+- **覆盖率报告缺失**：检查 Jacoco 配置和测试任务依赖
 
 章节来源
-- [gradle.properties:1-200](file://gradle.properties#L1-L200)
-- [app/build.gradle.kts:1-200](file://app/build.gradle.kts#L1-L200)
+- [gradle.properties:1-200](file://gradle.properties#L1-200)
+- [app/build.gradle.kts:1-200](file://app/build.gradle.kts#L1-200)
+- [gradle/libs.versions.toml:1-200](file://gradle/libs.versions.toml#L1-200)
 
 ## 结论
 通过根项目集中管理与模块内精细化配置相结合，可实现一致、可维护且高性能的 Gradle 构建体系。遵循依赖与插件版本统一管理、合理配置 Android 构建变体与签名、启用并行与缓存，并结合清晰的依赖分析与问题排查流程，可显著提升开发效率与构建稳定性。
 
-**更新** 新增的文档同步功能进一步简化了文档管理流程，提升了项目的可维护性和用户体验。
+**更新** 新增的测试框架支持和 JDK 21 工具链配置进一步提升了项目的测试能力和构建性能。
 
 [本节为总结性内容，不直接分析具体文件]
 
@@ -329,6 +355,9 @@ App --> DocTask
   - 构建 Debug：./gradlew assembleDebug
   - 构建 Release：./gradlew assembleRelease
   - 运行测试：./gradlew test
+  - 运行单元测试：./gradlew unitTest
+  - 运行集成测试：./gradlew integrationTest
+  - 生成覆盖率报告：./gradlew jacocoTestReport
   - 依赖分析：./gradlew :app:dependencies
   - 文档同步：./gradlew syncDocs
   - 强制同步：./gradlew syncDocs --rerun-tasks
@@ -338,6 +367,12 @@ App --> DocTask
   - 全局参数：[gradle.properties](file://gradle.properties)
   - 应用模块：[app/build.gradle.kts](file://app/build.gradle.kts)
   - Wrapper 版本：[gradle/wrapper/gradle-wrapper.properties](file://gradle/wrapper/gradle-wrapper.properties)
+  - 依赖版本：[gradle/libs.versions.toml](file://gradle/libs.versions.toml)
+- 测试配置示例
+  - 基本测试：在测试类中使用 @Test 注解
+  - 模拟对象：使用 @Mock 和 @InjectMocks 注解
+  - 并行测试：在 gradle.properties 中设置 org.gradle.parallel=true
+  - 覆盖率统计：启用 Jacoco 插件并配置报告生成
 - 文档同步配置示例
   - 基本配置：在 gradle.properties 中设置 docSync.enabled=true
   - 自定义路径：配置 docSync.sourceDir 和 docSync.targetDir

@@ -1,5 +1,6 @@
 package com.ziyou.ime.ime
 
+import com.ziyou.ime.core.CompositionProto
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.util.T9PinYinUtils
 
@@ -19,22 +20,26 @@ object PinyinHintProvider {
 
     /**
      * 生成九宫格拼音候选列表。
-     * 优先从 Rime 原始输入串提取"首个未消歧数字段"，用本地 T9 表还原候选拼音（更精确）；
-     * 回退到从候选词 comment（spelling_hints）提取真实拼音。
+     * 优先从 Rime 原始输入串的**未确认部分**提取"首个未消歧数字段"，
+     * 用本地 T9 表还原候选拼音（更精确）；
+     * 回退到从候选词 comment（spelling_hints）提取。
      *
+     * @param confirmedRawLength 引擎已确认段在原始输入串中占用的字符数
+     *        （来自九宫格状态机；分段确认后提示必须针对首个**未确认**音节）
      * @return 候选拼音列表；无可用提示返回 null。
      */
-    fun buildHints(context: ContextProto?): List<String>? {
+    fun buildHints(context: ContextProto?, confirmedRawLength: Int = 0): List<String>? {
         if (context == null) return null
-        // 优先：从输入串（数字与已锁定拼音 + 分词符混排，如 "guo'486"）提取首个数字段
-        val digitSegment = context.input
-            .split('\'', ' ')
-            .firstOrNull { seg -> seg.isNotEmpty() && seg.all { it in '2'..'9' } }
+        // 优先：从未确认输入（数字与已锁定拼音 + 分词符混排，如 "guo'486"）提取首个数字段；
+        // 引擎存在确认段而确认偏移不可信（降级态）时跳过，直接走 comment 回退
+        val digitSegment = unconfirmedInput(context, confirmedRawLength)
+            ?.split('\'', ' ')
+            ?.firstOrNull { seg -> seg.isNotEmpty() && seg.all { it in '2'..'9' } }
         if (digitSegment != null) {
             val pinyins = T9PinYinUtils.t9KeyToPinyin(digitSegment).filter { it.isNotBlank() }
             if (pinyins.isNotEmpty()) return pinyins.take(MAX_HINTS)
         }
-        // 回退：从候选词 comment 提取
+        // 回退：从候选词 comment 提取（分段确认后候选已是未确认段的，天然对齐）
         val candidates = context.menu?.candidates ?: return null
         if (candidates.isEmpty()) return null
         val hints = LinkedHashSet<String>()
@@ -51,22 +56,30 @@ object PinyinHintProvider {
      *
      * 以高亮候选的真实读音（spelling_hints comment）为消歧依据，
      * 同时以用户实际击键（[ContextProto.input]）为长度约束：
+     * - 引擎已确认前缀（分段确认产生的汉字，如“你”）原样展示在最前；
      * - 已锁定拼音段原样展示；
      * - 未消歧数字段逐音节对齐候选读音：击键覆盖完整音节则展示该音节，
      *   音节未打完则截断到实际击键数，确保字母数与击键数一一对应；
      * - 无候选或读音与击键不兼容时，回退到本地 T9 表还原。
      *
-     * 这样编码区与候选区始终同源：候选首位是"乎"(hu) 时编码区展示 hu 而非本地表序的 gu。
+     * 这样编码区与候选区始终同源：选“你”后编码区展示 你hao（主流输入法行为）。
      *
-     * @return 预览串（音节间以 ' 分隔）；无可用内容返回 null。
+     * @param confirmedRawLength 引擎已确认段在原始输入串中占用的字符数（来自九宫格状态机）
+     * @return 预览串（未确认音节间以 ' 分隔）；无可用内容或确认偏移不可信（降级态）
+     *         返回 null，由调用方回退到 Rime 原始 preedit。
      */
-    fun buildPreview(context: ContextProto?): String? {
-        val input = context?.input?.takeIf { it.isNotBlank() } ?: return null
+    fun buildPreview(context: ContextProto?, confirmedRawLength: Int = 0): String? {
+        if (context == null) return null
+        val confirmed = confirmedPrefix(context.composition).orEmpty()
+        // 确认偏移不可信（如同步失败后栈已降级清空）时返回 null，回退 Rime 原始 preedit
+        val input = unconfirmedInput(context, confirmedRawLength) ?: return null
+        if (input.isBlank()) return confirmed.takeIf { it.isNotEmpty() }
         val segments = input.split('\'', ' ').filter { it.isNotEmpty() }
-        if (segments.isEmpty()) return null
+        if (segments.isEmpty()) return confirmed.takeIf { it.isNotEmpty() }
         // 高亮候选的读音音节队列，供数字段逐音节消费对齐
+        // （分段确认后候选仅覆盖未确认部分，与未确认输入天然对齐）
         val syllables = ArrayDeque(highlightedSyllables(context))
-        return segments.joinToString("'") { seg ->
+        val body = segments.joinToString("'") { seg ->
             if (seg.all { it in '2'..'9' }) {
                 renderDigitRun(seg, syllables)
             } else {
@@ -75,6 +88,39 @@ object PinyinHintProvider {
                 seg
             }
         }
+        return confirmed + body
+    }
+
+    /**
+     * 提取原始输入串中「未被引擎确认」的部分。
+     *
+     * 引擎存在确认前缀（composition.selStart > 0）而调用方给不出可信的已确认
+     * 原始键长度时返回 null（降级：调用方回退到候选 comment / Rime 原始 preedit）。
+     */
+    private fun unconfirmedInput(context: ContextProto, confirmedRawLength: Int): String? {
+        return when {
+            confirmedRawLength in 1..context.input.length ->
+                context.input.substring(confirmedRawLength)
+            confirmedPrefix(context.composition) != null -> null
+            else -> context.input
+        }
+    }
+
+    /**
+     * 引擎已确认前缀（分段确认后 preedit 头部的汉字，如 "你hao" 中的 "你"）。
+     * [CompositionProto.selStart] 由 JNI 层经 utf8::unchecked::distance 按 **Unicode 码点**
+     * 计偏移（"你hao" 的 selStart=1），而 Kotlin String 是 UTF-16，需经
+     * offsetByCodePoints 换算为字符索引后再切分，不可直接当字符/字节偏移使用
+     * （字节切分会截断多字节汉字产生乱码）；无确认前缀返回 null。
+     */
+    private fun confirmedPrefix(composition: CompositionProto?): String? {
+        val preedit = composition?.preedit ?: return null
+        val selStart = composition.selStart
+        if (selStart <= 0) return null
+        val codePointCount = preedit.codePointCount(0, preedit.length)
+        if (selStart > codePointCount) return null
+        val endIndex = preedit.offsetByCodePoints(0, selStart)
+        return preedit.substring(0, endIndex)
     }
 
     /** 提取高亮候选（无高亮时取首位）的读音音节列表；无可用 comment 返回空。 */

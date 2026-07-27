@@ -834,11 +834,22 @@ class ZiYouInputMethodService : InputMethodService() {
                 if (keyCode == KeyCode.XK_BackSpace && currentKeyboardType == KeyboardType.NINE_GRID && !keyRecordStack.isEmpty()) {
                     val restoreCommand = keyRecordStack.popAndRestore()
                     if (restoreCommand != null) {
+                        // replaceKey（底层 set_input）会清空引擎内全部已确认段：
+                        // 先同步解除栈内确认标记，保持栈与引擎一致（无确认段时为空操作）
+                        keyRecordStack.unconfirmAll()
                         // 撤销拼音选择：将已锁定拼音替换回原 T9 键
                         inputLogic.restorePinyin(restoreCommand)
                         return  // 不发送普通 BackSpace
                     }
-                    // restoreCommand 为 null 表示弹出的是普通 T9Key/Apostrophe，继续执行正常退格
+                    // restoreCommand 为 null 表示弹出的是普通 T9Key/Apostrophe；
+                    // 若仍存在已确认段，禁发普通 BackSpace（删空未确认键时引擎会
+                    // Reopen 已确认段，把已确认汉字打回数字候选态），
+                    // 改走 End+KP_Left+Delete 的无 Reopen 安全删除序列
+                    if (keyRecordStack.hasConfirmed()) {
+                        inputLogic.deleteUnconfirmedBackward()
+                        return
+                    }
+                    // 无确认段：继续执行正常退格
                 }
                 // 九宫格模式下追踪 T9 按键
                 if (currentKeyboardType == KeyboardType.NINE_GRID) {
@@ -865,10 +876,16 @@ class ZiYouInputMethodService : InputMethodService() {
     /**
      * 处理用户在拼音候选区点击选择拼音。
      * 在主线程同步更新状态机（保证与退格等其他栈操作时序一致），再委托控制器送 Rime 替换。
+     * 存在引擎已确认段时改走「退格重打」路径（replaceKey 会清空确认段，逐键重打可保留）。
      */
     private fun handlePinyinSelect(pinyin: String) {
+        val beforeRaw = keyRecordStack.unconfirmedRawChars()
         val command = keyRecordStack.pushPinyinSelectAction(pinyin) ?: return
-        inputLogic.selectPinyin(command)
+        if (keyRecordStack.hasConfirmed()) {
+            inputLogic.retypeUnconfirmed(beforeRaw.length, keyRecordStack.unconfirmedRawChars())
+        } else {
+            inputLogic.selectPinyin(command)
+        }
     }
 
     /**
@@ -1060,17 +1077,18 @@ class ZiYouInputMethodService : InputMethodService() {
      */
     private fun buildPinyinHints(context: ContextProto?): List<String>? {
         if (currentKeyboardType != KeyboardType.NINE_GRID) return null
-        return PinyinHintProvider.buildHints(context)
+        return PinyinHintProvider.buildHints(context, keyRecordStack.confirmedRawLength())
     }
 
     /**
      * 生成顶部编码区的"当前拼音"单串预览（委托 [PinyinHintProvider]，
-     * 以高亮候选读音为消歧依据、以实际击键数为长度约束）。
+     * 以高亮候选读音为消歧依据、以实际击键数为长度约束；
+     * 分段确认后已确认前缀以汉字展示，未确认部分按状态机确认偏移切分）。
      * 非九宫格返回 null，由候选视图沿用 Rime 原始 preedit。
      */
     private fun buildPinyinPreview(context: ContextProto?): String? {
         if (currentKeyboardType != KeyboardType.NINE_GRID) return null
-        return PinyinHintProvider.buildPreview(context)
+        return PinyinHintProvider.buildPreview(context, keyRecordStack.confirmedRawLength())
     }
 
     // ===== Rime消息处理 =====
