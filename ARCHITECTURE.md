@@ -584,3 +584,48 @@ Rime 只组织光标之前的编码片段。若把选定拼音追加到编码串
 | `checkUpdates(context, catalog)` | 检查可更新词库 |
 | `regenerateMainDict(context)` | 重新生成主词库（注入已启用词库） |
 | `readLocalDictPreview(...)` | 读取本地词库预览 |
+
+### SkillManager（技能枚举）
+| 方法 | 说明 |
+|------|------|
+| `listSkills(context)` | 列出全部可用技能（内置在前，manifest 非法者跳过），返回 List\<SkillInfo\> |
+| `installRoot(context)` | 用户安装技能根目录 `files/skills/` |
+| `SkillInfo.openResource(context, relativePath)` | 统一资源读取入口（assets / 内部存储），调用方须先经 ZipEntryValidator 校验路径 |
+
+### SkillPackageInstaller（.skill 包安装）
+> 两段式安装，保证「权限确认在落盘之前」；校验失败统一抛 `IllegalArgumentException`（message 可直接展示）。
+
+| 方法 | 说明 |
+|------|------|
+| `inspect(context, source)` | 第一阶段：包体落临时文件 + 全量校验（5MB 上限/条目数/Zip Slip/manifest/冲突），返回 PendingInstall |
+| `commit(context, pending)` | 第二阶段：解压到 staging → 旧版本移备份 → 原子就位，失败自动回滚 |
+| `abort(pending)` | 用户取消：清理临时包体 |
+| `uninstall(context, skill)` | 卸载已安装技能（内置不可卸载），并清理其 storage 数据 |
+
+### SkillWebViewFactory（安全 WebView 工厂）
+| 方法 | 说明 |
+|------|------|
+| `create(context, skill, bridge, onRenderProcessGone)` | 创建已完成安全基线配置的 WebView：资源全量拦截（仅放行包内相对路径）、CSP 注入、文件/内容访问全关、禁跳转、渲染进程崩溃兜底 |
+| `entryUrl(skill)` | 技能入口页虚拟域名 URL（`appassets.androidplatform.net/skill/<entry>`） |
+
+### SkillBridge / SkillRuntime（JS Bridge 与能力层）
+> Bridge 只做消息搬运与线程切换（JS 经 `__IMESkillNative.postMessage` 单入口，全异步 Promise，异常全量兜底）；Runtime 承载能力实现，宿主能力经 `SkillRuntime.Host` 接口注入。
+
+| 方法 | 说明 |
+|------|------|
+| `SkillBridge.postMessage(message)` | JS 侧唯一入口（@JavascriptInterface），切主线程后分发到 Runtime |
+| `SkillBridge.release()` / `SkillRuntime.release()` | 面板关闭：丢弃后续消息 / 取消未完成 fetch |
+| `SkillRuntime.handle(method, params, complete)` | 处理一次 API 调用，结果异步交付（fetch 走 IO 协程，storage 走串行 IO 线程） |
+| `SkillRuntime.deleteStorage(context, skillId)` | 卸载时清理技能 storage 文件 |
+
+**Bridge 支持的脚本方法**（垫片 imeskill.js 封装为 `window.IMESkill`）：
+
+| 方法 | 说明 | 所需权限 |
+|------|------|---------|
+| `sendText` | 文本上屏（≤5000 字符）并关闭面板 | — |
+| `getContext` / `getLocale` / `haptic` | 编辑器上下文 / 语言标签 / 震动反馈 | — |
+| `ui.setTitle` / `ui.close` / `ui.setExpanded` | 面板标题（≤20 字）/ 关闭 / 输入法界面展开收缩 | — |
+| `storage.get/set/remove` | 键值存储（串行 IO，限额 1MB） | storage |
+| `fetch` | 宿主代理网络请求：强制 HTTPS + 域名白名单 + 超时 10s + 响应 ≤1MB + 频控 30 次/分 + 并发 ≤2 + 禁重定向 | network |
+| `clipboard.read` / `clipboard.write` | 剪贴板读 / 写 | clipboard_read / clipboard_write |
+| `input.requestFocus` / `input.releaseFocus` | 输入路由开关（键盘上屏改道注入面板，需 manifest 声明 needs_input） | — |
