@@ -13,6 +13,14 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
+ * 对话消息（role/content）
+ *
+ * 用于多轮对话历史传递：role 取值为 "user" 或 "assistant"，
+ * content 为该轮原始文本（未经 Markdown 渲染）。
+ */
+data class ChatMessage(val role: String, val content: String)
+
+/**
  * AI 问答客户端
  *
  * 以 OpenAI 兼容的 chat/completions 协议向 [AiConfig] 配置的端点发起
@@ -34,19 +42,32 @@ object AiChatClient {
     /** 单次提问长度上限（字符），超出直接拒绝，避免误发超长内容 */
     private const val MAX_QUESTION_CHARS = 2_000
 
-    /** 系统提示词：约束回答风格适配键盘面板小屏展示；限定 Markdown 子集
-     *  与 [MarkdownRenderer] 支持范围对齐（表格/图片/HTML 无法渲染，从源头避免） */
-    private const val SYSTEM_PROMPT = "你是输入法内置的AI助手，请用简体中文简明扼要地回答问题。" +
+    /**
+     * 基础系统提示词（Markdown 格式约束）
+     *
+     * 约束回答格式与 [MarkdownRenderer] 支持范围对齐（表格/图片/HTML 无法渲染，
+     * 从源头避免）；调用方应将人设提示词拼接于此之后，共同组成最终 system message。
+     * 暴露为 public，供面板层组合使用。
+     */
+    const val BASE_SYSTEM_PROMPT: String = "请用简体中文回答问题。" +
         "可使用基础 Markdown 格式（标题、粗体、斜体、列表、行内代码、代码块、引用），" +
         "不要使用表格、图片或 HTML 标签。"
 
     /**
      * 发起一次问答请求。
      *
-     * @param question 用户问题（已 trim 非空）
+     * @param question     用户问题（已 trim 非空）
+     * @param systemPrompt 完整系统提示词（调用方负责将 [BASE_SYSTEM_PROMPT]
+     *                     与人设提示词拼接后传入；默认仅含格式约束）
+     * @param history      多轮对话历史（最近 N 条，按时间顺序排列）
      * @return 成功返回 AI 回答文本；失败返回携带用户可读消息的异常
      */
-    suspend fun ask(context: Context, question: String): Result<String> =
+    suspend fun ask(
+        context: Context,
+        question: String,
+        systemPrompt: String = BASE_SYSTEM_PROMPT,
+        history: List<ChatMessage> = emptyList()
+    ): Result<String> =
         withContext(Dispatchers.IO) {
             if (question.length > MAX_QUESTION_CHARS) {
                 return@withContext Result.failure(
@@ -61,7 +82,7 @@ object AiChatClient {
             try {
                 connection = openConnection(AiConfig.getApiUrl(context), apiKey)
                 connection.outputStream.use { output ->
-                    output.write(buildRequestBody(AiConfig.getModel(context), question))
+                    output.write(buildRequestBody(AiConfig.getModel(context), question, systemPrompt, history))
                     output.flush()
                 }
 
@@ -106,16 +127,28 @@ object AiChatClient {
         }
     }
 
-    /** 组装 OpenAI 兼容的 chat/completions 请求体（非流式）。 */
-    private fun buildRequestBody(model: String, question: String): ByteArray {
+    /**
+     * 组装 OpenAI 兼容的 chat/completions 请求体（非流式）。
+     *
+     * messages 数组顺序：system（格式约束 + 人设）→ history（多轮上下文）→ user（当前问题）。
+     */
+    private fun buildRequestBody(
+        model: String,
+        question: String,
+        systemPrompt: String,
+        history: List<ChatMessage>
+    ): ByteArray {
+        val messages = JSONArray()
+            .put(JSONObject().put("role", "system").put("content", systemPrompt))
+        // 追加历史消息（保持时间顺序，由调用方保证）
+        for (msg in history) {
+            messages.put(JSONObject().put("role", msg.role).put("content", msg.content))
+        }
+        messages.put(JSONObject().put("role", "user").put("content", question))
         val body = JSONObject()
             .put("model", model)
             .put("stream", false)
-            .put(
-                "messages", JSONArray()
-                    .put(JSONObject().put("role", "system").put("content", SYSTEM_PROMPT))
-                    .put(JSONObject().put("role", "user").put("content", question))
-            )
+            .put("messages", messages)
         return body.toString().toByteArray(Charsets.UTF_8)
     }
 

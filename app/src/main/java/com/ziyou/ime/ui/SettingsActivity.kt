@@ -12,6 +12,8 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.ziyou.ime.ai.AiConfig
+import com.ziyou.ime.ai.AiPersona
+import com.ziyou.ime.ai.PersonaRepository
 import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.config.DisplayModeManager
 import com.ziyou.ime.config.ThemeManager
@@ -50,6 +52,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var schemaValueText: TextView
     private lateinit var themeValueText: TextView
     private lateinit var levelValueText: TextView
+    private lateinit var personaValueText: TextView
 
     /** Rime 引擎（经 DI 容器获取，依赖接口而非 RimeSession 单例） */
     private val rime get() = AppContainer.rimeEngine
@@ -219,6 +222,12 @@ class SettingsActivity : AppCompatActivity() {
             summary = "配置键盘「AI」键问答的服务地址与 API Key（OpenAI 兼容接口）",
             onClick = { showAiConfigDialog() }
         ))
+        val personaItem = createSettingItemWithValue(
+            title = "AI 人设",
+            valueHolder = { personaValueText = it }
+        )
+        personaItem.setOnClickListener { showPersonaManager() }
+        rootLayout.addView(personaItem)
         rootLayout.addView(createDivider())
 
         // ===== 数据同步 =====
@@ -491,6 +500,210 @@ class SettingsActivity : AppCompatActivity() {
             .show()
     }
 
+    // ===== AI 人设管理 =====
+
+    /**
+     * 人设管理弹窗：自定义 ListView 支持点击切换 + 长按弹出操作菜单。
+     *
+     * AlertDialog.setItems 只能响应单击，无法满足“长按编辑/删除”的交互需求；
+     * 这里改用 ListView + onItemClickListener / onItemLongClickListener 实现。
+     */
+    private fun showPersonaManager() {
+        val personas = PersonaRepository.getAllPersonas(this)
+        val currentId = PersonaRepository.getCurrentPersonaId(this)
+
+        // 构建列表条目数据（双行布局：主行=名称+徽标，副行=简介）
+        val items = personas.map { p ->
+            val check = if (p.id == currentId) "✓ " else ""
+            val badge = if (p.isBuiltin) " [内置]" else ""
+            val desc = if (p.description.isNotBlank()) p.description else "（无简介）"
+            PersonaListItem(title = "$check${p.name}$badge", subtitle = desc, persona = p)
+        }
+
+        val listView = ListView(this).apply {
+            adapter = object : android.widget.BaseAdapter() {
+                override fun getCount() = items.size
+                override fun getItem(position: Int) = items[position]
+                override fun getItemId(position: Int) = position.toLong()
+                override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup?): View {
+                    val item = items[position]
+                    val row = (convertView as? TwoLineRow) ?: TwoLineRow(this@SettingsActivity)
+                    row.title.text = item.title
+                    row.subtitle.text = item.subtitle
+                    row.subtitle.setTextColor(
+                        if (item.persona.id == currentId) 0xFF1976D2.toInt()
+                        else 0xFF757575.toInt()
+                    )
+                    return row
+                }
+            }
+            dividerHeight = dp(1)
+            // 单击：切换人设
+            onItemClickListener = android.widget.AdapterView.OnItemClickListener { _, _, position, _ ->
+                val selected = personas[position]
+                PersonaRepository.setCurrentPersona(this@SettingsActivity, selected.id)
+                personaValueText.text = selected.name
+                showToast("已切换到: ${selected.name}")
+            }
+            // 长按：弹出操作菜单（预览 / 编辑 / 删除）
+            onItemLongClickListener = android.widget.AdapterView.OnItemLongClickListener { _, _, position, _ ->
+                showPersonaActionsDialog(personas[position])
+                true
+            }
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("AI 人设（长按管理）")
+            .setView(listView)
+            .setNeutralButton("新增人设") { _, _ -> showPersonaEditDialog(null) }
+            .setNegativeButton("关闭", null)
+            .show()
+    }
+
+    /** 人设列表条目数据（主行标题 + 副行简介 + 关联 persona）。 */
+    private data class PersonaListItem(
+        val title: String, val subtitle: String, val persona: AiPersona
+    )
+
+    /** 人设列表双行行视图（复用 convertView 时减少重建开销）。 */
+    private class TwoLineRow(context: android.content.Context) : LinearLayout(context) {
+        val title: TextView
+        val subtitle: TextView
+        init {
+            orientation = VERTICAL
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            title = TextView(context).apply {
+                textSize = 16f
+                setTextColor(0xFF212121.toInt())
+            }
+            subtitle = TextView(context).apply {
+                textSize = 13f
+                setTextColor(0xFF757575.toInt())
+                setPadding(0, dp(2), 0, 0)
+                maxLines = 2
+            }
+            addView(title)
+            addView(subtitle)
+        }
+        private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    }
+
+    /**
+     * 人设操作菜单（长按触发）：内置人设仅可预览，自定义人设支持预览/编辑/删除。
+     */
+    private fun showPersonaActionsDialog(persona: AiPersona) {
+        val actions = if (persona.isBuiltin) {
+            arrayOf("预览")
+        } else {
+            arrayOf("预览", "编辑", "删除")
+        }
+        AlertDialog.Builder(this)
+            .setTitle(persona.name)
+            .setItems(actions) { _, which ->
+                when (actions[which]) {
+                    "预览" -> showPersonaPreview(persona)
+                    "编辑" -> showPersonaEditDialog(persona)
+                    "删除" -> confirmDeletePersona(persona)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** 预览人设：以只读对话框展示角色名称、简介与系统提示词。 */
+    private fun showPersonaPreview(persona: AiPersona) {
+        val content = buildString {
+            append("名称：${persona.name}\n")
+            if (persona.description.isNotBlank()) append("简介：${persona.description}\n")
+            append("\n系统提示词：\n${persona.systemPrompt}")
+        }
+        AlertDialog.Builder(this)
+            .setTitle("人设预览")
+            .setMessage(content)
+            .setPositiveButton("关闭", null)
+            .show()
+    }
+
+    /** 确认删除自定义人设。 */
+    private fun confirmDeletePersona(persona: AiPersona) {
+        AlertDialog.Builder(this)
+            .setTitle("删除人设")
+            .setMessage("确定删除「${persona.name}」？删除后不可恢复。")
+            .setPositiveButton("删除") { _, _ ->
+                PersonaRepository.removeCustomPersona(this, persona.id)
+                showToast("已删除")
+                personaValueText.text = PersonaRepository.getCurrentPersona(this).name
+                showPersonaManager()
+            }
+            .setNegativeButton("取消") { _, _ -> showPersonaManager() }
+            .show()
+    }
+
+    /**
+     * 人设编辑弹窗：角色名称 / 简介 / 系统提示词三字段。
+     * [existing] 为 null 时新建，否则编辑现有自定义人设。
+     */
+    private fun showPersonaEditDialog(existing: AiPersona?) {
+        val isEdit = existing != null
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        val nameInput = EditText(this).apply {
+            hint = "角色名称（必填，上限 20 字）"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(20))
+            setText(existing?.name ?: "")
+        }
+        val descInput = EditText(this).apply {
+            hint = "人设简介（选填，上限 50 字）"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(50))
+            setText(existing?.description ?: "")
+        }
+        val promptInput = EditText(this).apply {
+            hint = "系统提示词（必填，上限 500 字）"
+            filters = arrayOf(android.text.InputFilter.LengthFilter(500))
+            minLines = 3
+            gravity = Gravity.TOP
+            setText(existing?.systemPrompt ?: "")
+        }
+        container.addView(nameInput)
+        container.addView(descInput)
+        container.addView(promptInput)
+        AlertDialog.Builder(this)
+            .setTitle(if (isEdit) "编辑人设" else "新增人设")
+            .setView(container)
+            .setPositiveButton("保存") { _, _ ->
+                val name = nameInput.text.toString().trim()
+                val prompt = promptInput.text.toString().trim()
+                if (name.isEmpty()) {
+                    showToast("角色名称不能为空")
+                    return@setPositiveButton
+                }
+                if (prompt.isEmpty()) {
+                    showToast("系统提示词不能为空")
+                    return@setPositiveButton
+                }
+                val desc = descInput.text.toString().trim()
+                if (isEdit) {
+                    PersonaRepository.updateCustomPersona(this, existing!!.copy(
+                        name = name, description = desc, systemPrompt = prompt
+                    ))
+                    showToast("人设已更新")
+                } else {
+                    val saved = PersonaRepository.addCustomPersona(this, AiPersona(
+                        id = name, name = name, description = desc,
+                        systemPrompt = prompt, isBuiltin = false
+                    ))
+                    // 新建后自动切换
+                    PersonaRepository.setCurrentPersona(this, saved.id)
+                    showToast("已新增并切换到: ${saved.name}")
+                }
+                personaValueText.text = PersonaRepository.getCurrentPersona(this).name
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
     private fun syncUserData() {
         showToast("开始同步用户词典...")
         lifecycleScope.launch {
@@ -574,6 +787,10 @@ class SettingsActivity : AppCompatActivity() {
         if (::levelValueText.isInitialized) {
             val levelState = LevelRepository.load(this)
             levelValueText.text = "Lv.${levelState.level} ${LevelEngine.levelName(levelState.level)}"
+        }
+
+        if (::personaValueText.isInitialized) {
+            personaValueText.text = PersonaRepository.getCurrentPersona(this).name
         }
     }
 
