@@ -1,0 +1,102 @@
+{
+  "summary": {
+    "projectName": "字由输入法（Ziyou IME）",
+    "locale": "zh-CN",
+    "modelId": "agent-work-loop-v4",
+    "reportContractVersion": 25,
+    "overview": "项目架构文档质量极高（README + ARCHITECTURE 共 947 行），纯逻辑模块化测试覆盖良好，但核心 JNI/RIME 输入热路径零自动化测试覆盖且 DI 测试钩子从未被调用，JNI 会话创建异常被静默吞没阻断诊断链。0 个合格会话使交付验收与学习捕获评估受限，相关证据缺口保留在证据边界中。",
+    "aiAgentPractice": {
+      "inspectedSurfaces": [
+        "Rules",
+        "Memories"
+      ],
+      "coverageRows": [
+        {
+          "surface": "Memories",
+          "scopes": [
+            "Project"
+          ],
+          "count": 36
+        },
+        {
+          "surface": "Custom Agents",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        }
+      ]
+    },
+    "assignmentSummaries": [],
+    "dimensions": [
+      {
+        "id": "task-understanding",
+        "label": "任务理解",
+        "score": 55,
+        "summary": "架构文档详尽为 Relevant Context 提供 Present 证据，但无 AGENTS.md 机器可读指令，0 会话使 Intent/Scope 不可观测。",
+        "findingRefs": []
+      },
+      {
+        "id": "controlled-execution",
+        "label": "可控执行",
+        "score": 56,
+        "summary": "Gradle 构建路由已文档化（Present），但无 AGENTS.md 指令路由、无 doctor/health 校验命令，权限边界因 0 会话不可观测。",
+        "findingRefs": []
+      },
+      {
+        "id": "change-validation",
+        "label": "改动验证",
+        "score": 50,
+        "summary": "测试框架存在且覆盖纯逻辑，但核心 JNI/RIME 输入热路径零覆盖、DI 钩子从未调用；JNI catch(...) 静默吞异常阻断诊断链。",
+        "findingRefs": [
+          "core-path-zero-tests",
+          "jni-silent-exception"
+        ]
+      },
+      {
+        "id": "reliable-delivery",
+        "label": "可靠交付",
+        "score": 42,
+        "summary": "无 CI pipeline、无 PR 自动化、无部署证据，交付验收边界缺失；回滚/恢复因 0 会话不可观测。",
+        "findingRefs": []
+      },
+      {
+        "id": "learning-capture",
+        "label": "经验沉淀",
+        "score": 35,
+        "summary": "有界审查已完成，但 0 会话/0 Episode 致证据不可观测（Unobserved），无法评估生命周期机会或循环工程；36 条 Memory 仅标题元数据，检索-应用-结果链未验证。",
+        "findingRefs": []
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "core-path-zero-tests",
+      "title": "核心 JNI/RIME 输入热路径零自动化测试覆盖",
+      "severity": "Medium",
+      "reason": "从按键到上屏的最关键路径（rime_jni.cc 496 行、InputLogicController.kt 342 行、RimeSession.kt 226 行、SimpleRimeImpl.kt 168 行，共约 1232 行核心代码）无任何自动化测试。9 个测试文件全部针对 :core-logic 纯逻辑和 PinyinHintProvider。DI 测试钩子 AppContainer.overrideRimeEngine() 已存在但从未被任何测试调用（经 Grep 确认仅出现在 AppContainer.kt 自身）。对核心路径的任何变更无法通过项目自有检查验证，JNI 签名漂移、引擎生命周期竞态和输入事务串行化回归只能靠运行时暴露。",
+      "expectedOutput": [
+        "通过 overrideRimeEngine 钩子连接 InputLogicController 和 SimpleRimeImpl 的测试，覆盖按键到提交行为和引擎生命周期"
+      ],
+      "expectedArtifact": "Test suite",
+      "aiFixPrompt": "为核心输入热路径添加自动化测试，复用已存在的 DI 测试钩子。\n\n1. 在 app/src/test 下创建测试，通过 AppContainer.overrideRimeEngine() 注入 mock 或 fake RimeEngine\n2. 覆盖 InputLogicController.processKey() 的按键到提交流程\n3. 覆盖 RimeSession 生命周期（初始化、超时、关闭）\n4. 覆盖 SimpleRimeImpl 的 dispatcher 调度路径\n\n## Validation\n\n- 运行 ./gradlew :app:testDebugUnitTest\n- 确认新测试通过且覆盖核心路径关键分支",
+      "dimensionRefs": [
+        "change-validation"
+      ]
+    },
+    {
+      "id": "jni-silent-exception",
+      "title": "JNI 会话创建异常被静默吞没，阻断失败诊断",
+      "severity": "Medium",
+      "reason": "rime_jni.cc 中 session() 函数的 catch(...) 静默捕获所有异常，将 session 设为 nullptr 并返回 session id=0，不记录任何诊断信息。这断开了 failure → reproduction → diagnosis → repair 链：当 JNI 会话创建失败时，agent 和开发者均无法观测根因。项目其他层使用 android.util.Log 和 __android_log_print 记录日志，但此处唯一的错误信号是返回值 0，无法区分失败原因。",
+      "expectedOutput": [
+        "rime_jni.cc session() 的 catch(...) 块通过 __android_log_print 记录异常信息，使 JNI 会话创建失败可观测"
+      ],
+      "expectedArtifact": "Diagnostic improvement",
+      "aiFixPrompt": "替换 rime_jni.cc session() 中的静默 catch(...) 为有日志的异常处理。\n\n1. 在 catch(...) 块中添加 __android_log_print 输出错误级别日志，记录异常信息\n2. 保留返回 session id=0 的行为（向后兼容），但确保失败原因可通过 logcat 观测\n3. 使用项目已有的 __android_log_print 日志函数（rime_jni.cc 中已使用）\n\n## Validation\n\n- 运行 ./gradlew :app:assembleDebug 确认编译通过\n- 确认 session 创建失败时 logcat 输出包含错误级别日志",
+      "dimensionRefs": [
+        "change-validation"
+      ]
+    }
+  ]
+}

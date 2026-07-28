@@ -1,0 +1,184 @@
+{
+  "summary": {
+    "projectName": "ziyou-ime",
+    "locale": "zh-CN",
+    "modelId": "agent-work-loop-v4",
+    "reportContractVersion": 25,
+    "overview": "项目拥有详尽的架构文档和核心路径单元测试，但缺乏自动化验证门禁、AI agent 任务路由指令和交付守护机制。会话证据不可用，评估基于仓库静态检视。",
+    "aiAgentPractice": {
+      "inspectedSurfaces": [
+        "Memories"
+      ],
+      "coverageRows": [
+        {
+          "surface": "Memories",
+          "scopes": [
+            "Project"
+          ],
+          "count": 38
+        },
+        {
+          "surface": "Skills",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Rules",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Hooks",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Commands",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Custom Agents",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Plugins",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        }
+      ]
+    },
+    "assignmentSummaries": [],
+    "dimensions": [
+      {
+        "id": "task-understanding",
+        "label": "任务理解",
+        "score": 45,
+        "summary": "ARCHITECTURE.md 提供完整架构上下文，但缺少 AGENTS.md 使 AI agent 无法获得任务路由、禁止区域和验证命令的快捷指引。",
+        "findingRefs": [
+          "no-agent-instructions"
+        ]
+      },
+      {
+        "id": "controlled-execution",
+        "label": "可控执行",
+        "score": 50,
+        "summary": "Gradle 构建系统可用且版本已固定，但无 setup/doctor 命令，新环境需手动配置 NDK 和预编译库。",
+        "findingRefs": [
+          "debug-log-privacy"
+        ]
+      },
+      {
+        "id": "change-validation",
+        "label": "改动验证",
+        "score": 50,
+        "summary": "38 个 JVM 单元测试覆盖核心输入路径，但无 CI、无 pre-commit hook，验证完全依赖本地手动执行。",
+        "findingRefs": [
+          "no-automated-validation-gate",
+          "untracked-test-files"
+        ]
+      },
+      {
+        "id": "reliable-delivery",
+        "label": "可靠交付",
+        "score": 35,
+        "summary": "无交付证据、无验收边界、无回滚或恢复机制。",
+        "findingRefs": []
+      },
+      {
+        "id": "learning-capture",
+        "label": "经验沉淀",
+        "score": 38,
+        "summary": "38 条项目 Memory 存在但无法验证其检索、应用和结果改善链；无 Skill 或可观测的重复模式检测。",
+        "findingRefs": [
+          "memory-title-fragmentation"
+        ]
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "no-automated-validation-gate",
+      "title": "核心输入路径变更无自动化验证门禁",
+      "severity": "High",
+      "reason": "项目无 CI pipeline、无 pre-commit hook。当前 diff 修改了 JNI 热路径（SimpleRimeImpl.parseBulkResult 提取），新增的对应测试文件尚为 untracked 状态。若本地跳过测试或遗忘提交，解析逻辑回归将直接导致输入丢字或崩溃。9 个测试文件（38 用例）仅在开发者手动执行时生效，无任何机械守护。",
+      "expectedOutput": [
+        "每次推送或提交前自动运行核心路径单元测试，阻止未验证变更进入主干。"
+      ],
+      "expectedArtifact": "CI 配置或 pre-commit hook",
+      "aiFixPrompt": "/better-harness fix this issue\n\n为核心输入路径添加最小自动化验证门禁：配置 GitHub Actions CI 运行 ./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest，或添加 pre-commit hook 执行相同命令。\n\n## Validation\n\n- 确认 CI 配置或 hook 脚本存在且可执行\n- 运行一次完整测试命令确认通过",
+      "dimensionRefs": [
+        "change-validation"
+      ]
+    },
+    {
+      "id": "no-agent-instructions",
+      "title": "AI agent 缺乏任务路由与安全边界指令",
+      "severity": "Medium",
+      "reason": "90 个源文件、4 种语言、5 层架构的项目无 AGENTS.md。ARCHITECTURE.md（587 行）为人类设计文档，缺少禁止修改区域、测试命令速查、变更检查清单等 agent 可操作路由。AI 辅助变更需通读全文才能避免越界（如误改 libs/include/ 第三方头文件或 librime-prebuilt/）。",
+      "expectedOutput": [
+        "AI agent 可从 AGENTS.md 获取任务入口、禁止区域、验证命令和模块边界，无需通读 587 行架构文档。"
+      ],
+      "expectedArtifact": "AGENTS.md",
+      "aiFixPrompt": "/better-harness fix this issue\n\n在项目根目录创建 AGENTS.md，包含：项目一句话概述、禁止修改区域（libs/include/、librime-prebuilt/）、测试命令（./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest）、变更检查清单、模块依赖方向（app → core-logic 单向）。\n\n## Validation\n\n- 确认 AGENTS.md 存在且包含上述最小内容\n- 确认禁止区域列表与 evidence-pack 中 suggestedScopes 一致",
+      "dimensionRefs": [
+        "task-understanding"
+      ]
+    },
+    {
+      "id": "untracked-test-files",
+      "title": "实现与测试原子性断裂",
+      "severity": "Medium",
+      "reason": "5 个新增测试文件（约 1125 行）为 untracked 状态，与其测试的 SimpleRimeImpl.parseBulkResult 重构处于同一工作目录但不同 git 状态。若仅提交实现而遗忘测试，仓库将处于有重构无验证状态。项目无 CI 强制新代码必须附带测试。",
+      "expectedOutput": [
+        "实现重构与其验证测试在同一提交中入库，仓库不存在有实现无测试的中间状态。"
+      ],
+      "expectedArtifact": "已提交的测试文件",
+      "aiFixPrompt": "/better-harness fix this issue\n\n将 untracked 测试文件加入版本控制，确保实现变更与测试同步提交。考虑在 CI 中添加检查：若 src/main 有变更则对应 src/test 目录必须有变更或显式豁免。\n\n## Validation\n\n- git status 确认测试文件已 tracked\n- 运行 ./gradlew :app:testDebugUnitTest 确认测试通过",
+      "dimensionRefs": [
+        "change-validation"
+      ]
+    },
+    {
+      "id": "debug-log-privacy",
+      "title": "输入热路径日志记录用户文本无 DEBUG 守卫",
+      "severity": "Low",
+      "reason": "InputLogicController 的 Log.d 调用在 debug 构建中记录用户实际输入内容（commitText），无 BuildConfig.DEBUG 条件守卫或 Timber 式级别控制。虽然 release 构建的 R8 混淆可能 strip 部分日志，但无显式机制保证。ADB 连接或同设备应用可读取 logcat。",
+      "expectedOutput": [
+        "用户输入文本仅在 debug 构建中可见，release 构建无隐私泄露风险。"
+      ],
+      "expectedArtifact": "日志守卫代码",
+      "aiFixPrompt": "/better-harness fix this issue\n\n为 InputLogicController 中记录用户输入文本的 Log.d 调用添加 BuildConfig.DEBUG 守卫，或替换为 Timber 等支持级别控制的日志方案，确保 release 构建不输出用户输入内容。\n\n## Validation\n\n- 确认所有包含用户文本的日志调用有 DEBUG 条件守卫\n- 确认 release 构建变体中相关日志不输出",
+      "dimensionRefs": [
+        "controlled-execution"
+      ]
+    },
+    {
+      "id": "memory-title-fragmentation",
+      "title": "Memory 标题近似聚类暗示知识碎片化",
+      "severity": "Low",
+      "reason": "3 组 Memory 标题高度相似（93%、85%、80%），围绕 librime 预编译库构建和 Gradle Wrapper 配置两个主题。可能反映同一知识被分多次捕获为独立条目。标题层面无法确认正文是否重复或冲突，仅为人工合并审查线索。",
+      "expectedOutput": [
+        "消除标题碎片化，同一主题知识集中管理，减少检索噪声。"
+      ],
+      "expectedArtifact": "审查后的 Memory 集合",
+      "aiFixPrompt": "/better-harness fix this issue\n\n使用 SearchMemory 检索标题相似的 Memory 对（librime预编译库构建脚本/构建脚本配置/构建验证规范，Gradle Wrapper本地分发包标准配置流程/本地分发包配置），比较内容后使用 UpdateMemory 合并或去重。\n\n## Validation\n\n- 确认相似标题 Memory 已审查\n- 确认合并后无信息丢失",
+      "dimensionRefs": [
+        "learning-capture"
+      ]
+    }
+  ]
+}
