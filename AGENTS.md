@@ -9,7 +9,7 @@ Android 输入法应用，基于 Rime 引擎（Kotlin + C/C++ JNI + librime）�
 - `libs/include/` — librime C 头文件（预编译库接口）
 - `libs/arm64-v8a/` — 预编译静态库 `librime.a`
 - `librime-prebuilt/` — librime 源码、Boost 依赖、superbuild 构建脚本
-- `librime-prebuilt/boost/` — Boost 库源码（1.90.0）
+- `librime-prebuilt/boost/` — Boost 库源码（1.89.0）
 - `librime-prebuilt/librime/` — librime 上游源码
 - `gradle/wrapper/` — Gradle Wrapper 分发包
 

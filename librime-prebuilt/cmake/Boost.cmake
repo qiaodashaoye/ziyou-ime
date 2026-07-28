@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # 下载并解压指定版本的 Boost（cmake 打包版），提供 header + 编译型库
-# （regex 等）。移植自 Trime 的 app/src/main/jni/cmake/Boost.cmake。
+# （regex 等）。
 
 set(BOOST_VERSION 1.89.0)
 

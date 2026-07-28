@@ -2,16 +2,16 @@
 
 本模块负责为**字由输入法（ziyou-ime）**从源码交叉编译 [librime](https://github.com/rime/librime) 及其全部依赖，并合并成**单个** Android 静态库 `librime.a`（按 ABI 分目录），供 app 的 JNI 层直接链接。
 
-它用于**取代**此前从 Trime 项目获取预编译库的做法 —— 在 Trime 被删除后，ziyou-ime 可以完全独立地生成所需的 librime 预编译库。
+它使 ziyou-ime 可以完全独立地生成所需的 librime 预编译库，无需依赖任何外部预编译产物。
 
 ---
 
-## 1. 背景：与 Trime 的做法对比
+## 1. 背景：为什么需要独立预编译
 
-Trime 并没有真正产出「预编译库文件」，而是把 librime 及其依赖作为 git 子模块，在 **构建 App 时** 通过 CMake（`app/src/main/jni/CMakeLists.txt`）从源码整体编译进 App：
+常见的 Rime Android 集成方式并不产出「预编译库文件」，而是把 librime 及其依赖作为 git 子模块，在 **构建 App 时** 通过 CMake 从源码整体编译进 App：
 
 ```
-Trime app 构建
+整体源码编译的 app 构建
   └─ CMake
        ├─ add_subdirectory(boost / glog / yaml-cpp / snappy / leveldb / marisa / OpenCC)
        ├─ add_subdirectory(librime)         → 生成 rime-static 目标
@@ -23,12 +23,13 @@ Trime app 构建
 ziyou-ime 的定位不同：它的 JNI 层（`app/src/main/jni/librime_jni/CMakeLists.txt`）期望链接一个**已存在的**静态库：
 
 ```cmake
-find_library(RIME_LIB rime PATHS ${RIME_LIB_DIR} NO_DEFAULT_PATH)  # libs/<abi>/librime.a
+set(RIME_LIB_FILE "${RIME_LIB_DIR}/librime.a")   # libs/<abi>/librime.a
+target_link_libraries(rime_jni "${RIME_LIB_FILE}")
 ```
 
-因此本模块的职责就是：把 Trime 那套「从源码编译」的机制**独立出来**，并在最后**把 librime + 所有依赖合并成一个 `librime.a`**，产出到 `ziyou-ime/libs/`。
+因此本模块的职责就是：把这套「从源码编译」的机制**独立出来**，并在最后**把 librime + 所有依赖合并成一个 `librime.a`**，产出到 `ziyou-ime/libs/`。
 
-本模块的 CMake 依赖配置（`cmake/*.cmake` 中的 Find shim、`Boost.cmake`、`OpenccWorkarounds.cmake`）均**移植自 Trime 的成熟实现**，行为一致。
+本模块的 CMake 依赖配置（`cmake/*.cmake` 中的 Find shim、`Boost.cmake`、`OpenccWorkarounds.cmake`）均基于社区成熟实现移植，行为与上游实现一致。
 
 ---
 
@@ -36,9 +37,11 @@ find_library(RIME_LIB rime PATHS ${RIME_LIB_DIR} NO_DEFAULT_PATH)  # libs/<abi>/
 
 ```
 librime-prebuilt/
-├── CMakeLists.txt              # superbuild：编译 deps + librime，并合并为 librime.a
+├── superbuild/
+│   └── CMakeLists.txt          # superbuild：编译 deps + librime，并合并为 librime.a
+│                               #（置于子目录以避免 Android Studio 自动检测）
 ├── build.sh                    # 逐 ABI 交叉编译 + 安装到 ../libs 的驱动脚本
-├── Makefile                    # `make librime` 等入口（对齐旧 Trime 工作流）
+├── Makefile                    # `make librime` 等构建入口
 ├── cmake/
 │   ├── Boost.cmake             # 下载并解压指定版本 Boost
 │   ├── FindBoost.cmake         # 把 Boost:: 目标暴露给 librime 的 find_package
@@ -105,7 +108,7 @@ cd ../..
 无需手动操作，直接进入步骤 2。`build.sh` 检测到 `librime-prebuilt/librime` 不存在时，会自动执行
 `git clone --recursive`（版本由环境变量 `LIBRIME_VERSION` 指定，默认 `master`）。
 
-> **版本兼容性**：ziyou-ime 的 JNI 层仅使用 `rime_api.h` 暴露的 C 接口（`RimeTraits` / `RimeContext` / `process_key` 等），这些 API 长期稳定，librime **1.8.0 及以上**均兼容。为保证可复现，建议用方式 A 固定到一个具体 commit（可参考 Trime 曾使用的 librime commit 作为已验证基线）。
+> **版本兼容性**：ziyou-ime 的 JNI 层仅使用 `rime_api.h` 暴露的 C 接口（`RimeTraits` / `RimeContext` / `process_key` 等），这些 API 长期稳定，librime **1.8.0 及以上**均兼容。为保证可复现，建议用方式 A 固定到一个已验证的具体 commit 作为基线。
 
 ### 步骤 2：配置 NDK 路径
 
@@ -205,8 +208,8 @@ ziyou-ime 的 JNI 层通过 CMake 开关 `WITH_LUA` / `WITH_OCTAGRAM` / `WITH_PR
 ## 7. 工作原理简述
 
 1. `build.sh` 针对每个 ABI 调用 CMake，使用 NDK 的 `android.toolchain.cmake` 交叉编译。
-2. 顶层 `CMakeLists.txt` 依次 `add_subdirectory` 各依赖（生成 `glog` / `yaml-cpp` / `leveldb` / `marisa` / `libopencc` / `Boost::*` 目标），再 `add_subdirectory(librime)` 生成 `rime-static`。
-   - librime 的 `find_package(Glog/YamlCpp/...)` 会命中本模块 `cmake/` 下的 Find shim，直接指向上述目标（与 Trime 完全一致）。
+2. `superbuild/CMakeLists.txt` 依次 `add_subdirectory` 各依赖（生成 `glog` / `yaml-cpp` / `leveldb` / `marisa` / `libopencc` / `Boost::*` 目标），再 `add_subdirectory(librime)` 生成 `rime-static`。
+   - librime 的 `find_package(Glog/YamlCpp/...)` 会命中本模块 `cmake/` 下的 Find shim，直接指向上述目标。
 3. `bundle_static_library(rime-static rime)` 递归收集 `rime-static` 的**全部静态库依赖**，用 `llvm-ar` 的 MRI 脚本合并成单个 `librime.a`。
 4. `cmake --install` 把合并库拷到 `libs/<abi>/`，并把 librime 公共头文件拷到 `libs/include/`。
 

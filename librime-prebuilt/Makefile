@@ -4,7 +4,7 @@
 #
 # 字由输入法 —— librime 预编译库 Makefile
 #
-# 该 Makefile 提供与旧的 Trime `make librime` 等价的入口，构建产物
+# 该 Makefile 提供 `make librime` 等构建入口，构建产物
 # 直接安装到 ziyou-ime/libs/ 目录，供 app 的 JNI 层链接。
 
 .PHONY: all librime clean distclean lua octagram predict

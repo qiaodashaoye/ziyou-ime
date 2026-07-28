@@ -4,7 +4,7 @@
 它以清晰的分层架构集成了完整的 Rime 能力，并在其之上扩展了 **九宫格 T9 智能输入**、**在线扩展词库**、
 **打字等级成长体系** 等特色功能，既可作为学习 Rime Android 集成的参考项目，也是一款可日常使用的输入法。
 
-- **输入引擎**：librime（从源码交叉编译并合并为单个静态库，完全独立、不依赖 Trime）
+- **输入引擎**：librime（从源码交叉编译并合并为单个静态库，完全独立）
 - **界面**：键盘/候选区使用纯 Canvas 绘制（传统 View）；设置内的等级页、扩展词库页使用 Jetpack Compose (Material3)
 - **语言**：Kotlin + Kotlin 协程，JNI 层 C++17（RAII 资源管理）
 - **架构**：Gradle 多模块（`:app` + 纯逻辑库 `:core-logic`）；五层引擎栈 + 业务域；引擎经 `RimeEngine` 接口 + 轻量 DI 容器（`AppContainer`）解耦，核心纯逻辑独立单元测试
@@ -58,7 +58,7 @@ cd ziyou-ime
 
 ### 2. 准备 librime 预编译库
 
-项目自带 `librime-prebuilt/` 模块，可**独立**从源码交叉编译 librime 并生成所需的静态库（无需依赖 Trime）：
+项目自带 `librime-prebuilt/` 模块，可**独立**从源码交叉编译 librime 并生成所需的静态库：
 
 ```bash
 cd librime-prebuilt

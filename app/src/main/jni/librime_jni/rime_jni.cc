@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// 字由输入法 JNI核心文件 - 基于Trime精简
+// 字由输入法 JNI核心文件
 
 #include <rime_api.h>
 
