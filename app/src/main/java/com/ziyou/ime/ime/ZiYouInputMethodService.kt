@@ -131,6 +131,17 @@ class ZiYouInputMethodService : InputMethodService() {
         }
 
         override fun onPanelWillOpen() = clearCompositionForPanel()
+
+        override fun editorAcceptsImage(): Boolean = inputLogic.acceptsImageContent()
+
+        override fun commitImageToEditor(file: File, description: String): Boolean = try {
+            val uri = FileProvider.getUriForFile(
+                this@ZiYouInputMethodService, "$packageName.imecontent", file)
+            inputLogic.commitImageToEditor(uri, "image/png", description)
+        } catch (e: Exception) {
+            Log.e(TAG, "技能图片提交异常: ${e.message}", e)
+            false
+        }
     }
 
     /** AI 问答面板协调器（面板生命周期与键盘收放编排，与技能面板同一拆分纪律） */

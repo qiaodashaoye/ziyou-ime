@@ -14,13 +14,14 @@ import android.widget.TextView
 import com.ziyou.ime.config.KeyboardTheme
 
 /**
- * 涂鸦画板面板：内部结构为「宿主标题栏 + 工具栏 + 画布区」。
+ * 涂鸦画板面板：内部结构为「工具栏 + 画布区 + 操作栏」（无独立标题栏，
+ * 关闭钮合并进顶部工具栏右端，省下的整行空间全部让给画布）。
  *
  * 挂载在输入视图内容根容器顶部并立即收起键盘/候选区（见 [DoodlePanelCoordinator]），
  * 画布接管全部键盘空间。与 AI/技能面板不同，涂鸦无文字输入需求，
  * **不接管 commitTarget 输入路由**，对输入链路零侵入。
  *
- * 工具栏分两行避免溢出：顶部绘制工具（颜色圆点 + 笔宽循环 + 橡皮），
+ * 工具栏分两行避免溢出：顶部绘制工具（颜色圆点 + 笔宽循环 + 橡皮 + 关闭 ✕），
  * 底部操作栏（撤销 / 复位 / 清空 + 发送）；发送按钮位于画布**下方**操作栏而非
  * 覆盖画布，避免绘画时误触。画布支持**双指拖拽平移**浏览的无限画布
  * （单指绘制、双指平移，见 [DoodleCanvasView]），空画布时发送置灰不可点。
@@ -97,36 +98,6 @@ class DoodlePanelView(
         // 阻断触摸穿透到下层视图
         isClickable = true
 
-        // ── 标题栏（与 AI 面板同款结构：左占位 + 居中标题 + 右关闭钮）──
-        val titleView = TextView(context).apply {
-            text = "涂鸦画板"
-            textSize = 15f
-            setTextColor(theme.keyTextColor)
-            gravity = Gravity.CENTER
-            maxLines = 1
-        }
-        val closeButton = TextView(context).apply {
-            text = "✕"
-            textSize = 16f
-            setTextColor(theme.keyTextColor)
-            gravity = Gravity.CENTER
-            setPadding(dp(16f), 0, dp(16f), 0)
-            setOnClickListener {
-                host.performHaptic()
-                host.onRequestClose()
-            }
-        }
-        val titleBar = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            setBackgroundColor(theme.candidateBackground)
-            addView(View(context), LayoutParams(dp(48f), LayoutParams.MATCH_PARENT))
-            addView(titleView, LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
-            addView(closeButton, LayoutParams(dp(48f), LayoutParams.MATCH_PARENT))
-        }
-        addView(titleBar, LayoutParams(LayoutParams.MATCH_PARENT, dp(40f)))
-        addView(View(context).apply { setBackgroundColor(theme.borderColor) },
-            LayoutParams(LayoutParams.MATCH_PARENT, dp(1f)))
-
         // ── 画布（先创建，工具栏回调需引用）──
         canvasView = DoodleCanvasView(context, theme).apply {
             penColor = penColors[selectedColorIndex]
@@ -134,7 +105,8 @@ class DoodlePanelView(
             onContentChanged = { hasContent -> syncButtonStates(hasContent) }
         }
 
-        // ── 顶部工具栏（绘制工具）：颜色圆点 + 笔宽 + 橡皮（仅绘制相关，避免单行溢出）──
+        // ── 顶部工具栏（绘制工具）：颜色圆点 + 笔宽 + 橡皮 + 关闭 ✕
+        //    （取代原独立标题栏，省下的 41dp 整行空间全部让给画布）──
         val toolbar = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -159,7 +131,8 @@ class DoodlePanelView(
             canvasView.eraserMode = !canvasView.eraserMode
             refreshEraserStyle()
         }
-        for (button in listOf(widthButton, eraserButton)) {
+        val closeButton = createToolButton("✕") { host.onRequestClose() }
+        for (button in listOf(widthButton, eraserButton, closeButton)) {
             toolbar.addView(button, LayoutParams(LayoutParams.WRAP_CONTENT, dp(32f)).apply {
                 marginStart = dp(6f)
             })

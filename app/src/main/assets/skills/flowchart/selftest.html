@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>FlowParser 自检（开发用，桌面浏览器打开）</title>
+<style>
+  body { font-family: monospace; padding: 16px; font-size: 14px; }
+  .ok { color: #2e7d32; }
+  .fail { color: #c62828; }
+  pre { background: #f5f5f5; padding: 10px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<h3>FlowParser 自检</h3>
+<div id="result"></div>
+<h3>示例翻译输出</h3>
+<pre id="demo"></pre>
+<script src="parser.js"></script>
+<script>
+'use strict';
+var failures = FlowParser.selfTest();
+var resultEl = document.getElementById('result');
+if (failures.length === 0) {
+  resultEl.className = 'ok';
+  resultEl.textContent = '✔ 全部断言通过';
+} else {
+  resultEl.className = 'fail';
+  resultEl.textContent = '✘ 失败：\n' + failures.join('\n');
+  resultEl.style.whiteSpace = 'pre-wrap';
+}
+var demo = [
+  '活动发布',
+  '  -> 报名渠道判定',
+  '     ? 站内小程序 -> 匹配梯度',
+  '     ? 美团 -> 原价报名,不占早鸟名额',
+  '  匹配梯度 -> 确认占位',
+  '  确认占位 -> 支付判定',
+  '     ? 是 -> 占用名额',
+  '     ? 否 -> 取消报名,释放名额',
+  '  占用名额 -> 查看早鸟进度'
+].join('\n');
+document.getElementById('demo').textContent = FlowParser.toMermaid(FlowParser.parse(demo));
+</script>
+</body>
+</html>

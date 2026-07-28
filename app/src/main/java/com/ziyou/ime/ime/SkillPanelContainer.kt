@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -22,8 +23,9 @@ import com.ziyou.ime.skill.SkillRuntime
 import com.ziyou.ime.skill.SkillWebViewFactory
 
 /**
- * 技能面板容器：内部结构为「宿主标题栏（脚本不可遮盖，反钓鱼锚点）+
- * 内容区（技能列表 / 技能 WebView）」。
+ * 技能面板容器：内容区（技能列表 / 技能 WebView）占满全高，宿主角标
+ * （「‹ 技能名」返回角标 + 「✕」关闭角标）原生绘制并悬浮于内容之上，
+ * 脚本不可遮盖（反钓鱼锚点），不再占用整行标题栏的垂直空间。
  *
  * 挂载位置由宿主按阶段切换（经 [Host.onRequestElevatedLayout]）：
  * - 技能列表 / 普通技能：覆盖键盘区域（候选/编码区保持在上方）；
@@ -65,13 +67,22 @@ class SkillPanelContainer(
 
         /** 输入法界面展开开关：false 时键盘/编码区/候选区整体缩回、面板接管其空间（窗口总高不变） */
         fun onRequestImeExpanded(expanded: Boolean)
+
+        /** 面板高度比例变更（键盘高度的倍数，已钳制；仅提升挂载生效） */
+        fun onRequestPanelHeight(ratio: Float)
+
+        /** 当前编辑器是否接受图片富媒体（image.send 前置检查） */
+        fun editorAcceptsImage(): Boolean
+
+        /** 将 PNG 文件经 commitContent 发送到宿主编辑器，返回是否提交成功 */
+        fun commitImage(file: java.io.File, description: String): Boolean
     }
 
     private val density = resources.displayMetrics.density
     private fun dp(value: Float): Int = (value * density + 0.5f).toInt()
 
-    private val titleView: TextView
-    private val backButton: TextView
+    private val backChip: TextView
+    private val closeChip: TextView
     private val contentFrame: FrameLayout
     private val listScroll: ScrollView
 
@@ -107,45 +118,7 @@ class SkillPanelContainer(
         // 阻断触摸穿透到下层键盘
         isClickable = true
 
-        // ── 宿主标题栏（原生绘制，脚本不可遮盖）──
-        backButton = TextView(context).apply {
-            text = "‹ 返回"
-            textSize = 14f
-            setTextColor(theme.candidateHighlightColor)
-            gravity = Gravity.CENTER
-            setPadding(dp(12f), 0, dp(12f), 0)
-            visibility = GONE
-            setOnClickListener { showSkillList() }
-        }
-        titleView = TextView(context).apply {
-            text = TITLE_DEFAULT
-            textSize = 15f
-            setTextColor(theme.keyTextColor)
-            gravity = Gravity.CENTER
-            maxLines = 1
-        }
-        val closeButton = TextView(context).apply {
-            text = "✕"
-            textSize = 16f
-            setTextColor(theme.keyTextColor)
-            gravity = Gravity.CENTER
-            setPadding(dp(16f), 0, dp(16f), 0)
-            setOnClickListener { host.onRequestClose() }
-        }
-        val titleBar = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            setBackgroundColor(theme.candidateBackground)
-            addView(backButton, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
-            addView(titleView, LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
-            addView(closeButton, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
-        }
-        addView(titleBar, LayoutParams(LayoutParams.MATCH_PARENT, dp(40f)))
-
-        // 标题栏下分隔线
-        addView(View(context).apply { setBackgroundColor(theme.borderColor) },
-            LayoutParams(LayoutParams.MATCH_PARENT, dp(1f)))
-
-        // ── 内容区：技能列表（默认）/ 技能 WebView ──
+        // ── 内容区：技能列表（默认）/ 技能 WebView，占满全高 ──
         val skillListView = SkillListView(context, theme, SkillManager.listSkills(context)) { skill ->
             openSkill(skill)
         }
@@ -158,6 +131,43 @@ class SkillPanelContainer(
         contentFrame.addView(listScroll, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         addView(contentFrame, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+
+        // ── 宿主悬浮角标（原生绘制、后 add 保持 z 序在 WebView 之上，脚本不可遮盖）──
+        backChip = TextView(context).apply {
+            textSize = 12f
+            setTextColor(theme.candidateHighlightColor)
+            gravity = Gravity.CENTER
+            maxLines = 1
+            setPadding(dp(10f), 0, dp(10f), 0)
+            background = chipBackground()
+            visibility = GONE
+            setOnClickListener { showSkillList() }
+        }
+        closeChip = TextView(context).apply {
+            text = "✕"
+            textSize = 13f
+            setTextColor(theme.keyTextColor)
+            gravity = Gravity.CENTER
+            setPadding(dp(10f), 0, dp(10f), 0)
+            background = chipBackground()
+            setOnClickListener { host.onRequestClose() }
+        }
+        contentFrame.addView(backChip, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT, dp(CHIP_HEIGHT_DP)).apply {
+            gravity = Gravity.TOP or Gravity.START
+            setMargins(dp(6f), dp(6f), 0, 0)
+        })
+        contentFrame.addView(closeChip, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT, dp(CHIP_HEIGHT_DP)).apply {
+            gravity = Gravity.TOP or Gravity.END
+            setMargins(0, dp(6f), dp(6f), 0)
+        })
+    }
+
+    /** 角标胶囊背景：半透明候选区底色 + 全圆角。 */
+    private fun chipBackground() = GradientDrawable().apply {
+        setColor(theme.candidateBackground and 0x00FFFFFF or (0xCC shl 24))
+        cornerRadius = dp(CHIP_HEIGHT_DP) / 2f
     }
 
     // ===== 技能装载 =====
@@ -177,10 +187,11 @@ class SkillPanelContainer(
         bridge = skillBridge
         webView = view
         listScroll.visibility = GONE
-        contentFrame.addView(view, FrameLayout.LayoutParams(
+        // WebView 插到角标之下（索引 0），保证宿主角标 z 序始终在页面之上
+        contentFrame.addView(view, 0, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-        titleView.text = skill.manifest.name
-        backButton.visibility = VISIBLE
+        backChip.text = "‹ ${skill.manifest.name}"
+        backChip.visibility = VISIBLE
         // 挂载位置按技能类型切换（幂等）：needs_input 提升，否则确保回到键盘叠层
         host.onRequestElevatedLayout(skill.manifest.needsInput)
         view.loadUrl(SkillWebViewFactory.entryUrl(skill))
@@ -190,8 +201,7 @@ class SkillPanelContainer(
     private fun showSkillList() {
         destroyWebView()
         listScroll.visibility = VISIBLE
-        titleView.text = TITLE_DEFAULT
-        backButton.visibility = GONE
+        backChip.visibility = GONE
         host.onRequestElevatedLayout(false)
     }
 
@@ -226,7 +236,7 @@ class SkillPanelContainer(
     override fun closePanel() = host.onRequestClose()
 
     override fun setPanelTitle(title: String) {
-        if (title.isNotBlank()) titleView.text = title
+        if (title.isNotBlank()) backChip.text = "‹ $title"
     }
 
     override fun editorPackageName(): String? = host.editorPackageName()
@@ -247,8 +257,18 @@ class SkillPanelContainer(
         host.onRequestImeExpanded(expanded)
     }
 
+    override fun setPanelHeightRatio(ratio: Float) {
+        host.onRequestPanelHeight(ratio)
+    }
+
+    override fun editorAcceptsImage(): Boolean = host.editorAcceptsImage()
+
+    override fun commitImage(file: java.io.File, description: String): Boolean =
+        host.commitImage(file, description)
+
     companion object {
-        private const val TITLE_DEFAULT = "技能"
+        /** 悬浮角标高度（dp）：紧凑面板（needs_input）下也不显突兀 */
+        private const val CHIP_HEIGHT_DP = 26f
     }
 }
 

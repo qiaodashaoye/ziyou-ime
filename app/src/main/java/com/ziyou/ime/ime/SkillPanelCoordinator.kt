@@ -10,6 +10,8 @@ import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.annotation.MainThread
 import com.ziyou.ime.config.ThemeManager
+import com.ziyou.ime.core.skill.SkillPanelSpec
+import java.io.File
 
 /**
  * 技能面板协调器。
@@ -59,10 +61,20 @@ class SkillPanelCoordinator(
 
         /** 面板即将打开：清除活跃编码与候选/编码区展示（键盘状态零丢失） */
         fun onPanelWillOpen()
+
+        /** 当前编辑器是否接受图片富媒体（技能 image.send 前置检查） */
+        fun editorAcceptsImage(): Boolean
+
+        /** 将 PNG 文件经 commitContent 发送到宿主编辑器（面板期间直达，绕过 commitTarget 路由） */
+        fun commitImageToEditor(file: File, description: String): Boolean
     }
 
     /** 技能面板（仅打开时非空；关闭即释放内部 WebView）。 */
     private var panel: SkillPanelContainer? = null
+
+    /** 提升挂载面板高度比例（键盘高度的倍数）：默认紧凑高度，
+     *  技能可经 ui.setPanelHeight 自定义（已钳制），挂载切换时复位。 */
+    private var elevatedRatio = SkillPanelSpec.DEFAULT_HEIGHT_RATIO
 
     /** 面板是否已打开。 */
     val isOpen: Boolean get() = panel != null
@@ -132,10 +144,17 @@ class SkillPanelCoordinator(
 
         override fun onRequestImeExpanded(expanded: Boolean) = setImeExpanded(expanded)
 
+        override fun onRequestPanelHeight(ratio: Float) = setPanelHeightRatio(ratio)
+
         override fun onInputRoutingChanged(active: Boolean) {
             // 上屏目标切换：激活时键盘文本改道注入面板输入框（Phase 3 输入路由）
             host.setCommitTarget(if (active) panel?.skillCommitTarget else null)
         }
+
+        override fun editorAcceptsImage(): Boolean = host.editorAcceptsImage()
+
+        override fun commitImage(file: File, description: String): Boolean =
+            host.commitImageToEditor(file, description)
     }
 
     // ===== 三态布局 =====
@@ -150,11 +169,35 @@ class SkillPanelCoordinator(
     }
 
     /**
+     * 应用技能自定义的面板高度比例（ui.setPanelHeight，已经 SkillPanelSpec 钳制）：
+     * 仅提升挂载（needs_input）下立即生效；键盘叠层形态面板占满键盘区，比例无意义。
+     * 收缩态下同步更新接管高度（基数换为新比例，窗口总高仍不变）。
+     */
+    private fun setPanelHeightRatio(ratio: Float) {
+        elevatedRatio = ratio
+        val current = panel ?: return
+        val content = host.contentLayout() ?: return
+        val keyboard = host.keyboardContainer() ?: return
+        val candidates = host.candidatesContainer() ?: return
+        if (current.parent !== content) return
+        val params = current.layoutParams as? LinearLayout.LayoutParams ?: return
+        params.height = if (keyboard.visibility == View.GONE) {
+            // 收缩态：GONE 视图保留最后布局高度，接管量不变，仅基数更新
+            panelHeight(ratio) + keyboard.height + candidates.height
+        } else {
+            panelHeight(ratio)
+        }
+        current.layoutParams = params
+    }
+
+    /**
      * 技能面板挂载位置切换：
      * - elevated=true（needs_input 技能打开）：面板提升至内容根容器顶部（编码区上方），
-     *   紧凑高度（键盘 60%），下方键盘/候选/编码区完整可用供路由打字；
+     *   默认紧凑高度（键盘 60%，技能可经 ui.setPanelHeight 调整），
+     *   下方键盘/候选/编码区完整可用供路由打字；
      * - elevated=false（技能列表 / 普通技能）：面板回到键盘叠层（FrameLayout 覆盖，
      *   高度自然锁定为键盘高度），候选/编码区仍在其上方。
+     * 挂载切换时高度比例复位为默认值（自定义高度为单次技能会话级）。
      * 两种挂载均不动引擎与键盘状态。
      */
     private fun setElevated(elevated: Boolean) {
@@ -167,12 +210,14 @@ class SkillPanelCoordinator(
         if (elevated) {
             if (current.parent === content) return
             (current.parent as? ViewGroup)?.removeView(current)
+            elevatedRatio = SkillPanelSpec.DEFAULT_HEIGHT_RATIO
             // 索引 0 = 整个输入视图最顶部（编码区之上）
             content.addView(current, 0, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, panelHeight(0.6f)))
+                LinearLayout.LayoutParams.MATCH_PARENT, panelHeight(elevatedRatio)))
         } else {
             if (current.parent === container) return
             (current.parent as? ViewGroup)?.removeView(current)
+            elevatedRatio = SkillPanelSpec.DEFAULT_HEIGHT_RATIO
             container.addView(current, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         }
@@ -197,14 +242,14 @@ class SkillPanelCoordinator(
         if (!expanded) {
             if (keyboard.visibility == View.GONE) return
             // 先取各区实测高度再隐藏，面板接管全部空间，窗口总高不变
-            params.height = panelHeight(0.6f) + keyboard.height + candidates.height
+            params.height = panelHeight(elevatedRatio) + keyboard.height + candidates.height
             keyboard.visibility = View.GONE
             candidates.visibility = View.GONE
         } else {
             if (keyboard.visibility == View.VISIBLE) return
             keyboard.visibility = View.VISIBLE
             candidates.visibility = View.VISIBLE
-            params.height = panelHeight(0.6f)
+            params.height = panelHeight(elevatedRatio)
         }
         current.layoutParams = params
     }

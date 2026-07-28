@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'">
+<title>流程图</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; background: transparent; font-family: sans-serif; color: inherit; }
+  .wrap { display: flex; flex-direction: column; height: 100%; padding: 5px; gap: 5px; }
+  button { border: none; border-radius: 6px; font-size: 13px; padding: 7px 0;
+           background: rgba(127,127,127,.15); color: inherit; }
+  button:active { opacity: .75; }
+  .primary { background: #1976D2; color: #fff; }
+
+  /* ── 顶部：模式页签（为宿主悬浮角标让位：左「‹ 流程图」/ 右「✕」）── */
+  .tabs { display: flex; gap: 4px; flex: 0 0 auto; margin: 0 40px 0 84px; }
+  .tabs button { flex: 1; }
+  .tabs button.on { background: #1976D2; color: #fff; }
+
+  .view { flex: 1; display: none; flex-direction: column; gap: 5px; min-height: 0; }
+  .view.on { display: flex; }
+
+  /* ── 可视化编辑视图 ── */
+  #steps { flex: 1; overflow-y: auto; border-radius: 8px;
+           background: rgba(127,127,127,.08); padding: 4px; }
+  .step { display: flex; align-items: center; gap: 6px; padding: 7px 8px; margin: 2px 0;
+          border-radius: 6px; background: rgba(127,127,127,.12); font-size: 13px;
+          border: 1px solid transparent; }
+  .step.sel { border-color: #1976D2; background: rgba(25,118,210,.14); }
+  .step.branch { margin-left: 18px; }
+  .step .tag { flex: 0 0 auto; font-size: 12px; opacity: .8; }
+  .step .txt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .step.err { border-color: rgba(244,67,54,.5); }
+  #empty-hint { padding: 14px 10px; font-size: 12px; line-height: 1.7; opacity: .7; }
+  .toolbar { display: flex; gap: 4px; flex: 0 0 auto; }
+  .toolbar button { flex: 1; }
+
+  /* ── 内联输入表单（新增步骤/分支时出现，走输入路由打字）── */
+  #form { display: none; flex-direction: column; gap: 4px; flex: 0 0 auto;
+          background: rgba(127,127,127,.12); border-radius: 8px; padding: 6px; }
+  #form.on { display: flex; }
+  #form .row { display: flex; gap: 4px; align-items: center; }
+  #form .row label { flex: 0 0 58px; font-size: 12px; opacity: .8; text-align: right; }
+  #form input { flex: 1; border: 1px solid rgba(127,127,127,.4); border-radius: 6px;
+                padding: 6px 8px; font-size: 13px; background: rgba(127,127,127,.08);
+                color: inherit; outline: none; caret-color: transparent; }
+  #form input.routing { border-color: #1976D2; box-shadow: 0 0 0 1px #1976D2; }
+  #form .row.hidden { display: none; }
+  #form .btns { display: flex; gap: 4px; }
+  #form .btns button { flex: 1; padding: 6px 0; }
+
+  /* ── 文本模式视图 ── */
+  #pseudo-text { flex: 1; border: 1px solid rgba(127,127,127,.4); border-radius: 8px;
+                 padding: 8px; font-size: 13px; line-height: 1.55; resize: none;
+                 background: rgba(127,127,127,.08); color: inherit; outline: none;
+                 caret-color: auto; font-family: monospace; }
+  #pseudo-text.routing { border-color: #1976D2; box-shadow: 0 0 0 1px #1976D2; }
+  #warn { flex: 0 0 auto; font-size: 11px; line-height: 1.5; color: #f9a825;
+          max-height: 44px; overflow-y: auto; }
+  #warn:empty { display: none; }
+
+  /* ── 预览视图 ── */
+  #preview-canvas { flex: 1; width: 100%; min-height: 0; border-radius: 8px;
+                    background: #fff; }
+  #out-hint { flex: 0 0 auto; font-size: 11px; opacity: .7; text-align: center; }
+  #out-hint:empty { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="tabs">
+    <button id="tab-edit" class="on">编辑</button>
+    <button id="tab-text">文本</button>
+    <button id="tab-preview">预览</button>
+  </div>
+
+  <!-- 可视化编辑 -->
+  <div class="view on" id="view-edit">
+    <div id="steps"></div>
+    <div id="form">
+      <div class="row" id="cond-row">
+        <label>分支条件</label>
+        <input id="cond-input" placeholder="点此输入，如：是 / 否" readonly>
+      </div>
+      <div class="row">
+        <label id="name-label">步骤名称</label>
+        <input id="name-input" placeholder="点此输入，用下方键盘打字" readonly>
+      </div>
+      <div class="btns">
+        <button id="form-cancel">取消</button>
+        <button id="form-ok" class="primary">确定</button>
+      </div>
+    </div>
+    <div class="toolbar" id="edit-toolbar">
+      <button id="btn-step">➕ 步骤</button>
+      <button id="btn-branch">🔀 分支</button>
+      <button id="btn-del">⌫ 删行</button>
+      <button id="btn-clear">🗑 清空</button>
+    </div>
+  </div>
+
+  <!-- 文本模式 -->
+  <div class="view" id="view-text">
+    <textarea id="pseudo-text" placeholder="点此输入伪代码，用下方键盘打字&#10;每行一步：报名 -> 审核&#10;分支：? 通过 -> 发放" readonly></textarea>
+    <div id="warn"></div>
+    <div class="toolbar">
+      <button id="ins-arrow">-&gt;</button>
+      <button id="ins-branch">?</button>
+      <button id="ins-comma">,</button>
+      <button id="ins-newline">⏎ 换行</button>
+    </div>
+  </div>
+
+  <!-- 预览与输出 -->
+  <div class="view" id="view-preview">
+    <canvas id="preview-canvas"></canvas>
+    <div id="out-hint"></div>
+    <div class="toolbar">
+      <button id="btn-code" class="primary">上屏代码</button>
+      <button id="btn-image">发送图片</button>
+      <button id="btn-gallery">存相册</button>
+    </div>
+  </div>
+</div>
+<script src="parser.js"></script>
+<script src="render.js"></script>
+<script src="script.js"></script>
+</body>
+</html>

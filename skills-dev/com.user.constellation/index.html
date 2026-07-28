@@ -11,8 +11,8 @@
   html, body { height: 100%; background: transparent; font-family: sans-serif; }
   .wrap { display: flex; flex-direction: column; height: 100%; padding: 6px; gap: 5px; }
 
-  /* 输入行：needs_input 路由输入框 + 查询按钮 */
-  .input-row { display: flex; gap: 4px; flex: 0 0 auto; }
+  /* 输入行：needs_input 路由输入框 + 查询按钮（为宿主悬浮角标让位：左「‹ 星座查询」/ 右「✕」） */
+  .input-row { display: flex; gap: 4px; flex: 0 0 auto; margin: 0 40px 0 92px; }
   #sign-input {
     flex: 1; border: 1px solid rgba(127,127,127,.4); border-radius: 6px;
     padding: 7px 10px; font-size: 14px; background: rgba(127,127,127,.08);
@@ -55,7 +55,7 @@
 <body>
 <div class="wrap">
   <div class="input-row">
-    <input id="sign-input" placeholder="点此输入星座名，用下方键盘打字" readonly>
+    <input id="sign-input" placeholder="点此输入星座名" readonly>
     <button id="go">查询</button>
   </div>
   <div class="history" id="history"></div>

@@ -74,7 +74,7 @@
     /** 宿主 Bridge API 版本（manifest.min_host_api 协商用）。
      *  单一事实源为宿主 SkillManifestValidator.HOST_API_VERSION，
      *  注入时由 SkillWebViewFactory 自动覆写此处字面量（此值仅为回退）。 */
-    apiVersion: 2,
+    apiVersion: 3,
 
     /** 文本上屏并关闭面板 */
     sendText: function (text) { return call('sendText', { text: String(text) }); },
@@ -107,6 +107,14 @@
        */
       setExpanded: function (expanded) {
         return call('ui.setExpanded', { expanded: expanded === undefined ? true : !!expanded });
+      },
+      /**
+       * 自定义面板高度（API v4，仅 needs_input 技能有效）：
+       * ratio 为键盘高度的倍数，宿主钳制到 [0.4, 1.2]（默认 0.6）；
+       * 退出技能回到列表时自动复位为默认值。
+       */
+      setPanelHeight: function (ratio) {
+        return call('ui.setPanelHeight', { ratio: Number(ratio) });
       }
     },
 
@@ -139,6 +147,17 @@
      * 网络请求代理（需 network 权限 + network_domains 白名单）。
      * 返回 {status, body}；options 支持 {method:'POST', body, contentType}。
      */
-    fetch: function (url, options) { return call('fetch', { url: String(url), options: options || {} }); }
+    fetch: function (url, options) { return call('fetch', { url: String(url), options: options || {} }); },
+
+    /**
+     * 图片输出（API v3，需 image 权限）：base64 仅支持 PNG（可带 data URL 前缀）。
+     * send 经 commitContent 发送到当前输入框（如微信聊天框，需对方声明接受 image/*）；
+     * saveToGallery 存入系统相册（Android 10+）。注意 Bridge 单消息 512KB 上限，
+     * 超大图请先降分辨率重绘。
+     */
+    image: {
+      send: function (base64) { return call('image.send', { data: String(base64) }); },
+      saveToGallery: function (base64) { return call('image.saveToGallery', { data: String(base64) }); }
+    }
   };
 })();

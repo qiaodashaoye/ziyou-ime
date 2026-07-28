@@ -10,7 +10,8 @@
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; background: transparent; font-family: sans-serif; }
   .wrap { display: flex; flex-direction: column; height: 100%; padding: 6px; gap: 6px; }
-  .input-row { display: flex; gap: 4px; }
+  /* 顶行为宿主悬浮角标让位：左「‹ 天气查询」/ 右「✕」 */
+  .input-row { display: flex; gap: 4px; margin: 0 40px 0 92px; }
   #city {
     flex: 1; border: 1px solid rgba(127,127,127,.4); border-radius: 6px;
     padding: 8px 10px; font-size: 15px; background: rgba(127,127,127,.08); color: inherit;
@@ -34,7 +35,7 @@
 <div class="wrap">
   <!-- 自定义城市输入：点击后经 input.requestFocus 把键盘上屏文本路由进本输入框 -->
   <div class="input-row">
-    <input id="city" placeholder="点此输入城市，用下方键盘打字" readonly>
+    <input id="city" placeholder="点此输入城市" readonly>
     <button id="go">查询</button>
   </div>
   <div class="chips" id="chips"></div>

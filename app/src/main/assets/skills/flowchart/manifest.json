@@ -1,0 +1,14 @@
+{
+  "manifest_version": 1,
+  "id": "com.ziyou.skill.flowchart",
+  "name": "流程图",
+  "version": "1.0.0",
+  "min_host_api": 4,
+  "author": "字由官方",
+  "description": "可视化编排流程图，生成 Mermaid 代码上屏或图片发送",
+  "icon_text": "📊",
+  "entry": "index.html",
+  "panel_mode": "embed",
+  "needs_input": true,
+  "permissions": ["storage", "image"]
+}

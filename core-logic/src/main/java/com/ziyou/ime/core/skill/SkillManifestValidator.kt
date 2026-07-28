@@ -10,8 +10,10 @@ object SkillManifestValidator {
 
     /** 宿主 Bridge API 版本，随 API 演进递增；manifest.min_host_api 高于此值则拒绝加载。
      *  v1：sendText/getContext/getLocale/haptic/ui/storage
-     *  v2：+fetch 代理、clipboard、input 路由（needs_input 分栏布局）、ui.setExpanded */
-    const val HOST_API_VERSION = 2
+     *  v2：+fetch 代理、clipboard、input 路由（needs_input 分栏布局）、ui.setExpanded
+     *  v3：+image 图片输出（image.send 富媒体发送 / image.saveToGallery 存相册）
+     *  v4：+ui.setPanelHeight 面板高度自定义（needs_input 提升挂载） */
+    const val HOST_API_VERSION = 4
 
     /** 支持的 manifest 格式版本 */
     const val SUPPORTED_MANIFEST_VERSION = 1

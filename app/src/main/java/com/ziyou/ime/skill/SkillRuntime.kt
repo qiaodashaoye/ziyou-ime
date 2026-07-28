@@ -2,9 +2,16 @@ package com.ziyou.ime.skill
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ContentValues
 import android.content.Context
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.util.Base64
 import android.util.Log
+import com.ziyou.ime.core.skill.SkillPanelSpec
 import com.ziyou.ime.core.skill.SkillPermission
+import com.ziyou.ime.ime.ImageCommitBridge
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -55,6 +62,11 @@ class SkillRuntime(
         private const val FETCH_MAX_PER_MINUTE = 30
         private const val FETCH_MAX_CONCURRENT = 2
 
+        /** PNG 文件头魔数（image.* 仅接受 PNG，防伪造 MIME） */
+        private val PNG_HEADER = byteArrayOf(
+            0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A
+        )
+
         private fun storageFileFor(context: Context, skillId: String): File {
             val safeId = skillId.replace(Regex("[^a-zA-Z0-9._-]"), "_")
             return File(File(context.filesDir, "skill_data").apply { mkdirs() }, "$safeId.json")
@@ -92,6 +104,15 @@ class SkillRuntime(
         /** 输入法界面展开开关：false 时键盘/编码区/候选区整体缩回、面板接管其空间
          *  （窗口总高不变）；true 完整恢复。仅提升挂载（needs_input）生效 */
         fun setImeExpanded(expanded: Boolean)
+
+        /** 设置面板高度比例（键盘高度的倍数，已钳制）。仅提升挂载（needs_input）生效 */
+        fun setPanelHeightRatio(ratio: Float)
+
+        /** 当前编辑器是否接受图片富媒体（EditorInfo.contentMimeTypes 含 image 类型） */
+        fun editorAcceptsImage(): Boolean
+
+        /** 将 PNG 文件经 commitContent 发送到宿主编辑器（主线程），返回是否提交成功 */
+        fun commitImage(file: File, description: String): Boolean
     }
 
     /** 运行时协程域：fetch / storage 等异步能力；面板关闭时整体取消 */
@@ -127,6 +148,10 @@ class SkillRuntime(
         }
         if (method.startsWith("storage.")) {
             handleStorage(method, params, complete)
+            return
+        }
+        if (method.startsWith("image.")) {
+            handleImage(method, params, complete)
             return
         }
         // 其余方法均为同步能力，立即完成
@@ -172,6 +197,15 @@ class SkillRuntime(
         // （键盘/编码区/候选区缩回为内容腾位，窗口总高不变）；缺省 true = 恢复
         "ui.setExpanded" -> {
             host.setImeExpanded(params.optBoolean("expanded", true))
+            null
+        }
+
+        // 面板高度自定义（API v4）：ratio 为键盘高度的倍数，宿主钳制到合法区间；
+        // 仅提升挂载（needs_input）生效，键盘叠层形态面板本就占满键盘区
+        "ui.setPanelHeight" -> {
+            if (!params.has("ratio")) throw SkillApiException("ratio 不能为空")
+            val ratio = params.optDouble("ratio", Double.NaN).toFloat()
+            host.setPanelHeightRatio(SkillPanelSpec.clampHeightRatio(ratio))
             null
         }
 
@@ -248,6 +282,104 @@ class SkillRuntime(
                 }
             }
             complete(result)
+        }
+    }
+
+    // ===== image（API v3：图片输出，需 image 权限）=====
+
+    /**
+     * image.send / image.saveToGallery 统一处理：权限与前置条件在主线程即时失败，
+     * base64 解码/写盘在 IO 协程执行；image.send 回主线程经宿主 commitContent 提交
+     *（与涂鸦/AI 面板发图同路径）。仅接受 PNG（文件头魔数校验）。
+     */
+    private fun handleImage(method: String, params: JSONObject, complete: (Result<String?>) -> Unit) {
+        val data = runCatching {
+            requirePermission(SkillPermission.IMAGE)
+            when (method) {
+                "image.send" -> if (!host.editorAcceptsImage()) {
+                    throw SkillApiException("当前输入框不支持接收图片")
+                }
+                "image.saveToGallery" -> if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                    throw SkillApiException("保存到相册需要 Android 10 及以上系统")
+                }
+                else -> throw SkillApiException("未知方法: $method")
+            }
+            val raw = params.optString("data")
+            if (raw.isEmpty()) throw SkillApiException("图片数据不能为空")
+            raw
+        }.getOrElse {
+            complete(Result.failure(it))
+            return
+        }
+        runtimeScope.launch {
+            val result = runCatching {
+                val bytes = withContext(Dispatchers.IO) { decodePngBytes(data) }
+                if (method == "image.send") {
+                    val file = withContext(Dispatchers.IO) { writeImageFile(bytes) }
+                    // commitContent 必须在主线程（InputConnection 约束）
+                    if (!host.commitImage(file, skill.manifest.name)) {
+                        throw SkillApiException("图片发送失败，当前输入框可能不支持")
+                    }
+                } else {
+                    withContext(Dispatchers.IO) { insertToGallery(bytes) }
+                }
+                null
+            }.recoverCatching { e ->
+                if (e is SkillApiException) throw e
+                Log.w(TAG, "$method 失败: ${e.message}")
+                throw SkillApiException("图片处理失败")
+            }
+            complete(result)
+        }
+    }
+
+    /** 解码 base64（容忍 data URL 前缀）并校验 PNG 文件头。 */
+    private fun decodePngBytes(data: String): ByteArray {
+        val payload = data.substringAfter("base64,", data)
+        val bytes = try {
+            Base64.decode(payload, Base64.DEFAULT)
+        } catch (e: Exception) {
+            null
+        }
+        if (bytes == null || bytes.size < PNG_HEADER.size) throw SkillApiException("图片数据无效")
+        PNG_HEADER.forEachIndexed { index, byte ->
+            if (bytes[index] != byte) throw SkillApiException("仅支持 PNG 图片")
+        }
+        return bytes
+    }
+
+    /** 写入 FileProvider 已暴露的共享缓存子目录（先清理本技能历史文件，避免缓存累积）。 */
+    private fun writeImageFile(bytes: ByteArray): File {
+        val dir = File(context.cacheDir, ImageCommitBridge.CACHE_DIR_NAME).apply { mkdirs() }
+        val prefix = "skill_${skill.manifest.id.replace(Regex("[^a-zA-Z0-9._-]"), "_")}_"
+        dir.listFiles { file -> file.name.startsWith(prefix) }?.forEach { it.delete() }
+        val file = File(dir, "$prefix${System.currentTimeMillis()}.png")
+        file.writeBytes(bytes)
+        return file
+    }
+
+    /** 插入系统相册 Pictures/字由输入法/（API 29+ MediaStore，免存储权限）。 */
+    private fun insertToGallery(bytes: ByteArray) {
+        val resolver = context.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, "ziyou_skill_${System.currentTimeMillis()}.png")
+            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+            put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/字由输入法")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            ?: throw SkillApiException("相册写入失败")
+        try {
+            resolver.openOutputStream(uri)?.use { it.write(bytes) }
+                ?: throw SkillApiException("相册写入失败")
+            values.clear()
+            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+        } catch (e: Exception) {
+            // 写入半途失败：删除残留的 pending 记录
+            runCatching { resolver.delete(uri, null, null) }
+            if (e is SkillApiException) throw e
+            throw SkillApiException("相册写入失败")
         }
     }
 
