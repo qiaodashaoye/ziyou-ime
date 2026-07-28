@@ -63,8 +63,12 @@ class AiPanelView(
         /** 将 AI 答案上屏到当前输入框（绕过面板输入路由，直达宿主编辑器） */
         fun onCommitAnswer(text: String)
 
-        /** 将 AI 答案渲染为图片并发送到当前输入框（commitContent 富媒体提交） */
+        /** 将 AI 答案渲染为图片后提交：宿主按最新图片能力路由到
+         *  commitContent 直发输入框或保存到系统相册 */
         fun onSendAnswerAsImage(content: CharSequence)
+
+        /** 当前编辑器是否可直接接收图片（答案操作按钮呈现「发图」或「存图」） */
+        fun editorAcceptsImage(): Boolean
 
         /** 按键震动反馈 */
         fun performHaptic()
@@ -422,13 +426,15 @@ class AiPanelView(
             bubble.getChildAt(0).setOnClickListener { host.onRequestOpenSettings() }
         }
         // 成功答案右侧附操作列：「发送」上屏解析后纯文本（Markdown 标记已剥离，
-        // 列表已转 •）；「发图」把富文本渲染为主题卡片图发送，两者共用同一样式
+        // 列表已转 •）；图片钮按编辑器图片能力呈现「发图」（commitContent 直发）
+        // 或「存图」（保存到相册），标签在气泡创建时快照，点击时宿主按最新检测结果路由
         if (!isError) {
             val actions = LinearLayout(context).apply {
                 orientation = VERTICAL
                 addView(createAnswerActionButton("发送") { host.onCommitAnswer(content.toString()) },
                     LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-                addView(createAnswerActionButton("发图") { host.onSendAnswerAsImage(content) },
+                val imageLabel = if (host.editorAcceptsImage()) "发图" else "存图"
+                addView(createAnswerActionButton(imageLabel) { host.onSendAnswerAsImage(content) },
                     LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
                         topMargin = dp(6f)
                     })

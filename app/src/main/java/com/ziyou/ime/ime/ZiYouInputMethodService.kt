@@ -1,8 +1,11 @@
 package com.ziyou.ime.ime
 
+import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Bitmap
 import android.inputmethodservice.InputMethodService
+import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
@@ -21,6 +24,7 @@ import com.ziyou.ime.core.RimeMessage
 import com.ziyou.ime.daemon.RimeEngine
 import com.ziyou.ime.core.t9.KeyRecordStack
 import com.ziyou.ime.data.AssociationManager
+import com.ziyou.ime.data.ClipboardHistoryRepository
 import com.ziyou.ime.data.SideSymbolRepository
 import com.ziyou.ime.data.SymbolRepository
 import com.ziyou.ime.di.AppContainer
@@ -167,7 +171,9 @@ class ZiYouInputMethodService : InputMethodService() {
 
         override fun commitAnswerToEditor(text: String) = inputLogic.commitDirectToEditor(text)
 
-        override fun commitAnswerImageToEditor(content: CharSequence) = sendAnswerAsImage(content)
+        override fun commitAnswerImageToEditor(content: CharSequence) = submitAnswerImage(content)
+
+        override fun editorAcceptsImage(): Boolean = inputLogic.acceptsImageContent()
 
         override fun onPanelWillOpen() = clearCompositionForPanel()
     }
@@ -192,11 +198,46 @@ class ZiYouInputMethodService : InputMethodService() {
         override fun sendDoodleImage(snapshot: Bitmap) =
             sendDoodleAsImage(snapshot)
 
+        override fun saveDoodleImage(snapshot: Bitmap) =
+            saveDoodleAsImage(snapshot)
+
+        override fun imageSupportsSend(): Boolean = inputLogic.acceptsImageContent()
+
         override fun onPanelWillOpen() = clearCompositionForPanel()
     }
 
+    /** 粘贴板历史面板协调器（面板生命周期与键盘收放编排，与 AI/技能/涂鸦面板同一拆分纪律） */
+    private val clipboardPanels by lazy {
+        ClipboardPanelCoordinator(this, clipboardPanelHost)
+    }
+
+    /** 提供给 [ClipboardPanelCoordinator] 的宿主能力：容器访问与粘贴出口。 */
+    private val clipboardPanelHost = object : ClipboardPanelCoordinator.Host {
+        override fun contentLayout(): LinearLayout? = this@ZiYouInputMethodService.contentLayout
+
+        override fun keyboardContainer(): FrameLayout? =
+            this@ZiYouInputMethodService.keyboardContainer
+
+        override fun candidatesContainer(): LinearLayout? =
+            this@ZiYouInputMethodService.candidatesContainer
+
+        override fun keyboardView(): BaseKeyboardView? = this@ZiYouInputMethodService.keyboardView
+
+        override fun isFloatingMode(): Boolean =
+            displayModeCtrl.currentMode == DisplayMode.FLOATING
+
+        override fun pasteToEditor(text: String) = inputLogic.commitDirectToEditor(text)
+
+        override fun onPanelWillOpen() = clearCompositionForPanel()
+    }
+
+    /** 剪贴板变更监听：复制即收录历史（持强引用，onCreate 注册 / onDestroy 注销） */
+    private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
+        captureClipboardToHistory()
+    }
+
     /**
-     * 面板（技能 / AI 问答 / 涂鸦画板）打开前的统一清理：
+     * 面板（技能 / AI 问答 / 涂鸦画板 / 粘贴板）打开前的统一清理：
      * 清除活跃编码与候选/编码区展示，避免面板期间残留 preedit/候选。
      */
     private fun clearCompositionForPanel() {
@@ -304,11 +345,43 @@ class ZiYouInputMethodService : InputMethodService() {
             }
         }
 
+        // 监听剪贴板变更：复制即收录粘贴板历史
+        // （Android 10+ 后台读剪贴板仅默认输入法豁免，非默认时读到 null 自然跳过）
+        try {
+            getSystemService(ClipboardManager::class.java)
+                ?.addPrimaryClipChangedListener(clipboardListener)
+        } catch (e: Exception) {
+            Log.w(TAG, "注册剪贴板监听失败: ${e.message}")
+        }
+
         // 监听Rime消息（方案切换、选项变更等）
         serviceScope.launch {
             rime.messageFlow.collectLatest { message ->
                 handleRimeMessage(message)
             }
+        }
+    }
+
+    /**
+     * 读取当前剪贴板并收录进粘贴板历史（监听回调 + onStartInputView 兜底同步）。
+     * 去重/截断/容量裁剪由 :core-logic 的 ClipboardHistoryLogic 保证：
+     * 与头条重复的捕获不触发落盘，高频调用零 IO；
+     * Android 13+ 密码管理器等标记的敏感内容（EXTRA_IS_SENSITIVE）不入库。
+     */
+    private fun captureClipboardToHistory() {
+        try {
+            val clip = getSystemService(ClipboardManager::class.java)?.primaryClip ?: return
+            if (clip.itemCount == 0) return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                clip.description?.extras
+                    ?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE, false) == true
+            ) {
+                return
+            }
+            val text = clip.getItemAt(0).coerceToText(this)?.toString() ?: return
+            ClipboardHistoryRepository.addEntry(this, text)
+        } catch (e: Exception) {
+            Log.w(TAG, "读取剪贴板异常: ${e.message}")
         }
     }
 
@@ -333,10 +406,11 @@ class ZiYouInputMethodService : InputMethodService() {
      * 形态切换（[switchDisplayMode]）时也经本方法重建，与 onCreateInputView 同源。
      */
     private fun buildInputView(mode: DisplayMode): View {
-        // 重建前释放技能/AI/涂鸦面板（旧容器即将废弃，WebView/进行中请求/离屏 bitmap 必须显式释放）
+        // 重建前释放技能/AI/涂鸦/粘贴板面板（旧容器即将废弃，WebView/进行中请求/离屏 bitmap 必须显式释放）
         skillPanels.close()
         aiPanels.close()
         doodlePanels.close()
+        clipboardPanels.close()
         val theme = ThemeManager.getCurrentTheme(this)
         // 悬浮形态下键盘/候选/编码区统一缩放，停靠形态保持 1.0 零影响
         val scale = if (mode == DisplayMode.FLOATING) DisplayModeManager.FLOATING_SCALE else 1f
@@ -625,6 +699,13 @@ class ZiYouInputMethodService : InputMethodService() {
             setInputView(buildInputView(resolved))
         }
 
+        // 编辑器切换时实时重判图片能力（contentMimeTypes 动态检测 + 白名单兜底），
+        // 刷新涂鸦面板「发送/保存」按钮（同应用内切换输入框时面板可能仍打开）
+        doodlePanels.refreshImageSupport()
+
+        // 兜底同步当前剪贴板（服务重启期间漏听的复制在此补收；去重逻辑保证幂等零 IO）
+        captureClipboardToHistory()
+
         serviceScope.launch {
             try {
                 // 词库下载后引擎可能正在重新部署，先等待就绪再同步，
@@ -655,9 +736,6 @@ class ZiYouInputMethodService : InputMethodService() {
                 Log.w(TAG, "每日签到异常: ${e.message}")
             }
         }
-
-        // 图片选择器返回后编辑器重新获得焦点，此时 InputConnection 可用，提交待发图片
-        commitPendingImageIfAny()
     }
 
     /**
@@ -668,10 +746,11 @@ class ZiYouInputMethodService : InputMethodService() {
         super.onFinishInputView(finishingInput)
         Log.d(TAG, "onFinishInputView")
 
-        // 强制关闭技能面板（销毁 WebView，避免后台常驻内存/定时器）与 AI/涂鸦面板
+        // 强制关闭技能面板（销毁 WebView，避免后台常驻内存/定时器）与 AI/涂鸦/粘贴板面板
         skillPanels.close()
         aiPanels.close()
         doodlePanels.close()
+        clipboardPanels.close()
 
         // 丢弃未提交的多击预览并清空编码区
         keyboardView?.resetInputState()
@@ -774,30 +853,44 @@ class ZiYouInputMethodService : InputMethodService() {
                 displayModeCtrl.toggle()
             }
 
-            // 技能面板开关：覆盖/移除键盘区域上的技能面板（与 AI/涂鸦面板互斥）
+            // 技能面板开关：覆盖/移除键盘区域上的技能面板（与 AI/涂鸦/粘贴板面板互斥）
             KeyCode.KEYCODE_SKILL_PANEL -> {
                 aiPanels.close()
                 doodlePanels.close()
+                clipboardPanels.close()
                 skillPanels.toggle()
             }
-
-            // AI 问答面板开关：编码区上方展示输入框/答案区（与技能/涂鸦面板互斥）
+            
+            // AI 问答面板开关：编码区上方展示输入框/答案区（与技能/涂鸦/粘贴板面板互斥）
             KeyCode.KEYCODE_AI_ASSISTANT -> {
                 skillPanels.close()
                 doodlePanels.close()
+                clipboardPanels.close()
                 aiPanels.toggle()
             }
-
-            // 涂鸦画板开关：收起键盘展示画布（与技能/AI 面板互斥）；
-            // 编辑器不收图片时直接拦截，不开面板
+            
+            // 涂鸦画板开关：收起键盘展示画布（与技能/AI/粘贴板面板互斥）；
+            // 编辑器不收图片时面板按钮转为「保存」（存相册兑底），
+            // 仅当发送/保存两条出路都不可用（Android 10 以下且不收图）时拦截不开面板
             KeyCode.KEYCODE_DOODLE_PANEL -> {
-                if (!doodlePanels.isOpen && !inputLogic.acceptsImageContent()) {
+                if (!doodlePanels.isOpen && !inputLogic.acceptsImageContent() &&
+                    !GalleryImageSaver.isSupported) {
                     Toast.makeText(this, "当前输入框不支持发送图片", Toast.LENGTH_SHORT).show()
                 } else {
                     skillPanels.close()
                     aiPanels.close()
+                    clipboardPanels.close()
                     doodlePanels.toggle()
                 }
+            }
+            
+            // 粘贴板历史面板开关：收起键盘展示历史列表（与技能/AI/涂鸦面板互斥）；
+            // 点击条目经 commitDirectToEditor 直达宿主输入框，不接管 commitTarget
+            KeyCode.KEYCODE_CLIPBOARD_PANEL -> {
+                skillPanels.close()
+                aiPanels.close()
+                doodlePanels.close()
+                clipboardPanels.toggle()
             }
 
             // 收起键盘（候选区按钮栏）
@@ -813,18 +906,6 @@ class ZiYouInputMethodService : InputMethodService() {
             // 循环切换主题（候选区按钮栏）：在已解锁主题间依次切换
             KeyCode.KEYCODE_SWITCH_THEME -> {
                 cycleTheme()
-            }
-
-            // 发送图片（候选区按钮栏）：拉起图片选择器，选完回归后经 commitContent 提交
-            KeyCode.KEYCODE_SEND_IMAGE -> {
-                if (!inputLogic.acceptsImageContent()) {
-                    Toast.makeText(this, "当前输入框不支持发送图片", Toast.LENGTH_SHORT).show()
-                } else {
-                    val intent = Intent(this, ImagePickerActivity::class.java).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    startActivity(intent)
-                }
             }
 
             // 符号键盘开关：记录进入前布局，再次触发（面板内「返回」键）时恢复
@@ -910,6 +991,19 @@ class ZiYouInputMethodService : InputMethodService() {
     // ===== UI 渲染 =====
 
     /**
+     * AI 面板「发图/存图」统一入口：点击时按当前编辑器图片能力实时路由——
+     * 可收图走 commitContent 直发（[sendAnswerAsImage]），否则保存到相册
+     * （[saveAnswerAsImage]）。气泡按钮标签为创建时快照，滞后也不会误发。
+     */
+    private fun submitAnswerImage(content: CharSequence) {
+        if (inputLogic.acceptsImageContent()) {
+            sendAnswerAsImage(content)
+        } else {
+            saveAnswerAsImage(content)
+        }
+    }
+
+    /**
      * 将 AI 答案渲染为主题卡片图并经 commitContent 发送到当前输入框（AI 面板「发图」入口）。
      * 渲染/PNG 压缩在后台线程执行，提交与 Toast 反馈回主线程；面板打开期间
      * commitTarget 被占用，故经 [InputLogicController.commitImageToEditor] 绕过面板路由直达宿主编辑器。
@@ -941,6 +1035,35 @@ class ZiYouInputMethodService : InputMethodService() {
     }
 
     /**
+     * 将 AI 答案渲染为主题卡片图并保存到系统相册（AI 面板「存图」路径，
+     * 编辑器不收图片时的兜底出口）。渲染/PNG 压缩在后台线程执行，相册写入在
+     * IO 线程，Toast 反馈回主线程；Android 10 以下 MediaStore 免权限写入不可用，直接提示。
+     */
+    private fun saveAnswerAsImage(content: CharSequence) {
+        if (!GalleryImageSaver.isSupported) {
+            Toast.makeText(this, "保存到相册需要 Android 10 及以上系统", Toast.LENGTH_SHORT).show()
+            return
+        }
+        Toast.makeText(this, "正在生成图片…", Toast.LENGTH_SHORT).show()
+        val theme = ThemeManager.getCurrentTheme(this)
+        serviceScope.launch {
+            try {
+                val file = withContext(Dispatchers.Default) {
+                    TextImageRenderer.renderToPng(applicationContext, content, theme)
+                }
+                val ok = withContext(Dispatchers.IO) {
+                    GalleryImageSaver.savePng(applicationContext, file.readBytes(), "ziyou_ai")
+                }
+                Toast.makeText(this@ZiYouInputMethodService,
+                    if (ok) "已保存到相册" else "保存到相册失败", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Log.e(TAG, "AI 答案存图失败: ${e.message}", e)
+                Toast.makeText(this@ZiYouInputMethodService, "图片生成失败", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /**
      * 将涂鸦快照导出为 PNG 并经 commitContent 发送到当前输入框（涂鸦面板「发送」入口）。
      * 合成/PNG 压缩在后台线程执行，提交与 Toast 反馈回主线程；遵循面板期间直达宿主
      * 编辑器的路由纪律，经 [InputLogicController.commitImageToEditor] 提交；
@@ -948,8 +1071,8 @@ class ZiYouInputMethodService : InputMethodService() {
      */
     private fun sendDoodleAsImage(snapshot: Bitmap) {
         if (!inputLogic.acceptsImageContent()) {
-            snapshot.recycle()
-            Toast.makeText(this, "当前输入框不支持发送图片", Toast.LENGTH_SHORT).show()
+            // 按钮态滞后兜底：点击瞬间编辑器已不收图则转存相册
+            saveDoodleAsImage(snapshot)
             return
         }
         Toast.makeText(this, "正在生成图片…", Toast.LENGTH_SHORT).show()
@@ -979,22 +1102,40 @@ class ZiYouInputMethodService : InputMethodService() {
     }
 
     /**
-     * 图片选择器返回后提交待发送图片（若有）。
-     * [ImagePickerActivity] 选图并复制到本地后登记到 [ImageCommitBridge]；
-     * 选择器关闭、编辑器重新获焦时本方法取出并经 FileProvider 产生 content:// URI 提交。
+     * 将涂鸦快照导出为 PNG 并保存到系统相册（涂鸦面板「保存」入口，
+     * 编辑器不收图片时的兜底出口）。合成/PNG 压缩在后台线程执行，相册写入在
+     * IO 线程，Toast 反馈回主线程；快照所有权在本方法，导出完成后 recycle；
+     * 保存成功后自动关闭面板（与发送路径同一交互节奏）。
      */
-    private fun commitPendingImageIfAny() {
-        val pending = ImageCommitBridge.take() ?: return
-        val file = File(pending.path)
-        if (!file.exists()) return
-        try {
-            val uri = FileProvider.getUriForFile(this, "$packageName.imecontent", file)
-            val ok = inputLogic.commitImage(uri, pending.mime)
-            if (!ok) {
-                Toast.makeText(this, "发送图片失败或当前输入框不支持", Toast.LENGTH_SHORT).show()
+    private fun saveDoodleAsImage(snapshot: Bitmap) {
+        if (!GalleryImageSaver.isSupported) {
+            snapshot.recycle()
+            Toast.makeText(this, "保存到相册需要 Android 10 及以上系统", Toast.LENGTH_SHORT).show()
+            return
+        }
+        Toast.makeText(this, "正在生成图片…", Toast.LENGTH_SHORT).show()
+        serviceScope.launch {
+            try {
+                val file = withContext(Dispatchers.Default) {
+                    try {
+                        DoodleImageExporter.exportToPng(applicationContext, snapshot)
+                    } finally {
+                        snapshot.recycle()
+                    }
+                }
+                val ok = withContext(Dispatchers.IO) {
+                    GalleryImageSaver.savePng(applicationContext, file.readBytes(), "ziyou_doodle")
+                }
+                if (ok) {
+                    Toast.makeText(this@ZiYouInputMethodService, "已保存到相册", Toast.LENGTH_SHORT).show()
+                    doodlePanels.close()
+                } else {
+                    Toast.makeText(this@ZiYouInputMethodService, "保存到相册失败", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "涂鸦存图失败: ${e.message}", e)
+                Toast.makeText(this@ZiYouInputMethodService, "图片生成失败", Toast.LENGTH_SHORT).show()
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "提交图片异常: ${e.message}", e)
         }
     }
 
@@ -1162,6 +1303,13 @@ class ZiYouInputMethodService : InputMethodService() {
 
     override fun onDestroy() {
         Log.i(TAG, "InputMethodService onDestroy")
+        // 注销剪贴板监听（与 onCreate 注册对称）
+        try {
+            getSystemService(ClipboardManager::class.java)
+                ?.removePrimaryClipChangedListener(clipboardListener)
+        } catch (e: Exception) {
+            Log.w(TAG, "注销剪贴板监听失败: ${e.message}")
+        }
         // 释放技能面板（销毁 WebView）与 AI 面板（取消进行中请求）
         skillPanels.close()
         aiPanels.close()

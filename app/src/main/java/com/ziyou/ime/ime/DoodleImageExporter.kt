@@ -13,7 +13,7 @@ import java.io.File
  *
  * 将 [DoodleCanvasView.snapshot] 的透明底笔迹层合成为不透明白底图片
  * （透明底会被部分接收应用渲染成黑色，与 [TextImageRenderer] 同一经验），
- * 宽度超限时等比降采样，输出写入 cache 下 [ImageCommitBridge.CACHE_DIR_NAME]
+ * 宽度超限时等比降采样，输出写入 cache 下 [ImeImageCache.CACHE_DIR_NAME]
  * 目录（FileProvider 已暴露，可直接经 commitContent 提交）。
  *
  * 纯 CPU 绘制 + PNG 压缩，须在后台线程调用；传入的快照由调用方负责 recycle。
@@ -50,7 +50,7 @@ object DoodleImageExporter {
             )
 
             // 写入 FileProvider 已暴露的缓存子目录（先清理历史文件，避免缓存累积）
-            val dir = File(context.cacheDir, ImageCommitBridge.CACHE_DIR_NAME).apply { mkdirs() }
+            val dir = File(context.cacheDir, ImeImageCache.CACHE_DIR_NAME).apply { mkdirs() }
             dir.listFiles()?.forEach { it.delete() }
             val file = File(dir, "doodle_${System.currentTimeMillis()}.png")
             file.outputStream().use { output.compress(Bitmap.CompressFormat.PNG, 100, it) }

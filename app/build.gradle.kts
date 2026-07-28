@@ -141,6 +141,9 @@ dependencies {
     // ===== WebView 安全增强（技能插件系统：DOCUMENT_START_SCRIPT 垫片注入）=====
     implementation(libs.androidx.webkit)
 
+    // ===== 无障碍（候选区功能栏 Canvas 虚拟按钮的 ExploreByTouchHelper）=====
+    implementation(libs.androidx.customview)
+
     // ===== Debug 工具 =====
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)

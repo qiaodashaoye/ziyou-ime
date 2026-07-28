@@ -96,12 +96,13 @@ object KeyCode {
     const val KEYCODE_OPEN_SETTINGS = -107
     /** 用于内部标识循环切换主题（候选区按钮栏） */
     const val KEYCODE_SWITCH_THEME = -108
-    /** 用于内部标识发送图片（候选区按钮栏 → commitContent 富媒体提交） */
-    const val KEYCODE_SEND_IMAGE = -109
+    // -109 曾为发送图片（图片选择工具），已移除，编号保留不复用
     /** 用于内部标识 AI 问答面板开关（候选区按钮栏） */
     const val KEYCODE_AI_ASSISTANT = -110
     /** 用于内部标识涂鸦画板面板开关（候选区按钮栏 → commitContent 富媒体提交） */
     const val KEYCODE_DOODLE_PANEL = -111
+    /** 用于内部标识粘贴板历史面板开关（候选区按钮栏） */
+    const val KEYCODE_CLIPBOARD_PANEL = -112
 
     /**
      * 将Android KeyEvent的keyCode转换为Rime keysym

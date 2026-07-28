@@ -22,8 +22,10 @@ import com.ziyou.ime.config.KeyboardTheme
  * **不接管 commitTarget 输入路由**，对输入链路零侵入。
  *
  * 工具栏分两行避免溢出：顶部绘制工具（颜色圆点 + 笔宽循环 + 橡皮 + 关闭 ✕），
- * 底部操作栏（撤销 / 复位 / 清空 + 发送）；发送按钮位于画布**下方**操作栏而非
- * 覆盖画布，避免绘画时误触。画布支持**双指拖拽平移**浏览的无限画布
+ * 底部操作栏（撤销 / 复位 / 清空 + 发送/保存）；提交按钮位于画布**下方**操作栏而非
+ * 覆盖画布，避免绘画时误触；按钮文案随编辑器图片能力切换（见 [setImageSupport]）：
+ * 可收图时为「发送」（commitContent 直发），否则为「保存」（存入系统相册）。
+ * 画布支持**双指拖拽平移**浏览的无限画布
  * （单指绘制、双指平移，见 [DoodleCanvasView]），空画布时发送置灰不可点。
  * 配色全部映射自当前 [KeyboardTheme]，与 [AiPanelView] 同一视觉语言；
  * 画布纸面固定白底（导出图在深色主题下依然清晰）。
@@ -44,6 +46,10 @@ class DoodlePanelView(
         /** 将涂鸦快照导出为图片并发送到当前输入框（commitContent 富媒体提交）。
          *  快照所有权移交宿主，由宿主在导出后 recycle。 */
         fun onSendDoodle(snapshot: Bitmap)
+
+        /** 将涂鸦快照导出为图片并保存到系统相册（编辑器不收图片时的兜底出口）。
+         *  快照所有权移交宿主，由宿主在导出后 recycle。 */
+        fun onSaveDoodle(snapshot: Bitmap)
 
         /** 按键震动反馈 */
         fun performHaptic()
@@ -68,8 +74,11 @@ class DoodlePanelView(
     /** 涂鸦画布 */
     private val canvasView: DoodleCanvasView
 
-    /** 发送按钮（位于底部操作栏，空画布置灰） */
+    /** 发送/保存按钮（位于底部操作栏，空画布置灰，文案随图片能力切换） */
     private val sendButton: TextView
+
+    /** 当前编辑器是否可直接收图（true=「发送」，false=「保存」，见 [setImageSupport]） */
+    private var canSendImage = true
 
     /** 撤销按钮（无笔画时置灰） */
     private val undoButton: TextView
@@ -147,7 +156,7 @@ class DoodlePanelView(
         }
         addView(canvasArea, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
 
-        // ── 底部操作栏：撤销/复位/清空（左）+ 发送（右），位于画布之外避免误触 ──
+        // ── 底部操作栏：撤销/复位/清空（左）+ 发送/保存（右），位于画布之外避免误触 ──
         undoButton = createToolButton("撤销") { canvasView.undo() }
         val recenterButton = createToolButton("复位") { canvasView.resetView() }
         val clearButton = createToolButton("清空") { canvasView.clear() }
@@ -163,7 +172,8 @@ class DoodlePanelView(
                 if (!canvasView.hasContent()) return@setOnClickListener
                 host.performHaptic()
                 val snapshot = canvasView.snapshot() ?: return@setOnClickListener
-                host.onSendDoodle(snapshot)
+                // 按图片能力路由：可收图直发输入框，否则保存到相册
+                if (canSendImage) host.onSendDoodle(snapshot) else host.onSaveDoodle(snapshot)
             }
         }
         val actionBar = LinearLayout(context).apply {
@@ -225,6 +235,16 @@ class DoodlePanelView(
 
     // ===== 状态刷新 =====
 
+    /**
+     * 同步图片提交模式：编辑器可收图时按钮为「发送」（commitContent 直发），
+     * 否则为「保存」（存入系统相册）。面板打开时与 onStartInputView 编辑器切换时
+     * 由协调器刷新（见 DoodlePanelCoordinator.refreshImageSupport）。
+     */
+    fun setImageSupport(canSend: Boolean) {
+        canSendImage = canSend
+        sendButton.text = if (canSend) "发送" else "保存"
+    }
+
     /** 刷新颜色圆点：选中项加强调色描边环 */
     private fun refreshColorDots() {
         for (i in colorDots.indices) {
@@ -250,7 +270,7 @@ class DoodlePanelView(
         refreshColorDots()
     }
 
-    /** 同步发送/撤销按钮可用态（空画布置灰不可点） */
+    /** 同步发送(保存)/撤销按钮可用态（空画布置灰不可点） */
     private fun syncButtonStates(hasContent: Boolean) {
         sendButton.alpha = if (hasContent) 1f else 0.4f
         undoButton.alpha = if (hasContent) 1f else 0.4f

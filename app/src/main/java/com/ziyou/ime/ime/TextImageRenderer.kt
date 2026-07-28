@@ -17,7 +17,7 @@ import java.io.File
  * 将富文本内容（支持 Spanned，如 [com.ziyou.ime.ai.MarkdownRenderer] 的解析结果，
  * 粗体/列表/代码块样式随 Span 一并绘制）渲染为固定宽度的 PNG 卡片：
  * 顶部主题强调色条 + 正文 + 分隔线 + 品牌页脚，配色全部取自当前 [KeyboardTheme]，
- * 与键盘视觉一致。输出写入 cache 下 [ImageCommitBridge.CACHE_DIR_NAME] 目录
+ * 与键盘视觉一致。输出写入 cache 下 [ImeImageCache.CACHE_DIR_NAME] 目录
  * （FileProvider 已暴露该目录，可直接经 commitContent 提交）。
  *
  * 按固定像素宽度渲染（不乘设备密度），保证不同设备产出一致的分享图。
@@ -94,7 +94,7 @@ object TextImageRenderer {
                 dividerY + footerGap - footerPaint.ascent(), footerPaint)
 
             // 写入 FileProvider 已暴露的缓存子目录（先清理历史文件，避免缓存累积）
-            val dir = File(context.cacheDir, ImageCommitBridge.CACHE_DIR_NAME).apply { mkdirs() }
+            val dir = File(context.cacheDir, ImeImageCache.CACHE_DIR_NAME).apply { mkdirs() }
             dir.listFiles()?.forEach { it.delete() }
             val file = File(dir, "ai_answer_${System.currentTimeMillis()}.png")
             file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }

@@ -22,6 +22,9 @@ import com.ziyou.ime.data.AssociationManager
 import com.ziyou.ime.data.SideSymbol
 import com.ziyou.ime.data.SideSymbolRepository
 import com.ziyou.ime.data.SymbolRepository
+import com.ziyou.ime.data.ToolbarConfigRepository
+import com.ziyou.ime.ime.ToolbarItem
+import com.ziyou.ime.core.toolbar.ToolbarConfigLogic
 import com.ziyou.ime.core.level.LevelEngine
 import com.ziyou.ime.level.LevelRepository
 import kotlinx.coroutines.Dispatchers
@@ -148,6 +151,11 @@ class SettingsActivity : AppCompatActivity() {
         )
         themeItem.setOnClickListener { showThemeSelector() }
         rootLayout.addView(themeItem)
+        rootLayout.addView(createSettingItem(
+            title = "自定义功能栏",
+            summary = "选择键盘上方功能栏显示的按钮与排列顺序，支持预设模板",
+            onClick = { showToolbarCustomizer() }
+        ))
         rootLayout.addView(createDivider())
 
         // ===== 成长（等级体系）=====
@@ -329,6 +337,125 @@ class SettingsActivity : AppCompatActivity() {
                 Log.i(TAG, "切换主题: $selectedTheme")
                 showToast("主题已切换为: ${displayNames[which]}")
                 dialog.dismiss()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    // ===== 功能栏定制 =====
+
+    /**
+     * 功能栏定制弹窗：勾选显示的按钮 + ↑↓ 调整顺序 + 套用预设模板。
+     * 保存后由功能栏视图的配置监听即时生效，无需重启输入法。
+     */
+    private fun showToolbarCustomizer() {
+        // 编辑态：已启用按钮（保存顺序）在前，未启用按钮按目录顺序追在后
+        val savedIds = ToolbarConfigLogic.sanitize(
+            ToolbarConfigRepository.getItemIds(this),
+            ToolbarItem.ALL_IDS,
+            ToolbarConfigRepository.DEFAULT_IDS
+        )
+        val savedItems = savedIds.mapNotNull { ToolbarItem.fromId(it) }
+        var order = savedItems + ToolbarItem.entries.filter { it !in savedItems }
+        val enabled = savedItems.toMutableSet()
+
+        lateinit var adapter: BaseAdapter
+        adapter = object : BaseAdapter() {
+            override fun getCount() = order.size
+            override fun getItem(position: Int) = order[position]
+            override fun getItemId(position: Int) = position.toLong()
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
+                val item = order[position]
+                val row = LinearLayout(this@SettingsActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(8), dp(4), dp(8), dp(4))
+                }
+                row.addView(CheckBox(this@SettingsActivity).apply {
+                    isChecked = item in enabled
+                    contentDescription = "显示${item.description}"
+                    setOnCheckedChangeListener { _, checked ->
+                        if (checked) enabled.add(item) else enabled.remove(item)
+                    }
+                })
+                row.addView(TextView(this@SettingsActivity).apply {
+                    text = "${item.label}　${item.description}"
+                    textSize = 15f
+                    setTextColor(0xFF212121.toInt())
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                })
+                // ↑↓ 排序按钮（移动逻辑复用 :core-logic 的 ToolbarConfigLogic）
+                fun arrow(label: String, desc: String, offset: Int) = TextView(this@SettingsActivity).apply {
+                    text = label
+                    textSize = 18f
+                    setTextColor(0xFF1976D2.toInt())
+                    setPadding(dp(12), dp(4), dp(12), dp(4))
+                    contentDescription = "$desc${item.description}"
+                    isClickable = true
+                    isFocusable = true
+                    setBackgroundResource(android.R.drawable.list_selector_background)
+                    setOnClickListener {
+                        val moved = ToolbarConfigLogic.move(order.map { it.id }, position, offset)
+                        order = moved.mapNotNull { ToolbarItem.fromId(it) }
+                        adapter.notifyDataSetChanged()
+                    }
+                }
+                row.addView(arrow("↑", "上移", -1))
+                row.addView(arrow("↓", "下移", 1))
+                return row
+            }
+        }
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), 0)
+        }
+        container.addView(TextView(this).apply {
+            text = "勾选要显示的按钮，用 ↑↓ 调整顺序"
+            textSize = 13f
+            setTextColor(0xFF757575.toInt())
+            setPadding(dp(4), 0, dp(4), dp(8))
+        })
+        container.addView(Button(this).apply {
+            text = "套用预设模板…"
+            isAllCaps = false
+            setOnClickListener {
+                val presets = ToolbarConfigRepository.PRESETS
+                AlertDialog.Builder(this@SettingsActivity)
+                    .setTitle("选择预设模板")
+                    .setItems(presets.map { "${it.name}（${it.summary}）" }.toTypedArray()) { _, which ->
+                        val presetItems = presets[which].itemIds.mapNotNull { ToolbarItem.fromId(it) }
+                        order = presetItems + ToolbarItem.entries.filter { it !in presetItems }
+                        enabled.clear()
+                        enabled.addAll(presetItems)
+                        adapter.notifyDataSetChanged()
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+            }
+        })
+        container.addView(ListView(this).apply {
+            this.adapter = adapter
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(320)
+            )
+        })
+
+        AlertDialog.Builder(this)
+            .setTitle("自定义功能栏")
+            .setView(container)
+            .setPositiveButton("保存") { _, _ ->
+                val ids = order.filter { it in enabled }.map { it.id }
+                if (ids.isEmpty()) {
+                    showToast("至少保留一个功能按钮")
+                    return@setPositiveButton
+                }
+                ToolbarConfigRepository.setItemIds(this, ids)
+                showToast("功能栏已更新")
+            }
+            .setNeutralButton("恢复默认") { _, _ ->
+                ToolbarConfigRepository.resetToDefault(this)
+                showToast("已恢复默认功能栏")
             }
             .setNegativeButton("取消", null)
             .show()

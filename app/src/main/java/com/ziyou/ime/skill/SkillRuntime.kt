@@ -2,16 +2,14 @@ package com.ziyou.ime.skill
 
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.content.ContentValues
 import android.content.Context
 import android.os.Build
-import android.os.Environment
-import android.provider.MediaStore
 import android.util.Base64
 import android.util.Log
 import com.ziyou.ime.core.skill.SkillPanelSpec
 import com.ziyou.ime.core.skill.SkillPermission
-import com.ziyou.ime.ime.ImageCommitBridge
+import com.ziyou.ime.ime.GalleryImageSaver
+import com.ziyou.ime.ime.ImeImageCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -350,7 +348,7 @@ class SkillRuntime(
 
     /** 写入 FileProvider 已暴露的共享缓存子目录（先清理本技能历史文件，避免缓存累积）。 */
     private fun writeImageFile(bytes: ByteArray): File {
-        val dir = File(context.cacheDir, ImageCommitBridge.CACHE_DIR_NAME).apply { mkdirs() }
+        val dir = File(context.cacheDir, ImeImageCache.CACHE_DIR_NAME).apply { mkdirs() }
         val prefix = "skill_${skill.manifest.id.replace(Regex("[^a-zA-Z0-9._-]"), "_")}_"
         dir.listFiles { file -> file.name.startsWith(prefix) }?.forEach { it.delete() }
         val file = File(dir, "$prefix${System.currentTimeMillis()}.png")
@@ -358,27 +356,10 @@ class SkillRuntime(
         return file
     }
 
-    /** 插入系统相册 Pictures/字由输入法/（API 29+ MediaStore，免存储权限）。 */
+    /** 插入系统相册 Pictures/字由输入法/（API 29+ MediaStore 免存储权限，
+     *  与涂鸦/AI 面板「保存」路径共用 [GalleryImageSaver] 实现）。 */
     private fun insertToGallery(bytes: ByteArray) {
-        val resolver = context.contentResolver
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, "ziyou_skill_${System.currentTimeMillis()}.png")
-            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-            put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/字由输入法")
-            put(MediaStore.Images.Media.IS_PENDING, 1)
-        }
-        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-            ?: throw SkillApiException("相册写入失败")
-        try {
-            resolver.openOutputStream(uri)?.use { it.write(bytes) }
-                ?: throw SkillApiException("相册写入失败")
-            values.clear()
-            values.put(MediaStore.Images.Media.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
-        } catch (e: Exception) {
-            // 写入半途失败：删除残留的 pending 记录
-            runCatching { resolver.delete(uri, null, null) }
-            if (e is SkillApiException) throw e
+        if (!GalleryImageSaver.savePng(context, bytes, "ziyou_skill")) {
             throw SkillApiException("相册写入失败")
         }
     }

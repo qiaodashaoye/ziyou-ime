@@ -50,8 +50,12 @@ class AiPanelCoordinator(
         /** 将 AI 答案上屏到当前输入框（绕过面板输入路由，直达宿主编辑器） */
         fun commitAnswerToEditor(text: String)
 
-        /** 将 AI 答案渲染为图片卡片并经 commitContent 发送到当前输入框 */
+        /** 将 AI 答案渲染为图片卡片后提交：按最新图片能力路由到
+         *  commitContent 直发输入框或保存到系统相册 */
         fun commitAnswerImageToEditor(content: CharSequence)
+
+        /** 当前编辑器是否可直接接收图片（答案操作按钮呈现「发图」或「存图」） */
+        fun editorAcceptsImage(): Boolean
 
         /** 面板即将打开：清除活跃编码与候选/编码区展示（键盘状态零丢失） */
         fun onPanelWillOpen()
@@ -115,6 +119,8 @@ class AiPanelCoordinator(
 
         override fun onSendAnswerAsImage(content: CharSequence) =
             host.commitAnswerImageToEditor(content)
+
+        override fun editorAcceptsImage(): Boolean = host.editorAcceptsImage()
 
         override fun performHaptic() {
             host.keyboardView()?.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)

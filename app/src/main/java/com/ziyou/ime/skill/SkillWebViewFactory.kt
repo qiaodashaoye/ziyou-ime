@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.util.Log
+import android.view.View
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -50,6 +51,10 @@ object SkillWebViewFactory {
     /**
      * 创建已完成安全配置的技能 WebView。
      *
+     * 防黑屏闪烁：WebView 渲染进程提交首帧前其 surface 为黑色，故背景统一置为
+     * 面板主题色，且首帧提交前保持 INVISIBLE（不影响加载），空窗期露出面板自身背景。
+     *
+     * @param backgroundColor 面板主题背景色（加载空窗期与页面透明区域的底色）
      * @param onRenderProcessGone 渲染进程崩溃回调（主线程），调用方应销毁面板
      */
     @SuppressLint("SetJavaScriptEnabled")
@@ -57,9 +62,13 @@ object SkillWebViewFactory {
         context: Context,
         skill: SkillInfo,
         bridge: SkillBridge,
+        backgroundColor: Int,
         onRenderProcessGone: () -> Unit
     ): WebView {
         val webView = WebView(context)
+        webView.setBackgroundColor(backgroundColor)
+        // 首帧提交前隐藏，规避硬件加速下 WebView surface 的黑色空窗
+        webView.visibility = View.INVISIBLE
         webView.settings.apply {
             javaScriptEnabled = true
             allowFileAccess = false
@@ -120,6 +129,16 @@ object SkillWebViewFactory {
                 if (!shimInjectedAtStart) {
                     view.evaluateJavascript(shimScript, null)
                 }
+            }
+
+            /** 页面首帧提交：结束防闪烁隐藏期，显示实际内容 */
+            override fun onPageCommitVisible(view: WebView, url: String?) {
+                view.visibility = View.VISIBLE
+            }
+
+            /** 兜底：加载失败等场景 onPageCommitVisible 可能不回调，完成时确保可见 */
+            override fun onPageFinished(view: WebView, url: String?) {
+                view.visibility = View.VISIBLE
             }
 
             /**

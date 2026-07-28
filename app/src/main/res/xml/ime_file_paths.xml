@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   FileProvider 暴露路径：仅开放 cache/ime_images/ 子目录，
-  用于「发送图片」功能把待提交图片以 content:// URI 暴露给目标应用（如微信）。
+  用于涂鸦导出 / AI 答案转图 / 技能图片输出把待提交图片以 content:// URI 暴露给目标应用（如微信）。
   不暴露用户词库（rime_user/）等敏感目录，与 allowBackup=false 的隐私优先基线一致。
 -->
 <paths>

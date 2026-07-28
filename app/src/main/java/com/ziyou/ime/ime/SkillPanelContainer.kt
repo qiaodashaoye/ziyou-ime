@@ -179,7 +179,7 @@ class SkillPanelContainer(
         destroyWebView()
         val skillRuntime = SkillRuntime(context, skill, this)
         val skillBridge = SkillBridge(skillRuntime) { webView }
-        val view = SkillWebViewFactory.create(context, skill, skillBridge) {
+        val view = SkillWebViewFactory.create(context, skill, skillBridge, theme.keyboardBackground) {
             // 渲染进程崩溃：销毁 WebView 回到技能列表，IME 与面板存活
             showSkillList()
         }

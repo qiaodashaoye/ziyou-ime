@@ -67,18 +67,8 @@
             android:label="我的等级" />
 
         <!--
-          图片选择中转 Activity（发送图片功能）：输入法进程无 Activity，
-          借此透明跳板拉起系统图片选择器；透明、不进最近任务、无历史，选完即销毁。
-        -->
-        <activity
-            android:name=".ime.ImagePickerActivity"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:noHistory="true"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
-
-        <!--
-          FileProvider：把 cache/ime_images/ 下的待发送图片暴露为 content:// URI，
+          FileProvider：把 cache/ime_images/ 下的待发送图片（涂鸦导出 / AI 答案转图 /
+          技能图片输出）暴露为 content:// URI，
           经 commitContent(INPUT_CONTENT_GRANT_READ_URI_PERMISSION) 临时授权给目标应用读取。
         -->
         <provider

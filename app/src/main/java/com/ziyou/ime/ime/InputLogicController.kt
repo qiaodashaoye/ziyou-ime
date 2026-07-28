@@ -5,11 +5,11 @@ import android.net.Uri
 import android.util.Log
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
-import androidx.core.view.inputmethod.EditorInfoCompat
 import androidx.core.view.inputmethod.InputConnectionCompat
 import androidx.core.view.inputmethod.InputContentInfoCompat
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.core.CandidateProto
+import com.ziyou.ime.core.image.ImageSupportLevel
 import com.ziyou.ime.daemon.RimeEngine
 import com.ziyou.ime.core.t9.KeyRecordStack
 import com.ziyou.ime.core.t9.ReplaceCommand
@@ -358,35 +358,25 @@ class InputLogicController(
 
     /**
      * 当前编辑器是否接受图片富媒体（据此决定“发送图片”是否可用）。
-     * 微信等聊天框会通过 [EditorInfo] 的 contentMimeTypes 声明可接收类型；
-     * 未声明 image 类型时返回 false，避免无效提交。
+     * 检测委托 [EditorImageSupport]：[EditorInfo] 的 contentMimeTypes 动态检测
+     * 为主（微信等聊天框会声明可接收类型），ImageCapableApp 白名单兜底；
+     * 未命中时返回 false，此时图片出口应转为保存到相册。
      */
-    fun acceptsImageContent(): Boolean {
-        val editorInfo = callbacks.currentEditorInfo() ?: return false
-        val supported = EditorInfoCompat.getContentMimeTypes(editorInfo)
-        return supported.any { mime -> ClipDescription.compareMimeTypes(mime, "image/*") }
-    }
+    fun acceptsImageContent(): Boolean =
+        EditorImageSupport.detect(callbacks.currentEditorInfo()) == ImageSupportLevel.SEND
 
     /**
-     * 向当前编辑器提交一张图片（Commit Content API，Android 7.1+）。
+     * 直接向宿主编辑器提交图片（绕过 [commitTarget] 路由，Commit Content API，
+     * Android 7.1+），用于「面板打开期间仍需把图片送进真实输入框」的场景，
+     * 如 AI 答案转图发送；与 [commitDirectToEditor] 对称。
      *
      * @param uri 由本应用 FileProvider 暴露的 content:// URI
-     * @param mimeType 如 "image/png" / "image/gif"
+     * @param mimeType 如 "image/png"
      * @param description 无障碍描述（可空）
-     * @return 是否提交成功（编辑器不支持 / 无连接 / 面板占用焦点时返回 false）
+     * @return 是否提交成功（编辑器不支持 / 无连接时返回 false）
      *
      * 注：本方法仅“把图片交给输入框”，是否自动发送、是否弹确认框由接收方（如微信）决定，
      * 第三方输入法无法绕过接收方的确认逻辑直接发送。
-     */
-    fun commitImage(uri: Uri, mimeType: String, description: CharSequence? = null): Boolean {
-        // 技能/AI 面板占用输入焦点时不走富媒体提交
-        if (commitTarget != null) return false
-        return commitImageInternal(uri, mimeType, description)
-    }
-
-    /**
-     * 直接向宿主编辑器提交图片（绕过 [commitTarget] 路由），用于「面板打开期间仍需
-     * 把图片送进真实输入框」的场景，如 AI 答案转图发送；与 [commitDirectToEditor] 对称。
      */
     fun commitImageToEditor(uri: Uri, mimeType: String, description: CharSequence? = null): Boolean =
         commitImageInternal(uri, mimeType, description)
