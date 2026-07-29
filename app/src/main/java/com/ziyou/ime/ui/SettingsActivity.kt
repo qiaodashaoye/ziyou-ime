@@ -16,6 +16,7 @@ import com.ziyou.ime.ai.AiPersona
 import com.ziyou.ime.ai.PersonaRepository
 import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.config.DisplayModeManager
+import com.ziyou.ime.config.SchemaPreference
 import com.ziyou.ime.config.ThemeManager
 import com.ziyou.ime.di.AppContainer
 import com.ziyou.ime.data.AssociationManager
@@ -23,6 +24,7 @@ import com.ziyou.ime.data.SideSymbol
 import com.ziyou.ime.data.SideSymbolRepository
 import com.ziyou.ime.data.SymbolRepository
 import com.ziyou.ime.data.ToolbarConfigRepository
+import com.ziyou.ime.ime.KeyboardType
 import com.ziyou.ime.ime.ToolbarItem
 import com.ziyou.ime.core.toolbar.ToolbarConfigLogic
 import com.ziyou.ime.core.level.LevelEngine
@@ -136,7 +138,7 @@ class SettingsActivity : AppCompatActivity() {
         // ===== 输入方案 =====
         rootLayout.addView(createSectionHeader("输入方案"))
         val schemaItem = createSettingItemWithValue(
-            title = "当前方案",
+            title = "全键盘方案",
             valueHolder = { schemaValueText = it }
         )
         schemaItem.setOnClickListener { showSchemaSelector() }
@@ -288,26 +290,38 @@ class SettingsActivity : AppCompatActivity() {
     private fun showSchemaSelector() {
         lifecycleScope.launch {
             try {
+                // 布局专用方案（如九宫格的 t9）是实现细节，不作为用户选项暴露；
+                // 此处选择的是「全键盘方案」，写入持久化偏好，由 IME 在
+                // QWERTY 布局同步时对齐（九宫格仍强制使用专用 T9 方案）
                 val schemas = rime.api.getSchemaList()
+                    .filter { it.schemaId !in KeyboardType.FORCED_SCHEMA_IDS }
                 if (schemas.isEmpty()) {
                     showToast("无法获取方案列表，请确保Rime引擎已启动")
                     return@launch
                 }
 
-                val currentSchema = rime.api.getCurrentSchema()
-                val currentIndex = schemas.indexOfFirst { it.schemaId == currentSchema }
+                val preferredSchema = SchemaPreference.getQwertySchema(this@SettingsActivity)
+                val currentIndex = schemas.indexOfFirst { it.schemaId == preferredSchema }
                 val schemaNames = schemas.map { it.name }.toTypedArray()
 
                 withContext(Dispatchers.Main) {
                     AlertDialog.Builder(this@SettingsActivity)
-                        .setTitle("选择输入方案")
+                        .setTitle("选择全键盘方案")
                         .setSingleChoiceItems(schemaNames, currentIndex) { dialog, which ->
                             val selectedSchema = schemas[which]
                             lifecycleScope.launch {
-                                rime.api.selectSchema(selectedSchema.schemaId)
+                                // 先打引擎验证方案可用，成功才写入偏好（失败不静默吞掉）
+                                val ok = rime.api.selectSchema(selectedSchema.schemaId)
                                 withContext(Dispatchers.Main) {
-                                    schemaValueText.text = selectedSchema.name
-                                    showToast("已切换到: ${selectedSchema.name}")
+                                    if (ok) {
+                                        SchemaPreference.setQwertySchema(
+                                            this@SettingsActivity, selectedSchema.schemaId)
+                                        schemaValueText.text = selectedSchema.name
+                                        showToast("已切换到: ${selectedSchema.name}")
+                                    } else {
+                                        Log.e(TAG, "切换方案失败: ${selectedSchema.schemaId}")
+                                        showToast("切换方案失败: ${selectedSchema.name}")
+                                    }
                                 }
                             }
                             dialog.dismiss()
@@ -889,11 +903,13 @@ class SettingsActivity : AppCompatActivity() {
         if (::schemaValueText.isInitialized && rime.initialized) {
             lifecycleScope.launch {
                 try {
-                    val currentSchema = rime.api.getCurrentSchema()
+                    // 展示持久化的全键盘方案偏好（而非引擎当前方案：
+                    // 九宫格状态下引擎处于 t9，展示它会让用户困惑）
+                    val preferredSchema = SchemaPreference.getQwertySchema(this@SettingsActivity)
                     val schemas = rime.api.getSchemaList()
-                    val schemaName = schemas.firstOrNull { it.schemaId == currentSchema }?.name
+                    val schemaName = schemas.firstOrNull { it.schemaId == preferredSchema }?.name
                     withContext(Dispatchers.Main) {
-                        schemaValueText.text = schemaName ?: "未知方案"
+                        schemaValueText.text = schemaName ?: preferredSchema
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "刷新方案显示失败: ${e.message}")

@@ -103,6 +103,8 @@ object KeyCode {
     const val KEYCODE_DOODLE_PANEL = -111
     /** 用于内部标识粘贴板历史面板开关（候选区按钮栏） */
     const val KEYCODE_CLIPBOARD_PANEL = -112
+    /** 用于内部标识循环切换全键盘输入方案（候选区按钮栏，仅 QWERTY 布局生效） */
+    const val KEYCODE_SWITCH_SCHEMA = -113
 
     /**
      * 将Android KeyEvent的keyCode转换为Rime keysym

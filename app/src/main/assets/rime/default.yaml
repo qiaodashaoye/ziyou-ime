@@ -10,10 +10,10 @@ schema_list:
 
 switcher:
   caption: 〔方案選單〕
-  hotkeys:
-    - Control+grave
-    - Control+Shift+grave
-    - F4
+  # 方案切换统一由客户端控制（设置页 / 候选区「方」键）：
+  # 清空热键避免外接物理键盘经 F4/Ctrl+` 绕过客户端的
+  # 「键盘布局 ↔ 方案」映射与专用方案（t9）过滤逻辑
+  hotkeys: []
   save_options:
     - full_shape
     - ascii_punct

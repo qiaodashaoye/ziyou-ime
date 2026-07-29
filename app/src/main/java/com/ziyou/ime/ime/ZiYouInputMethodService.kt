@@ -19,6 +19,7 @@ import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.config.DisplayModeManager
+import com.ziyou.ime.config.SchemaPreference
 import com.ziyou.ime.config.ThemeManager
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.core.RimeMessage
@@ -56,11 +57,6 @@ class ZiYouInputMethodService : InputMethodService() {
         private const val PREF_NAME = "ziyou_keyboard"
         private const val KEY_KEYBOARD_TYPE = "keyboard_type"
 
-        /** 九宫格键盘对应的专用 T9 方案 id */
-        private const val T9_SCHEMA_ID = "t9"
-        /** 退出九宫格时的默认回退方案 id */
-        private const val DEFAULT_SCHEMA_ID = "luna_pinyin"
-
         /** 等待引擎就绪的轮询间隔（ms） */
         private const val ENGINE_READY_POLL_MS = 50L
         /** 视图同步类操作等待引擎就绪的超时（ms）：词库重部署可能耗时较长 */
@@ -97,14 +93,7 @@ class ZiYouInputMethodService : InputMethodService() {
 
         override fun onModeSwitched(mode: DisplayMode) {
             setInputView(buildInputView(mode))
-            serviceScope.launch {
-                try {
-                    if (!awaitEngineReady(KEY_ENGINE_READY_TIMEOUT_MS)) return@launch
-                    applyEngineForKeyboard(currentKeyboardType)
-                } catch (e: Exception) {
-                    Log.w(TAG, "切换显示形态后同步状态异常: ${e.message}")
-                }
-            }
+            scheduleEngineSync()
         }
     }
 
@@ -261,9 +250,6 @@ class ZiYouInputMethodService : InputMethodService() {
     /** 候选区容器（编码区 + 候选词列表），供技能面板展开态整体隐藏/恢复 */
     private var candidatesContainer: LinearLayout? = null
 
-    /** 进入九宫格（T9）前的方案 id，用于退出时恢复 */
-    private var schemeBeforeT9: String? = null
-
     /** 进入符号键盘前的布局类型，用于「返回」键恢复（符号键盘为临时面板） */
     private var keyboardBeforeSymbol: KeyboardType? = null
 
@@ -292,8 +278,9 @@ class ZiYouInputMethodService : InputMethodService() {
     /** 九宫格输入状态追踪栈（拼音消歧与智能回退） */
     private val keyRecordStack = KeyRecordStack()
 
-    /** 部署完成后的键盘状态重同步任务（去重：新部署消息到来时取消上一次） */
-    private var deploySyncJob: Job? = null
+    /** 引擎状态同步任务（latest-wins 串行化：新同步请求到来时取消上一次，
+     *  避免快速切换键盘/部署完成/形态切换的并发同步交错导致迟到写入） */
+    private var engineSyncJob: Job? = null
 
     /** 输入逻辑控制器（与 Rime 交互、上屏、刷新 UI），经 DI 容器获取引擎与上屏监听。 */
     private val inputLogic by lazy {
@@ -578,16 +565,7 @@ class ZiYouInputMethodService : InputMethodService() {
         saveKeyboardType(type)
         // 清除切换前残留的预览
         preeditOverlay?.setText(null)
-        serviceScope.launch {
-            try {
-                applyEngineForKeyboard(type)
-            } catch (e: Exception) {
-                Log.w(TAG, "切换键盘同步方案异常: ${e.message}")
-                // 同步失败（如词库重部署期间引擎不可用）时清除中→英标志，
-                // 避免残留的 pendingEnglishMode 吞掉后续一次中英切换
-                pendingEnglishMode = false
-            }
-        }
+        scheduleEngineSync()
     }
 
     /**
@@ -610,27 +588,73 @@ class ZiYouInputMethodService : InputMethodService() {
     }
 
     /**
-     * 根据当前键盘类型同步 Rime 方案与状态：
-     * - 九宫格：切到专用 T9 方案并保证中文模式（多击字母才能匹配拼音候选）
-     * - 全键盘：若当前仍为 T9 方案，恢复到进入九宫格前的方案
-     * 最后把状态同步到 UI。
+     * 调度一次引擎状态同步（latest-wins）：取消进行中的旧任务，等引擎就绪后
+     * 按「执行时」的当前键盘类型执行 [applyEngineForKeyboard]。
+     * 所有入口（键盘切换 / 获焦 / 部署完成 / 形态与主题切换 / 方案一致性守护）
+     * 共用本方法，串行化消除并发同步交错导致的迟到写入（如快速
+     * 九宫格→全键盘切换时，滞后的九宫格同步把引擎切回 t9）。
+     *
+     * @param timeoutMs 等待引擎就绪的超时；超时放弃本次，由部署完成消息触发的重同步兑底
+     * @param beforeSync 引擎就绪后、同步前的前置操作（如 onStartInputView 清编码）
+     */
+    private fun scheduleEngineSync(
+        timeoutMs: Long = KEY_ENGINE_READY_TIMEOUT_MS,
+        beforeSync: (suspend () -> Unit)? = null
+    ) {
+        engineSyncJob?.cancel()
+        engineSyncJob = serviceScope.launch {
+            try {
+                if (!awaitEngineReady(timeoutMs)) {
+                    Log.w(TAG, "引擎状态同步放弃：Rime引擎未就绪（可能正在重新部署，待部署完成消息重同步）")
+                    return@launch
+                }
+                beforeSync?.invoke()
+                applyEngineForKeyboard(currentKeyboardType)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "引擎状态同步异常: ${e.message}")
+                // 同步失败（如重部署窗口期 rime.api 抛异常）时清除中→英标志，
+                // 避免残留的 pendingEnglishMode 吞掉后续一次中英切换
+                pendingEnglishMode = false
+            }
+        }
+    }
+
+    /**
+     * 根据当前键盘类型同步 Rime 方案与状态（「布局 ↔ 方案」映射元数据见 [KeyboardType]）：
+     * - 九宫格：切到专用 T9 方案（[KeyboardType.forcedSchemaId]）并保证中文模式
+     *   （多击字母才能匹配拼音候选）
+     * - 全键盘：对齐到用户持久化的全键盘方案偏好（[SchemaPreference]，
+     *   替代早期易失的 schemeBeforeT9 内存记忆，进程重建后选择不丢）
+     * 所有 selectSchema 均检查返回值，失败时记日志不静默吞掉；最后把状态同步到 UI。
      */
     private suspend fun applyEngineForKeyboard(type: KeyboardType) {
         when (type) {
             KeyboardType.NINE_GRID -> {
-                val current = rime.api.getCurrentSchema()
-                if (current != T9_SCHEMA_ID) {
-                    schemeBeforeT9 = current
-                    rime.api.selectSchema(T9_SCHEMA_ID)
+                val forced = requireNotNull(type.forcedSchemaId)
+                if (rime.api.getCurrentSchema() != forced) {
+                    if (!rime.api.selectSchema(forced)) {
+                        Log.e(TAG, "切换九宫格专用方案失败: $forced（方案可能未编译/部署异常，可尝试设置页重新部署）")
+                    }
                 }
                 if (rime.api.getOption("ascii_mode")) {
                     rime.api.setOption("ascii_mode", false)
                 }
             }
             KeyboardType.QWERTY -> {
-                if (rime.api.getCurrentSchema() == T9_SCHEMA_ID) {
-                    rime.api.selectSchema(schemeBeforeT9 ?: DEFAULT_SCHEMA_ID)
-                    schemeBeforeT9 = null
+                // 对齐到用户的全键盘方案偏好（覆盖 t9 残留与外部意外切换）；
+                // 偏好方案切换失败（如方案已移除）时回退默认方案兼底
+                val preferred = SchemaPreference.getQwertySchema(this)
+                if (rime.api.getCurrentSchema() != preferred) {
+                    if (!rime.api.selectSchema(preferred)) {
+                        Log.e(TAG, "恢复全键盘方案失败: $preferred，回退默认方案 ${SchemaPreference.DEFAULT_SCHEMA_ID}")
+                        if (preferred != SchemaPreference.DEFAULT_SCHEMA_ID &&
+                            !rime.api.selectSchema(SchemaPreference.DEFAULT_SCHEMA_ID)
+                        ) {
+                            Log.e(TAG, "回退默认方案也失败: ${SchemaPreference.DEFAULT_SCHEMA_ID}")
+                        }
+                    }
                 }
                 // 九宫格“中→英”触发：强制英文模式，避免与 handleSoftKeyPress 竞态
                 if (pendingEnglishMode) {
@@ -708,21 +732,11 @@ class ZiYouInputMethodService : InputMethodService() {
         // 兜底同步当前剪贴板（服务重启期间漏听的复制在此补收；去重逻辑保证幂等零 IO）
         captureClipboardToHistory()
 
-        serviceScope.launch {
-            try {
-                // 词库下载后引擎可能正在重新部署，先等待就绪再同步，
-                // 否则 rime.api 抛异常导致 t9 方案/ascii_mode 永不恢复，九宫格按键失效
-                if (!awaitEngineReady(ENGINE_READY_TIMEOUT_MS)) {
-                    Log.w(TAG, "onStartInputView: Rime引擎未就绪（可能正在重新部署），待部署完成消息触发重同步")
-                    return@launch
-                }
-                // 清除之前的编码
-                rime.api.clearComposition()
-                // 同步当前键盘对应的方案与状态（九宫格会切到 T9 方案）
-                applyEngineForKeyboard(currentKeyboardType)
-            } catch (e: Exception) {
-                Log.e(TAG, "onStartInputView 处理异常: ${e.message}", e)
-            }
+        // 词库下载后引擎可能正在重新部署，scheduleEngineSync 内部先等待就绪再同步，
+        // 否则 rime.api 抛异常导致 t9 方案/ascii_mode 永不恢复，九宫格按键失效；
+        // 同步前先清除之前的编码，再按当前键盘对齐方案与状态（九宫格会切到 T9 方案）
+        scheduleEngineSync(ENGINE_READY_TIMEOUT_MS) {
+            rime.api.clearComposition()
         }
 
         // 每日签到：发放首用/连续天数奖励（幂等，后台线程执行，不阻塞输入视图）
@@ -933,6 +947,11 @@ class ZiYouInputMethodService : InputMethodService() {
             // 循环切换主题（候选区按钮栏）：在已解锁主题间依次切换
             KeyCode.KEYCODE_SWITCH_THEME -> {
                 cycleTheme()
+            }
+
+            // 循环切换全键盘输入方案（候选区按钮栏）：仅允许自选方案的布局生效
+            KeyCode.KEYCODE_SWITCH_SCHEMA -> {
+                cycleSchema()
             }
 
             // 符号键盘开关：记录进入前布局，再次触发（面板内「返回」键）时恢复
@@ -1228,12 +1247,50 @@ class ZiYouInputMethodService : InputMethodService() {
         if (!ThemeManager.setTheme(this, next)) return
         keyboardView?.resetInputState()
         setInputView(buildInputView(displayModeCtrl.currentMode))
+        scheduleEngineSync()
+    }
+
+    /**
+     * 在可选方案间循环切换全键盘输入方案（候选区按钮栏「方」键入口）。
+     * 仅允许自选方案的布局（[KeyboardType.allowsSchemaChoice]）生效；
+     * 布局专用方案（如 t9）不入循环候选。切换成功后写入 [SchemaPreference]
+     * 偏好并重同步引擎状态，与设置页选择同一持久化链路。
+     */
+    private fun cycleSchema() {
+        if (!currentKeyboardType.allowsSchemaChoice) {
+            Toast.makeText(this, "当前键盘使用专用方案，请切换到全键盘后选择", Toast.LENGTH_SHORT).show()
+            return
+        }
         serviceScope.launch {
             try {
-                if (!awaitEngineReady(KEY_ENGINE_READY_TIMEOUT_MS)) return@launch
-                applyEngineForKeyboard(currentKeyboardType)
+                if (!awaitEngineReady(KEY_ENGINE_READY_TIMEOUT_MS)) {
+                    Toast.makeText(this@ZiYouInputMethodService,
+                        "引擎正在部署，请稍后再试", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                // 布局专用方案（如 t9）是实现细节，不作为用户选项
+                val schemas = rime.api.getSchemaList()
+                    .filter { it.schemaId !in KeyboardType.FORCED_SCHEMA_IDS }
+                if (schemas.size < 2) {
+                    Toast.makeText(this@ZiYouInputMethodService,
+                        "暂无其他可选方案", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                val current = rime.api.getCurrentSchema()
+                val next = schemas[(schemas.indexOfFirst { it.schemaId == current } + 1) % schemas.size]
+                if (!rime.api.selectSchema(next.schemaId)) {
+                    Log.e(TAG, "循环切换方案失败: ${next.schemaId}")
+                    Toast.makeText(this@ZiYouInputMethodService,
+                        "切换方案失败", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                SchemaPreference.setQwertySchema(this@ZiYouInputMethodService, next.schemaId)
+                Toast.makeText(this@ZiYouInputMethodService,
+                    "已切换到: ${next.name}", Toast.LENGTH_SHORT).show()
+                // 重同步引擎状态到 UI（新方案与偏好已一致，仅刷新中英态/候选区）
+                scheduleEngineSync()
             } catch (e: Exception) {
-                Log.w(TAG, "切换主题后同步状态异常: ${e.message}")
+                Log.e(TAG, "循环切换方案异常: ${e.message}", e)
             }
         }
     }
@@ -1300,6 +1357,14 @@ class ZiYouInputMethodService : InputMethodService() {
             }
             is RimeMessage.SchemaMessage -> {
                 Log.d(TAG, "Rime方案切换: ${message.schemaId}")
+                // 一致性守护：当前布局要求专用方案（如九宫格绑 t9）而引擎被外部
+                // 切走（设置页/物理键盘热键）时立即重同步，不等下次获焦；
+                // 自身 selectSchema 触发的通知方案已一致，不会循环
+                val forced = currentKeyboardType.forcedSchemaId
+                if (forced != null && message.schemaId != forced) {
+                    Log.w(TAG, "方案与键盘布局不一致（收到 ${message.schemaId}，需要 $forced），触发重同步")
+                    scheduleEngineSync()
+                }
             }
             is RimeMessage.DeployMessage -> {
                 Log.d(TAG, "Rime部署状态: ${message.status}")
@@ -1309,21 +1374,9 @@ class ZiYouInputMethodService : InputMethodService() {
                     RimeNative.trimNativeHeap()
                 }
                 // 词库下载/启用后 RimeSession.redeploy 会整体重建引擎，方案与选项全部复位。
-                // 待引擎就绪后重新同步当前键盘的方案与中英文状态，
+                // 待引擎就绪后重新同步当前键盘的方案与中英文状态（latest-wins 统一调度），
                 // 否则九宫格停留在默认方案上，中/数切换等按键表现为“失效”。
-                deploySyncJob?.cancel()
-                deploySyncJob = serviceScope.launch {
-                    if (!awaitEngineReady(ENGINE_READY_TIMEOUT_MS)) {
-                        Log.w(TAG, "部署后重同步超时：Rime引擎仍未就绪")
-                        return@launch
-                    }
-                    try {
-                        applyEngineForKeyboard(currentKeyboardType)
-                        Log.i(TAG, "部署完成，已重同步键盘状态 (type=$currentKeyboardType)")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "部署后重同步键盘状态异常: ${e.message}")
-                    }
-                }
+                scheduleEngineSync(ENGINE_READY_TIMEOUT_MS)
             }
             is RimeMessage.UnknownMessage -> {
                 Log.d(TAG, "Rime未知消息: type=${message.type}, value=${message.value}")

@@ -61,9 +61,9 @@ class ToolbarConfigTest {
     fun `默认配置按钮顺序符合预期`() {
         // 设置（settings）与收起键盘（hide）已改为功能栏常驻固定按钮，
         // 中英切换（language）、符号键盘（symbol）与图片选择（image）已移除，
-        // 粘贴板（clipboard）为新增按钮，其余按钮保持历史顺序不变
+        // 粘贴板（clipboard）与方案切换（schema）为新增按钮，其余按钮保持历史顺序不变
         assertEquals(
-            listOf("theme", "doodle", "skill", "ai", "clipboard", "floating"),
+            listOf("theme", "schema", "doodle", "skill", "ai", "clipboard", "floating"),
             ToolbarConfigRepository.DEFAULT_IDS
         )
     }

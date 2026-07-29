@@ -26,6 +26,7 @@ enum class ToolbarItem(
     val keyCode: Int
 ) {
     THEME("theme", "肤", "切换主题", KeyCode.KEYCODE_SWITCH_THEME),
+    SCHEMA("schema", "方", "切换输入方案", KeyCode.KEYCODE_SWITCH_SCHEMA),
     DOODLE("doodle", "画", "涂鸦画板", KeyCode.KEYCODE_DOODLE_PANEL),
     SKILL("skill", "技", "技能面板", KeyCode.KEYCODE_SKILL_PANEL),
     AI("ai", "AI", "AI 问答", KeyCode.KEYCODE_AI_ASSISTANT),

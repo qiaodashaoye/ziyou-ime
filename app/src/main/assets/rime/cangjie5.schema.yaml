@@ -29,6 +29,12 @@ switches:
   - name: ascii_punct
     states: [ 中文標點, 西文標點 ]
     abbrev: [ '。', '．' ]
+  # 与 luna_pinyin / t9 对称声明联想开关：本方案未挂 predictor 处理器，
+  # 开关为惰性 no-op，但客户端 applyEngineForKeyboard 统一 setOption("prediction")
+  # 时三方案行为一致，后续启用 librime-predict 时无需改动
+  - name: prediction
+    reset: 1
+    states: [ 關閉聯想, 開啟聯想 ]
 
 engine:
   processors:

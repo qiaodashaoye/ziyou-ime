@@ -26,9 +26,9 @@ object ToolbarConfigRepository {
     private const val KEY_ITEMS = "toolbar_items"
 
     /** 默认配置（设置与收起键盘为功能栏常驻固定按钮，不入配置；其余顺序与历史版本一致，
-     *  粘贴板（clipboard）为新增按钮，已自定义配置的存量用户需在设置页手动勾选） */
+     *  粘贴板（clipboard）与方案切换（schema）为新增按钮，已自定义配置的存量用户需在设置页手动勾选） */
     val DEFAULT_IDS = listOf(
-        "theme", "doodle", "skill", "ai", "clipboard", "floating"
+        "theme", "schema", "doodle", "skill", "ai", "clipboard", "floating"
     )
 
     /** 预设模板（设置页「预设模板」入口展示；设置/收起键盘常驻，不在模板内） */
