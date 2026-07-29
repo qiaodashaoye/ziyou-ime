@@ -346,11 +346,12 @@ class SkillRuntime(
         return bytes
     }
 
-    /** 写入 FileProvider 已暴露的共享缓存子目录（先清理本技能历史文件，避免缓存累积）。 */
+    /** 写入 FileProvider 已暴露的共享缓存子目录（只删过期文件：前一张图可能
+     *  尚未被对端应用异步读走，见 [ImeImageCache] 清理策略）。 */
     private fun writeImageFile(bytes: ByteArray): File {
-        val dir = File(context.cacheDir, ImeImageCache.CACHE_DIR_NAME).apply { mkdirs() }
+        val dir = ImeImageCache.dir(context)
+        ImeImageCache.pruneExpired(dir)
         val prefix = "skill_${skill.manifest.id.replace(Regex("[^a-zA-Z0-9._-]"), "_")}_"
-        dir.listFiles { file -> file.name.startsWith(prefix) }?.forEach { it.delete() }
         val file = File(dir, "$prefix${System.currentTimeMillis()}.png")
         file.writeBytes(bytes)
         return file

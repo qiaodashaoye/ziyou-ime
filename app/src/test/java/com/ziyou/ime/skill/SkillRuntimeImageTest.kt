@@ -16,7 +16,6 @@ import kotlinx.coroutines.test.setMain
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -225,14 +224,16 @@ class SkillRuntimeImageTest {
     }
 
     @Test
-    fun `send重复调用清理本技能历史文件`() {
+    fun `send重复调用保留宽限窗口内的历史文件`() {
         val runtime = runtime(SkillPermission.IMAGE)
         call(runtime, "image.send", paramsWithData(pngBase64))
         val first = host.committedFile!!
         call(runtime, "image.send", paramsWithData(pngBase64))
         val second = host.committedFile!!
         assertTrue(second.exists())
-        if (first.path != second.path) assertFalse(first.exists())
+        // 前一张图可能尚未被对端应用异步读走（commitContent 异步拉取），
+        // 过期清理策略下宽限窗口内的历史文件不可误删
+        assertTrue(first.exists())
     }
 
     @Test

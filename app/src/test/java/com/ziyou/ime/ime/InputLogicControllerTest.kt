@@ -369,6 +369,62 @@ class InputLogicControllerTest {
         assertTrue(fakeEngine.api.replaceKeyCalls.isEmpty())
     }
 
+    // ===== 编码长度上限防护 =====
+
+    @Test
+    fun processKey_inputAtLimit_composingKeyDroppedAfterRealtimeConfirm() = runTest {
+        val longInput = "2".repeat(InputLogicController.MAX_INPUT_LENGTH)
+        // 第一键：引擎消费，编码长度达上限（缓存更新）
+        fakeEngine.api.bulkResults = mutableListOf(
+            KeyEventResult(consumed = true, commit = null, context = testContext(longInput))
+        )
+        controller.processKey('2'.code, 0)
+        assertEquals(1, fakeEngine.api.processKeyBulkCalls.size)
+
+        // 实时确认仍超限 → 第二个编码键被丢弃（不再送引擎）
+        fakeEngine.api.nextContext = testContext(longInput)
+        val contextCallsBefore = fakeEngine.api.contextCalls
+        controller.processKey('3'.code, 0)
+
+        assertEquals(1, fakeEngine.api.processKeyBulkCalls.size)
+        assertEquals(contextCallsBefore + 1, fakeEngine.api.contextCalls)
+    }
+
+    @Test
+    fun processKey_staleLimitCache_refreshedByRealtimeCheckAndKeyAccepted() = runTest {
+        val longInput = "2".repeat(InputLogicController.MAX_INPUT_LENGTH)
+        fakeEngine.api.bulkResults = mutableListOf(
+            KeyEventResult(consumed = true, commit = null, context = testContext(longInput)),
+            KeyEventResult(consumed = true, commit = null, context = testContext("3"))
+        )
+        controller.processKey('2'.code, 0)
+
+        // 旁路（如选词/清编码）已清空编码 → 实时确认后新编码键正常放行
+        fakeEngine.api.nextContext = testContext("")
+        controller.processKey('3'.code, 0)
+
+        assertEquals(2, fakeEngine.api.processKeyBulkCalls.size)
+    }
+
+    @Test
+    fun processKey_atLimit_functionKeysBypassGuard() = runTest {
+        val longInput = "2".repeat(InputLogicController.MAX_INPUT_LENGTH)
+        fakeEngine.api.bulkResults = mutableListOf(
+            KeyEventResult(consumed = true, commit = null, context = testContext(longInput)),
+            KeyEventResult(consumed = true, commit = null, context = testContext(longInput)),
+            KeyEventResult(consumed = true, commit = null, context = testContext(longInput))
+        )
+        controller.processKey('2'.code, 0)
+        val contextCallsBefore = fakeEngine.api.contextCalls
+
+        // 退格与空格（T9 选首候选）不受限：直接送引擎，无实时确认开销
+        controller.processKey(KeyCode.XK_BackSpace, 0)
+        controller.processKey(' '.code, 0)
+
+        assertEquals(3, fakeEngine.api.processKeyBulkCalls.size)
+        assertEquals(contextCallsBefore, fakeEngine.api.contextCalls)
+    }
+
     // ===== 辅助 =====
 
     private fun testContext(

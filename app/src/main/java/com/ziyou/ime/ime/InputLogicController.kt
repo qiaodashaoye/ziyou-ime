@@ -2,6 +2,7 @@ package com.ziyou.ime.ime
 
 import android.content.ClipDescription
 import android.net.Uri
+import android.os.SystemClock
 import android.util.Log
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -47,6 +48,17 @@ class InputLogicController(
 
     companion object {
         private const val TAG = "InputLogicController"
+
+        /** 慢按键告警阈值（ms）：引擎单键耗时超过即打 Log.w，便于发现耗时退化 */
+        private const val SLOW_KEY_WARN_MS = 100L
+
+        /**
+         * 编码串长度上限：真机压测（REA-AN00）显示 T9 混合数字编码超过 ~30 键后，
+         * script_translator 组句搜索的音节切分组合爆炸（单键耗时 300~450ms 且随长度
+         * 超线性增长，全部串行在 Rime 线程上造成按键积压）。达上限后丢弃新增
+         * 编码键（退格/回车/空格选词等功能键不受限），与主流输入法编码上限行为一致。
+         */
+        internal const val MAX_INPUT_LENGTH = 30
     }
 
     /**
@@ -97,6 +109,12 @@ class InputLogicController(
     var commitTarget: CommitTarget? = null
 
     /**
+     * 最近一次引擎上下文的编码串长度（processKey/updateUI 在 [inputMutex] 内更新）。
+     * 仅作超限预判缓存；选词/面板清编码等旁路可能使其过期，拒键前必经实时确认。
+     */
+    private var lastInputLength = 0
+
+    /**
      * 核心按键处理：将按键发送给 Rime 引擎并处理返回结果。
      * 被 Rime 消费则取 commit 文本上屏 + 刷新 UI；未消费则退格删字符或可打印字符直接上屏。
      * 热路径走 [RimeApi.processKeyBulk]：processKey/getCommit/getContext 单次引擎调度完成，
@@ -104,15 +122,32 @@ class InputLogicController(
      */
     suspend fun processKey(keyCode: Int, mask: Int) = inputMutex.withLock {
         try {
+            // 编码超限防护：继续追加编码键只会放大组句搜索耗时（见 MAX_INPUT_LENGTH）。
+            // 缓存命中时实时取一次引擎编码长度确认（防选词/清编码旁路造成的过期缓存误拒），
+            // 确认路径仅在病态长编码区触发，不影响正常输入热路径。
+            if (lastInputLength >= MAX_INPUT_LENGTH && isComposingKey(keyCode, mask)) {
+                val realLength = engine.api.getContext()?.input?.length ?: 0
+                lastInputLength = realLength
+                if (realLength >= MAX_INPUT_LENGTH) {
+                    Log.w(TAG, "编码长度达上限($MAX_INPUT_LENGTH)，丢弃编码键 $keyCode")
+                    return@withLock
+                }
+            }
+
+            val startMs = SystemClock.elapsedRealtime()
             val result = engine.api.processKeyBulk(keyCode, mask)
-            Log.d(TAG, "processKey($keyCode, $mask) -> consumed=${result.consumed}")
+            val costMs = SystemClock.elapsedRealtime() - startMs
+            if (costMs >= SLOW_KEY_WARN_MS) {
+                Log.w(TAG, "慢按键: processKeyBulk($keyCode) 耗时 ${costMs}ms" +
+                    " (编码长度=${result.context?.input?.length ?: lastInputLength})")
+            }
 
             if (result.consumed) {
+                lastInputLength = result.context?.input?.length ?: 0
                 // Rime消费了这个按键，检查是否有commit文本
                 result.commit?.text?.let { text ->
                     // 将文本提交到当前编辑器
                     commitAndCount(text)
-                    Log.d(TAG, "commitText: $text")
                     keyRecordStack.clear()
                 }
                 // 用随批量结果返回的上下文刷新候选词与编码区UI；若引擎已启用
@@ -131,19 +166,16 @@ class InputLogicController(
                         } else {
                             callbacks.currentInputConnection()?.deleteSurroundingText(1, 0)
                         }
-                        Log.d(TAG, "直接删除: deleteBackward (target=${target != null})")
                     }
                     // 回车键：上屏目标为面板时路由给面板（如 AI 面板触发发送）
                     keyCode == KeyCode.XK_Return && commitTarget != null -> {
                         val target = commitTarget
                         withContext(Dispatchers.Main) { target?.onEnter() }
-                        Log.d(TAG, "回车路由到面板目标")
                     }
                     // 可打印字符且Rime未处理，直接提交
                     keyCode in 0x20..0x7E && mask == 0 -> {
                         val char = keyCode.toChar().toString()
                         commitAndCount(char)
-                        Log.d(TAG, "直接提交字符: $char")
                     }
                 }
             }
@@ -423,6 +455,13 @@ class InputLogicController(
     }
 
     /**
+     * 是否为会追加编码串的键（超限防护的限制对象）：无修饰键的可打印 ASCII，
+     * 含数字/字母/撇号分词符；排除空格（T9 选首候选）与 XK_* 功能键（退格/回车/方向等）。
+     */
+    private fun isComposingKey(keyCode: Int, mask: Int): Boolean =
+        mask == 0 && keyCode in 0x21..0x7E
+
+    /**
      * 从 Rime 获取最新上下文并在主线程刷新 UI。
      * 引擎已启用 librime-predict 时，commit 后的预测词位于 context.menu 中，
      * 经本方法走既有候选渲染与选词路径，无需专用处理。
@@ -430,6 +469,7 @@ class InputLogicController(
     private suspend fun updateUI() {
         try {
             val context: ContextProto? = engine.api.getContext()
+            lastInputLength = context?.input?.length ?: 0
             withContext(Dispatchers.Main) {
                 callbacks.renderContext(context)
             }

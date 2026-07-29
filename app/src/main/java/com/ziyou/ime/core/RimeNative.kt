@@ -49,6 +49,14 @@ object RimeNative {
     @JvmStatic
     external fun exitRime()
 
+    /**
+     * 归还 native 堆空闲页给系统（mallopt M_PURGE）。
+     * 词库部署产生的大量临时分配释放后会被分配器持留（真机实测 20~27MB），
+     * 部署完成 / 内存吃紧时调用可降低常驻占用。线程安全，无需经 RimeDispatcher。
+     */
+    @JvmStatic
+    external fun trimNativeHeap()
+
     // ===== 输入处理（热路径） =====
 
     /** 处理按键事件，返回是否被Rime消费 */

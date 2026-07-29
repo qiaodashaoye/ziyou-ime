@@ -2,6 +2,7 @@ package com.ziyou.ime.ime
 
 import android.content.ClipDescription
 import android.content.ClipboardManager
+import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.graphics.Bitmap
 import android.inputmethodservice.InputMethodService
@@ -21,6 +22,7 @@ import com.ziyou.ime.config.DisplayModeManager
 import com.ziyou.ime.config.ThemeManager
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.core.RimeMessage
+import com.ziyou.ime.core.RimeNative
 import com.ziyou.ime.daemon.RimeEngine
 import com.ziyou.ime.core.t9.KeyRecordStack
 import com.ziyou.ime.data.AssociationManager
@@ -768,6 +770,31 @@ class ZiYouInputMethodService : InputMethodService() {
         }
     }
 
+    /**
+     * 系统内存吃紧回调：主动释放面板资源，降低低内存设备上 IME 进程被
+     * LMK 优先猎杀的风险（技能面板 WebView 是 librime 常驻之上最大的内存增量，
+     * 40~80MB，技能插件可行性方案 §9 承诺的主动回收落点）。
+     * RUNNING_LOW 及更严重级别时关闭全部面板（各 close 均幂等，
+     * 与 onFinishInputView 同一清理路径）。
+     *
+     * RUNNING_* 系列常量在 API 34+ 已废弃（不再下发），但 minSdk 24 区间的
+     * 低版本设备仍会收到；API 34+ 上本判断自然退化为仅响应 UI_HIDDEN 及以上
+     * 级别（数值更大），作为 onFinishInputView 之外的强制清理层。
+     */
+    @Suppress("DEPRECATION")
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            Log.w(TAG, "onTrimMemory(level=$level)：关闭全部面板释放内存")
+            skillPanels.close()
+            aiPanels.close()
+            doodlePanels.close()
+            clipboardPanels.close()
+            // 同步归还 native 堆持留的空闲页（部署残留，真机实测 20~27MB）
+            if (RimeNative.isLoaded) RimeNative.trimNativeHeap()
+        }
+    }
+
     // ===== 物理按键处理 =====
 
     /**
@@ -1276,6 +1303,11 @@ class ZiYouInputMethodService : InputMethodService() {
             }
             is RimeMessage.DeployMessage -> {
                 Log.d(TAG, "Rime部署状态: ${message.status}")
+                // 部署结束（成功/失败）后归还编译期临时分配持留的 native 空闲页
+                //（非热路径，mallopt 线程安全）
+                if (message.status != "start" && RimeNative.isLoaded) {
+                    RimeNative.trimNativeHeap()
+                }
                 // 词库下载/启用后 RimeSession.redeploy 会整体重建引擎，方案与选项全部复位。
                 // 待引擎就绪后重新同步当前键盘的方案与中英文状态，
                 // 否则九宫格停留在默认方案上，中/数切换等按键表现为“失效”。

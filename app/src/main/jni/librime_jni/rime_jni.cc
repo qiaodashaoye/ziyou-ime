@@ -7,6 +7,7 @@
 #include <rime_api.h>
 
 #include <android/log.h>
+#include <malloc.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -318,6 +319,27 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_ziyou_ime_core_RimeNative_exitRime(JNIEnv *env,
                                                      jclass /* thiz */) {
   Rime::Instance().exit();
+}
+
+// bionic 旧版本头文件可能未定义 M_PURGE（API 28+ 支持；不支持的系统上
+// mallopt 返回 0 安全退化为 no-op）
+#ifndef M_PURGE
+#define M_PURGE (-101)
+#endif
+
+// mallopt 声明在 bionic 中标注为 API 26+（minSdk 24 编译目标下被头文件隐藏），
+// 以弱符号声明 + 运行时判空：API 24/25 设备上符号缺失时安全跳过
+extern "C" int mallopt(int __option, int __value) __attribute__((weak));
+
+// 归还 native 堆空闲页给系统：词库部署（start_maintenance 编译 schema/词典）
+// 会产生大量临时分配，释放后 scudo 分配器默认持留空闲页不还（真机实测
+// 持留 20~27MB，并连带产生 zRAM 换出）。mallopt 线程安全，可在任意线程调用。
+extern "C" JNIEXPORT void JNICALL
+Java_com_ziyou_ime_core_RimeNative_trimNativeHeap(JNIEnv *env,
+                                                  jclass /* thiz */) {
+  if (mallopt) {
+    mallopt(M_PURGE, 0);
+  }
 }
 
 // 同步用户数据

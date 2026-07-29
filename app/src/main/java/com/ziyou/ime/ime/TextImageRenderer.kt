@@ -93,9 +93,10 @@ object TextImageRenderer {
             canvas.drawText(FOOTER_TEXT, PADDING.toFloat(),
                 dividerY + footerGap - footerPaint.ascent(), footerPaint)
 
-            // 写入 FileProvider 已暴露的缓存子目录（先清理历史文件，避免缓存累积）
-            val dir = File(context.cacheDir, ImeImageCache.CACHE_DIR_NAME).apply { mkdirs() }
-            dir.listFiles()?.forEach { it.delete() }
+            // 写入 FileProvider 已暴露的缓存子目录（只删过期文件：全清会破坏
+            // 对端应用尚未异步读走的前一张图，见 ImeImageCache 清理策略）
+            val dir = ImeImageCache.dir(context)
+            ImeImageCache.pruneExpired(dir)
             val file = File(dir, "ai_answer_${System.currentTimeMillis()}.png")
             file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
             return file
