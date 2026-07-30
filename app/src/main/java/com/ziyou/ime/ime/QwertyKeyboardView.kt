@@ -16,7 +16,7 @@ import android.util.AttributeSet
  * [q][w][e][r][t][y][u][i][o][p]
  *  [a][s][d][f][g][h][j][k][l]
  * [⇧] [z][x][c][v][b][n][m] [⌫]
- * [九][中/英][符][  空格  ][.][↵]
+ * [九][中/英][符][123][ 空格 ][.][↵]
  *
  * 注：技能面板「技」与悬浮切换「浮」已移至候选区按钮栏 [CandidateToolbarView]。
  */
@@ -53,10 +53,11 @@ class QwertyKeyboardView @JvmOverloads constructor(
     )
 
     private val row4 = listOf(
-        Key("九", KeyCode.KEYCODE_SWITCH_KEYBOARD, 1.4f, isFunctional = true),
-        Key("中", KeyCode.KEYCODE_SWITCH_LANGUAGE, 1.1f, isFunctional = true),
-        Key("符", KeyCode.KEYCODE_SYMBOL, 1.1f, isFunctional = true),
-        Key("空格", KeyCode.XK_space, 3.6f),
+        Key("九", KeyCode.KEYCODE_SWITCH_KEYBOARD, 1.2f, isFunctional = true),
+        Key("中", KeyCode.KEYCODE_SWITCH_LANGUAGE, 1f, isFunctional = true),
+        Key("符", KeyCode.KEYCODE_SYMBOL, 1f, isFunctional = true),
+        Key("123", KeyCode.KEYCODE_NUMBER_KEYBOARD, 1.2f, isFunctional = true),
+        Key("空格", KeyCode.XK_space, 2.8f),
         Key(".", '.'.code, 1f),
         Key("↵", KeyCode.XK_Return, 1.8f, isFunctional = true)
     )
@@ -105,6 +106,10 @@ class QwertyKeyboardView @JvmOverloads constructor(
 
             // 切换到九宫格
             KeyCode.KEYCODE_SWITCH_KEYBOARD -> onSwitchKeyboard?.invoke(KeyboardType.NINE_GRID)
+
+            // 数字键盘（临时面板，由 Service 记录进入前布局并切换）
+            KeyCode.KEYCODE_NUMBER_KEYBOARD ->
+                sendKey(KeyCode.KEYCODE_NUMBER_KEYBOARD, 0)
 
             else -> {
                 // 中英文切换 / 符号键盘等共用逻辑

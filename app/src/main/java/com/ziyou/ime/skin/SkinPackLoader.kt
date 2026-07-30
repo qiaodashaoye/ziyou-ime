@@ -66,6 +66,7 @@ object SkinPackLoader {
             val upgraded = File(SkinRepository.skinsRoot(context), spec.meta.id).exists()
             extractAndCommit(context, tempFile, spec)
             SkinRepository.addToIndex(context, spec)
+            SkinRepository.evictSpec(spec.meta.id)
             SkinAssetCache.evict(spec.meta.id)
             // 重装的正是当前皮肤 → 快照失效重建
             if (SkinRepository.getCurrentSkinId(context) == spec.meta.id) {
@@ -96,6 +97,7 @@ object SkinPackLoader {
         if (removed) {
             SkinRepository.removeFromIndex(context, skinId)
             SkinRepository.clearOverride(context, skinId)
+            SkinRepository.evictSpec(skinId)
             SkinAssetCache.evict(skinId)
             if (SkinRepository.getCurrentSkinId(context) == skinId) {
                 SkinRepository.setCurrentSkinId(context, SkinDefaults.DEFAULT_SKIN_ID)

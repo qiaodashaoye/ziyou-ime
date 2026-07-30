@@ -92,6 +92,8 @@ class LevelEngineTest {
     @Test
     fun themeUnlock_byLevel() {
         assertTrue(LevelEngine.isThemeUnlocked("Light", 1))
+        assertFalse(LevelEngine.isThemeUnlocked("云雾拟态", 1))
+        assertTrue(LevelEngine.isThemeUnlocked("云雾拟态", 2))
         assertFalse(LevelEngine.isThemeUnlocked("Material", 1))
         assertTrue(LevelEngine.isThemeUnlocked("Material", 7))
     }

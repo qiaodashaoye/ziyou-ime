@@ -84,7 +84,7 @@ object KeyCode {
     const val KEYCODE_SYMBOL = -101
     /** 用于内部标识键盘布局切换（全键盘 / 九宫格等） */
     const val KEYCODE_SWITCH_KEYBOARD = -102
-    /** 用于内部标识中文/数字模式切换 */
+    /** 用于内部标识九宫格「中数转换」键：切换到数字键盘布局（与 KEYCODE_NUMBER_KEYBOARD 同路径） */
     const val KEYCODE_SWITCH_NUMBER_MODE = -103
     /** 用于内部标识悬浮/停靠形态切换（游戏悬浮键盘） */
     const val KEYCODE_TOGGLE_FLOATING = -104
@@ -105,6 +105,10 @@ object KeyCode {
     const val KEYCODE_CLIPBOARD_PANEL = -112
     /** 用于内部标识循环切换全键盘输入方案（候选区按钮栏，仅 QWERTY 布局生效） */
     const val KEYCODE_SWITCH_SCHEMA = -113
+    /** 用于内部标识数字键盘开关（临时面板，与符号键盘同模式） */
+    const val KEYCODE_NUMBER_KEYBOARD = -114
+    /** 用于内部标识工具面板开关（候选区按钮栏 Logo 键，展示全部工具项） */
+    const val KEYCODE_TOOL_PANEL = -115
 
     /**
      * 将Android KeyEvent的keyCode转换为Rime keysym

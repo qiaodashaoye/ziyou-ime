@@ -18,6 +18,7 @@ package com.ziyou.ime.ime
  * - [QWERTY]     标准全键盘（26 键）
  * - [NINE_GRID]  九宫格（T9，2-9 多字母键 + 多击循环选择）
  * - [SYMBOL]     符号键盘（分类导航 + 符号网格，临时面板不持久化）
+ * - [NUMBER]     数字键盘（0-9 + 小数点/正负号等，临时面板不持久化）
  * - 后续可扩展：HANDWRITING（手写）、CUSTOM（自定义布局）等
  */
 enum class KeyboardType(
@@ -28,7 +29,8 @@ enum class KeyboardType(
 ) {
     QWERTY(allowsSchemaChoice = true),
     NINE_GRID(forcedSchemaId = "t9"), // 与伴生对象 T9_SCHEMA_ID 一致（枚举项构造时伴生对象尚未初始化，不能直接引用）
-    SYMBOL;
+    SYMBOL,
+    NUMBER;
 
     companion object {
         /** 九宫格键盘专用的 T9 方案 id */

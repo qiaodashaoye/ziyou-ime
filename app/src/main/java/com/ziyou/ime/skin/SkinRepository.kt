@@ -9,6 +9,7 @@ import com.ziyou.ime.core.skin.SkinSpec
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 皮肤持久化仓库：当前皮肤 id、已安装皮肤索引、用户自定义覆盖、深浅色策略。
@@ -34,6 +35,9 @@ object SkinRepository {
     private const val LEGACY_PREF_NAME = "ziyou_theme"
     private const val LEGACY_KEY_THEME = "current_theme"
 
+    // 已废弃的历史内置皮肤 id → 现行 id（读取时透明改写）
+    private val RENAMED_SKIN_IDS = mapOf("builtin.dark" to SkinDefaults.ID_YUNWU)
+
     /** 深浅色策略。 */
     enum class DarkModePolicy(val id: String) {
         FOLLOW_SYSTEM("followSystem"),
@@ -50,8 +54,13 @@ object SkinRepository {
 
     fun getCurrentSkinId(context: Context): String {
         migrateLegacyIfNeeded(context)
-        return prefs(context).getString(KEY_CURRENT, SkinDefaults.DEFAULT_SKIN_ID)
+        val stored = prefs(context).getString(KEY_CURRENT, SkinDefaults.DEFAULT_SKIN_ID)
             ?: SkinDefaults.DEFAULT_SKIN_ID
+        // 内置皮肤改名迁移：历史持久化 id 改写为现行 id
+        val renamed = RENAMED_SKIN_IDS[stored] ?: return stored
+        setCurrentSkinId(context, renamed)
+        Log.i(TAG, "内置皮肤 id 已迁移: $stored -> $renamed")
+        return renamed
     }
 
     fun setCurrentSkinId(context: Context, skinId: String) {
@@ -79,17 +88,27 @@ object SkinRepository {
 
     // ===== 规格加载 =====
 
+    /** 进程级规格缓存：导入皮肤的 skin.json 解码产物，避免读热路径重复磁盘 IO 。 */
+    private val specCache = ConcurrentHashMap<String, SkinSpec>()
+
     /**
-     * 加载皮肤规格：内置取内存规格，导入皮肤读安装目录 skin.json。
+     * 加载皮肤规格：内置取内存规格，导入皮肤优先命中 [specCache]，
+     * 未命中才读安装目录 skin.json（安装/卸载时经 [evictSpec] 定向失效）。
      * @throws IllegalArgumentException 皮肤不存在或 skin.json 非法
      */
     fun loadSpec(context: Context, skinId: String): SkinSpec {
         SkinDefaults.builtinSpec(skinId)?.let { return it }
+        specCache[skinId]?.let { return it }
         val file = File(skinsRoot(context), skinId).resolve("skin.json")
         if (!file.isFile) {
             throw IllegalArgumentException("皮肤不存在或已损坏: $skinId")
         }
-        return SkinSpecCodec.decodeSpec(file.readText())
+        return SkinSpecCodec.decodeSpec(file.readText()).also { specCache[skinId] = it }
+    }
+
+    /** 皮肤安装 / 卸载后定向失效规格缓存（与 [SkinAssetCache.evict] 同时机调用）。 */
+    fun evictSpec(skinId: String) {
+        specCache.remove(skinId)
     }
 
     // ===== 已安装索引 =====
@@ -201,9 +220,36 @@ object SkinRepository {
                 )
             }
         } catch (e: Exception) {
-            Log.w(TAG, "皮肤索引损坏，已重置: ${e.message}")
-            emptyList()
+            Log.w(TAG, "皮肤索引损坏，尝试从磁盘扫描重建: ${e.message}")
+            rebuildIndexFromDisk(context)
         }
+    }
+
+    /**
+     * 索引损坏自愈：扫描 skins/ 下含合法 skin.json 的安装目录重建索引并回写。
+     * 单个目录解析失败仅跳过该目录，不中断重建；仅在索引 JSON 损坏分支触发，
+     * 正常路径零改动。
+     */
+    private fun rebuildIndexFromDisk(context: Context): List<IndexEntry> {
+        val dirs = skinsRoot(context).listFiles { f ->
+            f.isDirectory && !f.name.startsWith(".")
+        } ?: emptyArray()
+        val entries = dirs.mapNotNull { dir ->
+            val file = dir.resolve("skin.json")
+            if (!file.isFile) return@mapNotNull null
+            try {
+                val spec = SkinSpecCodec.decodeSpec(file.readText())
+                // 目录名与规格 id 不一致视为非法安装，跳过
+                if (spec.meta.id != dir.name) return@mapNotNull null
+                IndexEntry(spec.meta.id, spec.meta.name, spec.meta.author, spec.meta.version)
+            } catch (e: Exception) {
+                Log.w(TAG, "索引重建跳过损坏目录: ${dir.name}, ${e.message}")
+                null
+            }
+        }
+        writeIndex(context, entries)
+        Log.i(TAG, "皮肤索引已从磁盘重建，恢复 ${entries.size} 个皮肤")
+        return entries
     }
 
     private fun writeIndex(context: Context, entries: List<IndexEntry>) {

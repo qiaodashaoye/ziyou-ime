@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.util.AttributeSet
@@ -32,6 +33,9 @@ import com.ziyou.ime.skin.SkinTheme
  * 2. **符号模式**（无候选拼音）：展示用户自定义侧栏符号 [setSideSymbols]，点击回调
  *    [onSymbolInput] 直接上屏；列表末尾附「＋」页脚，点击回调 [onAddSymbol] 进入自定义管理。
  *    —— 等价 yuyansdk 中 footer(`mLlAddSymbol`) + `responseKeyEvent(SoftKey(label))`。
+ *
+ * 此外底部固定一枚「符号」键（[setGridGeometry] 指定其位置与高度，与九宫格底行对齐），
+ * 点击回调 [onSymbolKeyboard] 进入符号键盘；上方列表区域在剩余高度内滚动。
  */
 @SuppressLint("ViewConstructor")
 class PinyinSideBarView @JvmOverloads constructor(
@@ -44,13 +48,15 @@ class PinyinSideBarView @JvmOverloads constructor(
         /** 单元高度（dp） */
         private const val ITEM_HEIGHT_DP = 40f
         /** 单元间距（dp） */
-        private const val ITEM_MARGIN_DP = 3f
+        private const val ITEM_MARGIN_DP = 2f
         /** 单元圆角（dp） */
-        private const val ITEM_RADIUS_DP = 6f
+        private const val ITEM_RADIUS_DP = 4f
         /** 文字大小（sp） */
         private const val TEXT_SIZE_SP = 15f
         /** 「＋」页脚符号 */
         private const val ADD_FOOTER_LABEL = "\uFF0B"
+        /** 底部固定「符号」键文案 */
+        private const val SYMBOL_KEY_LABEL = "符号"
     }
 
     /** 点击拼音回调（拼音模式）：参数为所选拼音字符串 */
@@ -61,6 +67,9 @@ class PinyinSideBarView @JvmOverloads constructor(
 
     /** 点击「＋」页脚回调：进入侧栏符号自定义管理 */
     var onAddSymbol: (() -> Unit)? = null
+
+    /** 点击底部「符号」键回调：切换到符号键盘 */
+    var onSymbolKeyboard: (() -> Unit)? = null
 
     private enum class Mode { PINYIN, SYMBOL }
 
@@ -83,6 +92,18 @@ class PinyinSideBarView @JvmOverloads constructor(
     /** 竖向滚动偏移（内容超过可视高度时） */
     private var scrollOffset = 0f
 
+    /** 底部固定「符号」键矩形；未设置尺寸（高度为 0）时不绘制 */
+    private val symbolKeyRect = RectF()
+
+    /** 列表区顶部 y 偏移（px），与九宫格首行按键顶部对齐 */
+    private var listTop = 0f
+
+    /** 列表区与底部「符号」键之间的间距（px），与九宫格行间距对齐 */
+    private var listGap = 0f
+
+    /** 列表整体圆角裁剪路径（项间紧密排列，圆角只作用于列表外轮廓） */
+    private val listClipPath = Path()
+
     // ===== 画笔 =====
 
     private val boardBgPaint = Paint().apply { style = Paint.Style.FILL }
@@ -102,6 +123,12 @@ class PinyinSideBarView @JvmOverloads constructor(
         override fun onDown(e: MotionEvent): Boolean = true
 
         override fun onSingleTapUp(e: MotionEvent): Boolean {
+            // 底部「符号」键固定不随列表滚动，优先命中
+            if (symbolKeyRect.height() > 0f && symbolKeyRect.contains(e.x, e.y)) {
+                onSymbolKeyboard?.invoke()
+                performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                return true
+            }
             val y = e.y + scrollOffset
             for (i in itemRects.indices) {
                 if (itemRects[i].contains(e.x, y)) {
@@ -115,7 +142,7 @@ class PinyinSideBarView @JvmOverloads constructor(
         override fun onScroll(
             e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float
         ): Boolean {
-            val maxScroll = (contentHeight() - height).coerceAtLeast(0f)
+            val maxScroll = (contentBottom() - listBottom()).coerceAtLeast(0f)
             scrollOffset = (scrollOffset + distanceY).coerceIn(0f, maxScroll)
             invalidate()
             return true
@@ -140,7 +167,8 @@ class PinyinSideBarView @JvmOverloads constructor(
 
     private fun rebuildPaints() {
         boardBgPaint.color = skin.keyboardBackground
-        itemBgPaint.color = skin.keyBackground
+        // 侧栏单元与功能键同色，与右侧功能列形成对称的灏灰背景
+        itemBgPaint.color = skin.funcKeyBackground
         textPaint.color = skin.keyTextColor
         textPaint.typeface = skin.textTypeface
         addPaint.color = skin.candidateHighlightColor
@@ -176,6 +204,29 @@ class PinyinSideBarView @JvmOverloads constructor(
         invalidate()
     }
 
+    /**
+     * 设置九宫格几何对齐信息（相对本视图顶部，px）：
+     * 列表区顶部与网格首行按键顶部对齐，底部固定「符号」键与网格底行对齐。
+     * 由 [KeyboardLayoutManager] 依九宫格布局完成后传入；
+     * bottomKeyHeight 为 0 时不绘制底部键（如尚未完成布局）。
+     *
+     * @param gridTop 网格首行按键顶部 y 偏移
+     * @param rowGap 网格行间距（列表区与底部键之间沿用此间距）
+     * @param bottomKeyTop 网格底行顶部 y 偏移
+     * @param bottomKeyHeight 网格单行按键高度
+     */
+    fun setGridGeometry(gridTop: Float, rowGap: Float, bottomKeyTop: Float, bottomKeyHeight: Float) {
+        listTop = gridTop
+        listGap = rowGap
+        val margin = dp2px(ITEM_MARGIN_DP)
+        symbolKeyRect.set(
+            margin, bottomKeyTop,
+            (width - margin).coerceAtLeast(margin), bottomKeyTop + bottomKeyHeight
+        )
+        recalculateLayout()
+        invalidate()
+    }
+
     // ===== 布局与绘制 =====
 
     private fun currentDisplays(): List<String> = when (mode) {
@@ -183,26 +234,33 @@ class PinyinSideBarView @JvmOverloads constructor(
         Mode.SYMBOL -> sideSymbols.map { it.display }
     }
 
+    /** 可滚动列表区域底部 y（总高扣除底部固定「符号」键及间距），与网格第 3 行底部对齐 */
+    private fun listBottom(): Float =
+        if (symbolKeyRect.height() > 0f) symbolKeyRect.top - listGap else height.toFloat()
+
     private fun recalculateLayout() {
         itemRects.clear()
         if (width == 0) return
         val margin = dp2px(ITEM_MARGIN_DP)
-        val itemH = dp2px(ITEM_HEIGHT_DP)
         val left = margin
         val right = (width - margin).coerceAtLeast(left)
-        var y = margin
-        for (i in currentDisplays().indices) {
-            itemRects.add(RectF(left, y, right, y + itemH))
-            y += itemH + margin
-        }
         hasFooter = mode == Mode.SYMBOL
-        if (hasFooter) {
+        val count = currentDisplays().size + if (hasFooter) 1 else 0
+        if (count == 0) return
+        // 内容不足时均分列表区域高度填满（顶/底与右侧三行网格按键齐平），
+        // 内容较多时回退到基准单元高度并支持滚动；项与项之间紧密排列、无竖向间隔
+        val evenH = (listBottom() - listTop) / count
+        val itemH = maxOf(dp2px(ITEM_HEIGHT_DP), evenH)
+        var y = listTop
+        repeat(count) {
             itemRects.add(RectF(left, y, right, y + itemH))
+            y += itemH
         }
     }
 
-    private fun contentHeight(): Float =
-        if (itemRects.isEmpty()) 0f else itemRects.last().bottom + dp2px(ITEM_MARGIN_DP)
+    /** 列表内容底部 y（未滚动坐标系） */
+    private fun contentBottom(): Float =
+        if (itemRects.isEmpty()) listTop else itemRects.last().bottom
 
     private fun handleClick(index: Int) {
         val displays = currentDisplays()
@@ -220,22 +278,38 @@ class PinyinSideBarView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        if (symbolKeyRect.height() > 0f) {
+            // 宽度变化后重新拉伸底部键，保持与列表同宽
+            val margin = dp2px(ITEM_MARGIN_DP)
+            symbolKeyRect.left = margin
+            symbolKeyRect.right = (w - margin).coerceAtLeast(margin)
+        }
         recalculateLayout()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), boardBgPaint)
+        drawBottomSymbolKey(canvas)
         if (itemRects.isEmpty()) return
 
         canvas.save()
+        // 整体圆角裁剪：圆角只作用于列表外轮廓，项间无缝衔接；
+        // 同时限制在底部「符号」键之上，避免滚动时覆盖固定键
+        val radius = dp2px(ITEM_RADIUS_DP)
+        val first = itemRects.first()
+        val visibleBottom = minOf(contentBottom() - scrollOffset, listBottom())
+        listClipPath.rewind()
+        listClipPath.addRoundRect(
+            first.left, listTop, first.right, visibleBottom, radius, radius, Path.Direction.CW
+        )
+        canvas.clipPath(listClipPath)
         canvas.translate(0f, -scrollOffset)
 
         val displays = currentDisplays()
-        val radius = dp2px(ITEM_RADIUS_DP)
         for (i in itemRects.indices) {
             val rect = itemRects[i]
-            canvas.drawRoundRect(rect, radius, radius, itemBgPaint)
+            canvas.drawRect(rect, itemBgPaint)
             val isFooter = hasFooter && i == itemRects.size - 1
             if (isFooter) {
                 drawCenteredText(canvas, ADD_FOOTER_LABEL, rect, addPaint)
@@ -244,6 +318,14 @@ class PinyinSideBarView @JvmOverloads constructor(
             }
         }
         canvas.restore()
+    }
+
+    /** 绘制底部固定「符号」键（不参与列表滚动） */
+    private fun drawBottomSymbolKey(canvas: Canvas) {
+        if (symbolKeyRect.height() <= 0f) return
+        val radius = dp2px(ITEM_RADIUS_DP)
+        canvas.drawRoundRect(symbolKeyRect, radius, radius, itemBgPaint)
+        drawCenteredText(canvas, SYMBOL_KEY_LABEL, symbolKeyRect, textPaint)
     }
 
     private fun drawCenteredText(canvas: Canvas, text: String, rect: RectF, paint: Paint) {

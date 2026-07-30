@@ -22,6 +22,7 @@ import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.config.DisplayModeManager
 import com.ziyou.ime.config.SchemaPreference
 import com.ziyou.ime.skin.SkinManager
+import com.ziyou.ime.skin.SkinTheme
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.core.RimeMessage
 import com.ziyou.ime.core.RimeNative
@@ -223,6 +224,28 @@ class ZiYouInputMethodService : InputMethodService() {
         override fun onPanelWillOpen() = clearCompositionForPanel()
     }
 
+    /** 工具面板协调器（Logo 键入口，面板生命周期与键盘收放编排，与其他面板同一拆分纪律） */
+    private val toolPanels by lazy {
+        ToolPanelCoordinator(this, toolPanelHost)
+    }
+
+    /** 提供给 [ToolPanelCoordinator] 的宿主能力：容器访问与功能码分发出口。 */
+    private val toolPanelHost = object : ToolPanelCoordinator.Host {
+        override fun contentLayout(): LinearLayout? = this@ZiYouInputMethodService.contentLayout
+
+        override fun keyboardContainer(): FrameLayout? =
+            this@ZiYouInputMethodService.keyboardContainer
+
+        override fun candidatesContainer(): LinearLayout? =
+            this@ZiYouInputMethodService.candidatesContainer
+
+        override fun keyboardView(): BaseKeyboardView? = this@ZiYouInputMethodService.keyboardView
+
+        override fun dispatchToolKey(keyCode: Int) = handleSoftKeyPress(keyCode, 0)
+
+        override fun onPanelWillOpen() = clearCompositionForPanel()
+    }
+
     /** 剪贴板变更监听：复制即收录历史（持强引用，onCreate 注册 / onDestroy 注销） */
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
         captureClipboardToHistory()
@@ -254,6 +277,9 @@ class ZiYouInputMethodService : InputMethodService() {
     /** 进入符号键盘前的布局类型，用于「返回」键恢复（符号键盘为临时面板） */
     private var keyboardBeforeSymbol: KeyboardType? = null
 
+    /** 进入数字键盘前的布局类型，用于「返回」键恢复（数字键盘为临时面板） */
+    private var keyboardBeforeNumber: KeyboardType? = null
+
     /** 候选词视图引用 */
     private var candidatesView: SimpleCandidatesView? = null
 
@@ -265,9 +291,6 @@ class ZiYouInputMethodService : InputMethodService() {
 
     /** 九宫格左侧拼音侧栏引用（仅九宫格布局下存在） */
     private var pinyinSideBar: PinyinSideBarView? = null
-
-    /** 九宫格底栏引用（仅九宫格布局下存在，用于同步 isChineseMode） */
-    private var nineGridBottomBar: NineGridBottomBarView? = null
 
     /**
      * 九宫格“中→英”专用标志。
@@ -400,11 +423,12 @@ class ZiYouInputMethodService : InputMethodService() {
      * 形态切换（[switchDisplayMode]）时也经本方法重建，与 onCreateInputView 同源。
      */
     private fun buildInputView(mode: DisplayMode): View {
-        // 重建前释放技能/AI/涂鸦/粘贴板面板（旧容器即将废弃，WebView/进行中请求/离屏 bitmap 必须显式释放）
+        // 重建前释放技能/AI/涂鸦/粘贴板/工具面板（旧容器即将废弃，WebView/进行中请求/离屏 bitmap 必须显式释放）
         skillPanels.close()
         aiPanels.close()
         doodlePanels.close()
         clipboardPanels.close()
+        toolPanels.close()
         val skin = SkinManager.getCurrentSkin(this)
         // 悬浮形态下键盘/候选/编码区统一缩放，停靠形态保持 1.0 零影响
         val scale = if (mode == DisplayMode.FLOATING) DisplayModeManager.FLOATING_SCALE else 1f
@@ -559,7 +583,6 @@ class ZiYouInputMethodService : InputMethodService() {
         val installed = keyboardLayoutManager.install(container, type, floating, scale)
         keyboardView = installed.keyboardView
         pinyinSideBar = installed.pinyinSideBar
-        nineGridBottomBar = installed.nineGridBottomBar
         currentKeyboardType = type
     }
 
@@ -685,6 +708,11 @@ class ZiYouInputMethodService : InputMethodService() {
                 rime.api.clearComposition()
                 keyRecordStack.clear()
             }
+            KeyboardType.NUMBER -> {
+                // 数字键盘与符号键盘同模式：临时面板，清编码不动方案与 ascii_mode
+                rime.api.clearComposition()
+                keyRecordStack.clear()
+            }
         }
         val isAscii = rime.api.getOption("ascii_mode")
         // 引擎级联想（librime-predict）选项联动：与应用层联想总开关同步。
@@ -697,15 +725,10 @@ class ZiYouInputMethodService : InputMethodService() {
             keyboardView?.isChineseMode = !isAscii
             candidatesView?.updateCandidates(context)
             updateToolbarVisibility(context)
-            // 编码区同源同步：九宫格按候选读音+实际击键还原预览，悬浮层与键盘视图
-            // 共用同一串；全键盘回退到 Rime 原始 preedit
+            // 编码区同源同步（仅候选栏悬浮层，键盘视图不绘制编码）：九宫格按候选
+            // 读音+实际击键还原预览；全键盘回退到 Rime 原始 preedit
             val preview = buildPinyinPreview(context)
             preeditOverlay?.setText(preview ?: context?.composition?.preedit)
-            if (preview != null) {
-                keyboardView?.updateCompositionPreview(preview)
-            } else {
-                keyboardView?.updateComposition(context?.composition)
-            }
             // 刷新左侧拼音侧栏（拼音候选 + 自定义符号）
             if (type == KeyboardType.NINE_GRID) {
                 pinyinSideBar?.setSideSymbols(
@@ -722,8 +745,8 @@ class ZiYouInputMethodService : InputMethodService() {
     }
 
     private fun saveKeyboardType(type: KeyboardType) {
-        // 符号键盘是临时面板，不持久化；重建输入视图时回到进入前的布局
-        if (type == KeyboardType.SYMBOL) return
+        // 符号/数字键盘是临时面板，不持久化；重建输入视图时回到进入前的布局
+        if (type == KeyboardType.SYMBOL || type == KeyboardType.NUMBER) return
         getSharedPreferences(PREF_NAME, MODE_PRIVATE).edit()
             .putString(KEY_KEYBOARD_TYPE, type.name)
             .apply()
@@ -779,11 +802,12 @@ class ZiYouInputMethodService : InputMethodService() {
         super.onFinishInputView(finishingInput)
         Log.d(TAG, "onFinishInputView")
 
-        // 强制关闭技能面板（销毁 WebView，避免后台常驻内存/定时器）与 AI/涂鸦/粘贴板面板
+        // 强制关闭技能面板（销毁 WebView，避免后台常驻内存/定时器）与 AI/涂鸦/粘贴板/工具面板
         skillPanels.close()
         aiPanels.close()
         doodlePanels.close()
         clipboardPanels.close()
+        toolPanels.close()
 
         // 丢弃未提交的多击预览并清空编码区
         keyboardView?.resetInputState()
@@ -821,6 +845,7 @@ class ZiYouInputMethodService : InputMethodService() {
             aiPanels.close()
             doodlePanels.close()
             clipboardPanels.close()
+            toolPanels.close()
             // 同步归还 native 堆持留的空闲页（部署残留，真机实测 20~27MB）
             if (RimeNative.isLoaded) RimeNative.trimNativeHeap()
         }
@@ -876,32 +901,11 @@ class ZiYouInputMethodService : InputMethodService() {
                         }
                         val currentAscii = rime.api.getOption("ascii_mode")
                         rime.api.setOption("ascii_mode", !currentAscii)
-                        // 视图不再预翻转，统一在此按引擎结果回写（含九宫格底栏）
+                        // 视图不再预翻转，统一在此按引擎结果回写
                         keyboardView?.isChineseMode = currentAscii // 反转
-                        nineGridBottomBar?.isChineseMode = currentAscii
                         Log.d(TAG, "切换中英文: ascii_mode=${!currentAscii}")
                     } catch (e: Exception) {
                         Log.e(TAG, "切换中英文异常: ${e.message}", e)
-                    }
-                }
-            }
-
-            // 中文/数字模式切换：中文时发送数字 0–9 直接上屏，英文时正常输入
-            KeyCode.KEYCODE_SWITCH_NUMBER_MODE -> {
-                serviceScope.launch {
-                    try {
-                        if (!awaitEngineReady(KEY_ENGINE_READY_TIMEOUT_MS)) {
-                            Log.w(TAG, "切换中数模式失败：Rime引擎未就绪（可能正在重新部署）")
-                            return@launch
-                        }
-                        val currentAscii = rime.api.getOption("ascii_mode")
-                        rime.api.setOption("ascii_mode", !currentAscii)
-                        // 视图不再预翻转，统一在此按引擎结果回写（含九宫格底栏）
-                        keyboardView?.isChineseMode = currentAscii // 反转
-                        nineGridBottomBar?.isChineseMode = currentAscii
-                        Log.d(TAG, "切换中数模式: ascii_mode=${!currentAscii}")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "切换中数模式异常: ${e.message}", e)
                     }
                 }
             }
@@ -911,23 +915,25 @@ class ZiYouInputMethodService : InputMethodService() {
                 displayModeCtrl.toggle()
             }
 
-            // 技能面板开关：覆盖/移除键盘区域上的技能面板（与 AI/涂鸦/粘贴板面板互斥）
+            // 技能面板开关：覆盖/移除键盘区域上的技能面板（与 AI/涂鸦/粘贴板/工具面板互斥）
             KeyCode.KEYCODE_SKILL_PANEL -> {
                 aiPanels.close()
                 doodlePanels.close()
                 clipboardPanels.close()
+                toolPanels.close()
                 skillPanels.toggle()
             }
             
-            // AI 问答面板开关：编码区上方展示输入框/答案区（与技能/涂鸦/粘贴板面板互斥）
+            // AI 问答面板开关：编码区上方展示输入框/答案区（与技能/涂鸦/粘贴板/工具面板互斥）
             KeyCode.KEYCODE_AI_ASSISTANT -> {
                 skillPanels.close()
                 doodlePanels.close()
                 clipboardPanels.close()
+                toolPanels.close()
                 aiPanels.toggle()
             }
             
-            // 涂鸦画板开关：收起键盘展示画布（与技能/AI/粘贴板面板互斥）；
+            // 涂鸦画板开关：收起键盘展示画布（与技能/AI/粘贴板/工具面板互斥）；
             // 编辑器不收图片时面板按钮转为「保存」（存相册兑底），
             // 仅当发送/保存两条出路都不可用（Android 10 以下且不收图）时拦截不开面板
             KeyCode.KEYCODE_DOODLE_PANEL -> {
@@ -938,17 +944,29 @@ class ZiYouInputMethodService : InputMethodService() {
                     skillPanels.close()
                     aiPanels.close()
                     clipboardPanels.close()
+                    toolPanels.close()
                     doodlePanels.toggle()
                 }
             }
             
-            // 粘贴板历史面板开关：收起键盘展示历史列表（与技能/AI/涂鸦面板互斥）；
+            // 粘贴板历史面板开关：收起键盘展示历史列表（与技能/AI/涂鸦/工具面板互斥）；
             // 点击条目经 commitDirectToEditor 直达宿主输入框，不接管 commitTarget
             KeyCode.KEYCODE_CLIPBOARD_PANEL -> {
                 skillPanels.close()
                 aiPanels.close()
                 doodlePanels.close()
+                toolPanels.close()
                 clipboardPanels.toggle()
+            }
+
+            // 工具面板开关（候选区按钮栏 Logo 键）：收起键盘网格展示全部工具项
+            //（与技能/AI/涂鸦/粘贴板面板互斥）；选中工具后先关面板再回到本方法统一路由
+            KeyCode.KEYCODE_TOOL_PANEL -> {
+                skillPanels.close()
+                aiPanels.close()
+                doodlePanels.close()
+                clipboardPanels.close()
+                toolPanels.toggle()
             }
 
             // 收起键盘（候选区按钮栏）
@@ -956,7 +974,7 @@ class ZiYouInputMethodService : InputMethodService() {
                 requestHideSelf(0)
             }
 
-            // 打开设置页（候选区按钮栏）
+            // 打开设置页（工具面板「设置」项，原功能栏固定设置按钮已替换为 Logo）
             KeyCode.KEYCODE_OPEN_SETTINGS -> {
                 openSettings()
             }
@@ -980,6 +998,20 @@ class ZiYouInputMethodService : InputMethodService() {
                 } else {
                     keyboardBeforeSymbol = currentKeyboardType
                     switchKeyboard(KeyboardType.SYMBOL)
+                }
+            }
+
+            // 数字键盘开关：与符号键盘同模式，记录进入前布局，「返回」时恢复。
+            // 九宫格底栏的「中数转换」键（KEYCODE_SWITCH_NUMBER_MODE）走同一路径，
+            // 即切到数字键盘布局，而非切换 ascii_mode
+            KeyCode.KEYCODE_NUMBER_KEYBOARD, KeyCode.KEYCODE_SWITCH_NUMBER_MODE -> {
+                if (currentKeyboardType == KeyboardType.NUMBER) {
+                    val restore = keyboardBeforeNumber ?: KeyboardType.QWERTY
+                    keyboardBeforeNumber = null
+                    switchKeyboard(restore)
+                } else {
+                    keyboardBeforeNumber = currentKeyboardType
+                    switchKeyboard(KeyboardType.NUMBER)
                 }
             }
 
@@ -1010,7 +1042,12 @@ class ZiYouInputMethodService : InputMethodService() {
                 if (currentKeyboardType == KeyboardType.NINE_GRID) {
                     when {
                         keyCode in '2'.code..'9'.code -> keyRecordStack.pushT9Key(keyCode.toChar())
-                        keyCode == '\''.code -> keyRecordStack.pushApostrophe()
+                        keyCode == '\''.code -> {
+                            // 分词键：无编码时为空操作（Rime 不消费会降级直接上屏撇号，
+                            // 在此拦截避免把 ' 字符提交到编辑器）
+                            if (keyRecordStack.isEmpty()) return
+                            keyRecordStack.pushApostrophe()
+                        }
                     }
                 }
                 serviceScope.launch {
@@ -1214,15 +1251,10 @@ class ZiYouInputMethodService : InputMethodService() {
         candidatesView?.updateCandidates(context, predictionMode)
         // 无候选词且无活跃编码时显示候选区功能按钮栏
         updateToolbarVisibility(context)
-        // 编码区同源同步：九宫格按候选读音+实际击键还原预览，悬浮层与键盘视图
-        // 共用同一串，确保编码区与候选区拼音一致；全键盘回退到 Rime 原始 preedit
+        // 编码区同源同步（仅候选栏悬浮层，键盘视图不绘制编码）：九宫格按候选
+        // 读音+实际击键还原预览，确保编码区与候选区拼音一致；全键盘回退到 Rime 原始 preedit
         val preview = buildPinyinPreview(context)
         preeditOverlay?.setText(preview ?: context?.composition?.preedit)
-        if (preview != null) {
-            keyboardView?.updateCompositionPreview(preview)
-        } else {
-            keyboardView?.updateComposition(context?.composition)
-        }
         // 左侧拼音侧栏：有候选拼音则展示拼音，否则展示自定义符号
         pinyinSideBar?.setPinyinCandidates(pinyinHints)
     }
@@ -1265,16 +1297,38 @@ class ZiYouInputMethodService : InputMethodService() {
     }
 
     /**
-     * 皮肤快照就绪/变更回调（主线程）：重建输入视图套用新皮肤
-     * （与形态切换同源路径），并重同步引擎状态到新视图。
+     * 皮肤快照就绪/变更回调（主线程）：
+     * - STYLE_ONLY（仅颜色/字号/圆角等样式变化，背景图/字体/布局尺寸不变）：
+     *   对现有视图原地 applySkin，跳过全量重建，保留输入状态；
+     *   悬浮形态下悬浮容器链派用皮肤，仍走全量重建（保守策略）。
+     * - FULL：重建输入视图套用新皮肤（与形态切换同源路径），并重同步引擎状态。
      * 输入视图尚未创建时跳过（onCreateInputView 自会取最新快照）。
      */
-    private val skinChangeListener = SkinManager.SkinChangeListener {
-        if (contentLayout != null) {
-            keyboardView?.resetInputState()
-            setInputView(buildInputView(displayModeCtrl.currentMode))
-            scheduleEngineSync()
+    private val skinChangeListener = object : SkinManager.SkinChangeListener {
+        override fun onSkinChanged(skin: SkinTheme) =
+            onSkinChanged(skin, SkinManager.SkinChangeKind.FULL)
+
+        override fun onSkinChanged(skin: SkinTheme, kind: SkinManager.SkinChangeKind) {
+            if (contentLayout == null) return
+            if (kind == SkinManager.SkinChangeKind.STYLE_ONLY &&
+                displayModeCtrl.currentMode == DisplayMode.DOCKED
+            ) {
+                applySkinToViews(skin)
+            } else {
+                keyboardView?.resetInputState()
+                setInputView(buildInputView(displayModeCtrl.currentMode))
+                scheduleEngineSync()
+            }
         }
+    }
+
+    /** STYLE_ONLY 增量路径：对全部皮肤消费视图原地套用新皮肤（不重建视图树）。 */
+    private fun applySkinToViews(skin: SkinTheme) {
+        keyboardView?.applySkin(skin)
+        pinyinSideBar?.applySkin(skin)
+        candidatesView?.applySkin(skin)
+        candidateToolbar?.applySkin(skin)
+        preeditOverlay?.applySkin(skin)
     }
 
     /**
@@ -1373,8 +1427,6 @@ class ZiYouInputMethodService : InputMethodService() {
                             val isAscii = rime.api.getOption("ascii_mode")
                             withContext(Dispatchers.Main) {
                                 keyboardView?.isChineseMode = !isAscii
-                                // 九宫格“数”键位于独立底栏视图，同样需同步，否则显示与引擎状态相反
-                                nineGridBottomBar?.isChineseMode = !isAscii
                             }
                         } catch (e: Exception) {
                             Log.w(TAG, "同步 ascii_mode 状态异常: ${e.message}")
@@ -1440,7 +1492,6 @@ class ZiYouInputMethodService : InputMethodService() {
         candidateToolbar = null
         preeditOverlay = null
         pinyinSideBar = null
-        nineGridBottomBar = null
         displayModeCtrl.release()
         super.onDestroy()
     }

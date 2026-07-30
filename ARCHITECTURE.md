@@ -304,7 +304,7 @@ Android KeyEvent.keyCode → KeyCode.androidKeyCodeToRimeKeyCode() → X11 Keysy
 ```
 - 字母键：ASCII 码值（'a'=0x61）；功能键：X11 keysym（BackSpace=0xff08, Return=0xff0d）
 - 修饰键：`getModifierMask()` 提取 Shift/Ctrl/Alt mask
-- 另定义自定义功能码：`KEYCODE_SWITCH_LANGUAGE`（中英）、`KEYCODE_SWITCH_NUMBER_MODE`（中数）、
+- 另定义自定义功能码：`KEYCODE_SWITCH_LANGUAGE`（中英）、`KEYCODE_SWITCH_NUMBER_MODE`（中数转换，切数字键盘）、
   `KEYCODE_SWITCH_KEYBOARD`（切键盘）、`KEYCODE_SYMBOL`（符号）
 
 ### 业务域模块

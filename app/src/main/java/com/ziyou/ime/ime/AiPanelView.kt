@@ -13,12 +13,20 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import com.ziyou.ime.ai.AiChatClient
 import com.ziyou.ime.ai.AiConfig
 import com.ziyou.ime.ai.AiPersona
 import com.ziyou.ime.ai.ChatMessage
 import com.ziyou.ime.ai.MarkdownRenderer
 import com.ziyou.ime.ai.PersonaRepository
+import com.ziyou.ime.ai.knowledge.AiMemoryStore
+import com.ziyou.ime.ai.knowledge.AiUsageStats
+import com.ziyou.ime.ai.knowledge.KnowledgeRepository
+import com.ziyou.ime.ai.knowledge.KnowledgeSearcher
+import com.ziyou.ime.core.rag.RagPromptBuilder
+import com.ziyou.ime.core.rag.RetrievedChunk
+import com.ziyou.ime.core.rag.SensitiveWordFilter
 import com.ziyou.ime.skin.SkinTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +34,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * AI 问答面板：内部结构为「宿主标题栏 + 对话气泡区（可滚动）+ 输入行」。
@@ -82,6 +91,9 @@ class AiPanelView(
         private const val BUBBLE_MAX_WIDTH_RATIO = 0.78f
         /** 多轮对话历史上限（条数，包含 user + assistant，FIFO 淘汰） */
         private const val MAX_HISTORY_SIZE = 10
+
+        /** 回答内容安全过滤器（内置最小词表，与知识库导入侧一致） */
+        private val answerFilter = SensitiveWordFilter(SensitiveWordFilter.DEFAULT_WORDS)
     }
 
     private val density = resources.displayMetrics.density
@@ -122,6 +134,9 @@ class AiPanelView(
 
     /** 标题栏人设标签（点击弹出切换浮层） */
     private lateinit var personaLabel: TextView
+
+    /** 标题栏知识库开关标签（📚，开启高亮色 / 关闭次要色） */
+    private lateinit var knowledgeLabel: TextView
 
     /** 人设选择浮层（初始 GONE，点击 personaLabel 展开） */
     private lateinit var personaOverlay: LinearLayout
@@ -184,6 +199,19 @@ class AiPanelView(
                 togglePersonaOverlay()
             }
         }
+        // 知识库开关标签（人设标签右侧，点击切换 RAG 检索开关）
+        knowledgeLabel = TextView(context).apply {
+            text = "\uD83D\uDCDA"
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setPadding(dp(4f), 0, dp(4f), 0)
+            isClickable = true
+            setOnClickListener {
+                host.performHaptic()
+                toggleKnowledge()
+            }
+        }
+        refreshKnowledgeLabel()
         // 新对话按钮（右侧，清空历史重新开始）
         val newChatButton = TextView(context).apply {
             text = "新对话"
@@ -200,6 +228,7 @@ class AiPanelView(
             orientation = HORIZONTAL
             setBackgroundColor(theme.candidateBackground)
             addView(personaLabel, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
+            addView(knowledgeLabel, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
             addView(titleView, LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
             addView(newChatButton, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
             addView(closeButton, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
@@ -324,25 +353,57 @@ class AiPanelView(
             return
         }
 
-        // 拼接基础格式约束 + 当前人设提示词
+        // 拼接基础格式约束 + 当前人设提示词（无知识库时的原路径 prompt）
         val fullSystemPrompt = AiChatClient.BASE_SYSTEM_PROMPT + "\n\n" + currentPersona.systemPrompt
         showLoading()
+        val appContext = context.applicationContext
         requestJob = panelScope.launch {
+            // RAG 分叉：知识库开启且有数据时检索并融合 prompt；
+            // 检索异常或无命中时降级为与现状一致的原路径（错误隔离）
+            var retrieved: List<RetrievedChunk> = emptyList()
+            val systemPrompt = withContext(Dispatchers.IO) {
+                try {
+                    if (KnowledgeRepository.isEnabled(appContext) &&
+                        KnowledgeRepository.hasItems(appContext)) {
+                        KnowledgeSearcher.ensureLoaded(appContext)
+                        retrieved = KnowledgeSearcher.retrieve(
+                            question, KnowledgeRepository.getTopK(appContext))
+                    }
+                    if (retrieved.isNotEmpty()) {
+                        RagPromptBuilder.build(
+                            AiChatClient.BASE_SYSTEM_PROMPT,
+                            currentPersona.systemPrompt,
+                            AiMemoryStore.loadSummary(appContext),
+                            retrieved
+                        )
+                    } else fullSystemPrompt
+                } catch (e: Exception) {
+                    Log.w(TAG, "知识库检索失败，降级为普通问答: ${e.message}")
+                    retrieved = emptyList()
+                    fullSystemPrompt
+                }
+            }
+            AiUsageStats.recordQuestion(appContext, retrieved.size)
             val result = AiChatClient.ask(
-                context.applicationContext,
+                appContext,
                 question,
-                fullSystemPrompt,
+                systemPrompt,
                 chatHistory.dropLast(1)  // 刚追加的 user 由 buildRequestBody 末尾加入，历史仅传前 N-1 条
             )
             hideLoading()
             result.fold(
                 onSuccess = { answer ->
-                    chatHistory.add(ChatMessage("assistant", answer))
+                    // 回答渲染前经敏感词清洗（命中词替换为 *）
+                    val sanitized = answerFilter.sanitize(answer)
+                    AiUsageStats.recordSuccess(appContext)
+                    chatHistory.add(ChatMessage("assistant", sanitized))
                     trimHistory()
-                    addAnswerBubble(answer, isError = false)
+                    addAnswerBubble(sanitized, isError = false,
+                        sources = retrieved.map { it.sourceName })
                 },
                 onFailure = { e ->
                     Log.w(TAG, "AI 请求失败: ${e.message}")
+                    AiUsageStats.recordFailure(appContext)
                     // 失败时回滚刚追加的 user 消息，避免下次重试时重复
                     if (chatHistory.isNotEmpty() && chatHistory.last().role == "user"
                         && chatHistory.last().content == question) {
@@ -361,10 +422,11 @@ class AiPanelView(
         }
     }
 
-    /** 开启新对话：清空气泡与历史，恢复输入行与键盘。 */
+    /** 开启新对话：持久化当前会话记忆后清空气泡与历史，恢复输入行与键盘。 */
     private fun startNewConversation() {
         requestJob?.cancel()
         requestJob = null
+        persistConversationMemory()
         chatHistory.clear()
         chatList.removeAllViews()
         chatScroll.visibility = GONE
@@ -414,9 +476,15 @@ class AiPanelView(
      * 答案卡片：左对齐；[isError] 时以错误样式呈现（纯文本，不附操作按钮），
      * 成功答案经 [MarkdownRenderer] 解析为富文本展示（粗体/列表/代码块等），
      * 右侧附「发送」（上屏解析后纯文本）与「发图」（富文本渲染为图片后
-     * commitContent 发送）两个按钮纵向堆叠；[withSettingsEntry] 时点击卡片跳转设置页。
+     * commitContent 发送）两个按钮纵向堆叠；[withSettingsEntry] 时点击卡片跳转设置页；
+     * [sources] 非空时在卡片下方附知识库引用来源小字行（与 prompt 内 [n] 编号对应）。
      */
-    private fun addAnswerBubble(text: String, isError: Boolean, withSettingsEntry: Boolean = false) {
+    private fun addAnswerBubble(
+        text: String,
+        isError: Boolean,
+        withSettingsEntry: Boolean = false,
+        sources: List<String> = emptyList()
+    ) {
         // 成功答案按 Markdown 渲染；错误提示为本地文案，保持纯文本
         val content: CharSequence = if (isError) text else MarkdownRenderer.render(text, markdownPalette)
         val bubble = createBubble(content, alignEnd = false,
@@ -445,6 +513,20 @@ class AiPanelView(
             })
         }
         chatList.addView(bubble)
+        // 知识库引用来源行（仅本次检索命中时展示；不做点击跳转，IME 窗口限制）
+        if (!isError && sources.isNotEmpty()) {
+            val label = sources.mapIndexed { i, name -> "[${i + 1}]$name" }
+                .distinct()
+                .joinToString(" ")
+            chatList.addView(TextView(context).apply {
+                // 外层函数参数 text 遮蔽 TextView.text，需显式 this
+                this.text = "参考: $label"
+                textSize = 11f
+                setTextColor(theme.preeditTextColor)
+                setPadding(dp(4f), 0, dp(4f), dp(2f))
+                maxLines = 2
+            })
+        }
         chatScroll.visibility = VISIBLE
         scrollToBottom()
     }
@@ -610,6 +692,40 @@ class AiPanelView(
         personaOverlay.visibility = GONE
     }
 
+    // ===== 知识库开关 =====
+
+    /** 切换知识库开关；库为空时提示先去设置页导入。 */
+    private fun toggleKnowledge() {
+        val enabled = KnowledgeRepository.isEnabled(context)
+        if (!enabled && !KnowledgeRepository.hasItems(context)) {
+            Toast.makeText(context, "请先在「设置 → AI 知识库」中导入知识库", Toast.LENGTH_SHORT).show()
+            return
+        }
+        KnowledgeRepository.setEnabled(context, !enabled)
+        refreshKnowledgeLabel()
+    }
+
+    /** 刷新知识库标签颜色：开启高亮色 / 关闭次要色（降透明）。 */
+    private fun refreshKnowledgeLabel() {
+        val enabled = KnowledgeRepository.isEnabled(context)
+        knowledgeLabel.setTextColor(
+            if (enabled) theme.candidateHighlightColor
+            else theme.preeditTextColor and 0x00FFFFFF or 0x60000000)
+        knowledgeLabel.alpha = if (enabled) 1f else 0.55f
+    }
+
+    // ===== 对话记忆 =====
+
+    /** 持久化当前会话历史并异步更新跨会话摘要（新对话 / release 时调用）。 */
+    private fun persistConversationMemory() {
+        if (chatHistory.isEmpty()) return
+        val appContext = context.applicationContext
+        val historySnapshot = chatHistory.toList()
+        AiMemoryStore.saveSession(appContext, historySnapshot)
+        // 摘要生成走 AiMemoryStore 内部的独立 IO 作用域，不依赖面板 panelScope
+        AiMemoryStore.updateSummaryAsync(appContext, historySnapshot)
+    }
+
     // ===== 布局形态（由协调器在键盘收放后回调）=====
 
     /**
@@ -637,8 +753,10 @@ class AiPanelView(
         scrollToBottom()
     }
 
-    /** 面板移除前必须调用：取消进行中的 AI 请求与协程作用域。 */
+    /** 面板移除前必须调用：持久化会话记忆与统计，取消进行中的 AI 请求与协程作用域。 */
     fun release() {
+        persistConversationMemory()
+        AiUsageStats.flush(context.applicationContext)
         requestJob?.cancel()
         requestJob = null
         panelScope.cancel()

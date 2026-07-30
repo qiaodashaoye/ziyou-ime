@@ -14,6 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import com.ziyou.ime.ai.AiConfig
 import com.ziyou.ime.ai.AiPersona
 import com.ziyou.ime.ai.PersonaRepository
+import com.ziyou.ime.ai.knowledge.KnowledgeRepository
 import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.config.DisplayModeManager
 import com.ziyou.ime.config.SchemaPreference
@@ -58,6 +59,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var themeValueText: TextView
     private lateinit var levelValueText: TextView
     private lateinit var personaValueText: TextView
+    private lateinit var knowledgeValueText: TextView
 
     /** Rime 引擎（经 DI 容器获取，依赖接口而非 RimeSession 单例） */
     private val rime get() = AppContainer.rimeEngine
@@ -238,6 +240,14 @@ class SettingsActivity : AppCompatActivity() {
         )
         personaItem.setOnClickListener { showPersonaManager() }
         rootLayout.addView(personaItem)
+        val knowledgeItem = createSettingItemWithValue(
+            title = "AI 知识库",
+            valueHolder = { knowledgeValueText = it }
+        )
+        knowledgeItem.setOnClickListener {
+            startActivity(Intent(this, KnowledgeActivity::class.java))
+        }
+        rootLayout.addView(knowledgeItem)
         rootLayout.addView(createDivider())
 
         // ===== 数据同步 =====
@@ -916,6 +926,13 @@ class SettingsActivity : AppCompatActivity() {
 
         if (::personaValueText.isInitialized) {
             personaValueText.text = PersonaRepository.getCurrentPersona(this).name
+        }
+
+        if (::knowledgeValueText.isInitialized) {
+            val count = KnowledgeRepository.getItems(this).size
+            val enabled = KnowledgeRepository.isEnabled(this)
+            knowledgeValueText.text =
+                "已导入 $count 条 · " + if (enabled) "已启用" else "未启用"
         }
     }
 

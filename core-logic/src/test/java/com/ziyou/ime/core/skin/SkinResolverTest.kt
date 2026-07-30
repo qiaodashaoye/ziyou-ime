@@ -42,7 +42,7 @@ class SkinResolverTest {
         )
     }
 
-    /** 内置三皮肤解析结果应与迁移前 ThemeManager 色值逐一一致（视觉零回归锚点）。 */
+    /** 内置三皮肤解析结果应与预设色值逐一一致（视觉回归锚点）。 */
     @Test
     fun resolve_builtinSkins_matchLegacyThemeColors() {
         val light = SkinResolver.resolve(SkinDefaults.builtinSpec(SkinDefaults.ID_LIGHT)!!)
@@ -50,10 +50,23 @@ class SkinResolverTest {
         assertEquals(SkinColor.parse("#1976D2"), light.candidateHighlightColor)
         assertFalse(light.isDark)
 
-        val dark = SkinResolver.resolve(SkinDefaults.builtinSpec(SkinDefaults.ID_DARK)!!)
-        assertEquals(SkinColor.parse("#303030"), dark.keyboardBackground)
-        assertEquals(SkinColor.parse("#64B5F6"), dark.candidateHighlightColor)
-        assertTrue(dark.isDark)
+        // 云雾拟态皮肤（builtin.yunwu）：darkMode=both，跟随系统深浅色切变体
+        val yunwuLight = SkinResolver.resolve(
+            SkinDefaults.builtinSpec(SkinDefaults.ID_YUNWU)!!, systemDark = false
+        )
+        assertFalse(yunwuLight.isDark)
+        assertEquals("云雾拟态", yunwuLight.name)
+        assertEquals(SkinColor.parse("#E8E9ED"), yunwuLight.keyboardBackground)
+        assertEquals(SkinColor.parse("#F5637F"), yunwuLight.candidateHighlightColor)
+        assertEquals(16f, yunwuLight.keyCornerRadiusDp, 0f)
+        assertTrue(yunwuLight.keyTextBold)
+
+        val yunwuDark = SkinResolver.resolve(
+            SkinDefaults.builtinSpec(SkinDefaults.ID_YUNWU)!!, systemDark = true
+        )
+        assertTrue(yunwuDark.isDark)
+        assertEquals(SkinColor.parse("#26272C"), yunwuDark.keyboardBackground)
+        assertEquals(SkinColor.parse("#F5738C"), yunwuDark.candidateHighlightColor)
 
         val material = SkinResolver.resolve(SkinDefaults.builtinSpec(SkinDefaults.ID_MATERIAL)!!)
         assertEquals(SkinColor.parse("#E3F2FD"), material.keyboardBackground)

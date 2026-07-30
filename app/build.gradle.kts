@@ -1,8 +1,23 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
 
+// ===== 发布签名配置（keystore.properties 不入库，见根目录 keystore.properties.template）=====
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+
+// 发布 ABI 列表可通过 -Pziyou.abis=arm64-v8a,armeabi-v7a 覆盖；
+// 每个 ABI 必须先经 librime-prebuilt/build.sh 产出 libs/<abi>/librime.a
+val releaseAbis = (project.findProperty("ziyou.abis") as String?)
+    ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+    ?: listOf("arm64-v8a")
 
 android {
     namespace = "com.ziyou.ime"
@@ -19,7 +34,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
-            abiFilters += listOf("arm64-v8a")
+            abiFilters += releaseAbis
         }
 
         externalNativeBuild {
@@ -28,6 +43,17 @@ android {
                 // 必须与 librime-prebuilt 侧的 WITH_PREDICT 开关一致：
                 // 库未编入插件时此处开启会链接失败（undefined symbol）
                 arguments("-DWITH_PREDICT=ON")
+            }
+        }
+    }
+
+    signingConfigs {
+        if (keystorePropertiesFile.exists()) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
             }
         }
     }
@@ -49,6 +75,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // 无 keystore.properties 时产出未签名 APK（CI 校验编译用），有则正式签名
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

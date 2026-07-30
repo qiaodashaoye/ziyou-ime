@@ -15,3 +15,11 @@
 librime-prebuilt/superbuild/
 librime-prebuilt/boost/
 librime-prebuilt/boost-*.tar.xz
+
+# 发布签名（严禁入库）
+/keystore.properties
+*.keystore
+*.jks
+
+# 发布产物归档
+/dist/

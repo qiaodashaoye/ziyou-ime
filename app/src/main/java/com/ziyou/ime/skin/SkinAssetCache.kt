@@ -8,6 +8,7 @@ import android.util.Log
 import android.util.LruCache
 import com.ziyou.ime.core.skin.ResolvedSkin
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 皮肤资源缓存：背景图（LruCache + 解码期降采样）、字体（进程级复用）、预览图。
@@ -19,18 +20,27 @@ import java.io.File
 object SkinAssetCache {
     private const val TAG = "SkinAssetCache"
 
-    /** 背景图缓存：当前 + 预览合成最多同时存活的少量位图 */
-    private val bitmapCache = object : LruCache<String, Bitmap>(4 * 1024 * 1024 * 8) {
+    /**
+     * 背景图缓存：当前皮肤 + 编辑器预览合成各 1 张降采样背景图。
+     * 8MB 预算足够容纳 1-2 张按屏宽降采样的 ARGB_8888 全屏图。
+     */
+    private val bitmapCache = object : LruCache<String, Bitmap>(8 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
 
-    /** 预览图缓存（管理页网格用，上限 8 张） */
-    private val previewCache = object : LruCache<String, Bitmap>(8 * 1440 * 960 * 4) {
+    /**
+     * 预览图缓存（管理页网格用，约 8 张半屏宽缩略图的预算，
+     * 高分辨率屏由 LRU 自行淘汰最旧条目）。
+     */
+    private val previewCache = object : LruCache<String, Bitmap>(8 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
 
-    /** Typeface 进程级缓存（Typeface 可安全长持有） */
-    private val typefaceCache = mutableMapOf<String, Typeface>()
+    /**
+     * Typeface 进程级缓存（Typeface 可安全长持有；皮肤字体数量有限，无需 LRU）。
+     * IO 协程与主线程（编辑器预览）并发读写，须用并发容器。
+     */
+    private val typefaceCache = ConcurrentHashMap<String, Typeface>()
 
     /**
      * 加载皮肤背景图（已按屏宽降采样）。

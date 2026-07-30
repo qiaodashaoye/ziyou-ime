@@ -17,9 +17,11 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
 import android.widget.OverScroller
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import androidx.customview.widget.ExploreByTouchHelper
+import com.ziyou.ime.R
 import com.ziyou.ime.skin.SkinTheme
 import com.ziyou.ime.core.toolbar.ToolbarConfigLogic
 import com.ziyou.ime.data.ToolbarConfigRepository
@@ -34,7 +36,8 @@ import com.ziyou.ime.data.ToolbarConfigRepository
  *
  * 按钮内容与顺序由用户在设置页自定义（[ToolbarConfigRepository]），
  * 目录见 [ToolbarItem]；本视图注册 SharedPreferences 监听（观察者模式），
- * 设置页保存后无需重启输入法即时刷新。
+ * 设置页保存后无需重启输入法即时刷新。左侧固定按钮为应用 Logo，
+ * 点击打开工具面板（全量工具目录见 [ToolPanelCatalog]，设置入口已移入其中）。
  *
  * 遵循本项目「数据-皮肤-绘制」分离与 Canvas 纯绘制的既有风格
  * （见 [BaseKeyboardView] / [SimpleCandidatesView]）：按钮绘制为主题化胶囊，
@@ -42,7 +45,7 @@ import com.ziyou.ime.data.ToolbarConfigRepository
  * 携带 [KeyCode] 自定义功能码向上抛出，由 Service 的 handleSoftKeyPress 统一路由，
  * View 层不持有 Service 引用。
  *
- * 布局：设置与收起键盘为常驻固定按钮，分别钉在视图最左侧与最右侧，
+ * 布局：Logo（工具面板入口）与收起键盘为常驻固定按钮，分别钉在视图最左侧与最右侧，
  * 不参与配置与滚动；动态按钮为固定单元宽，在两个固定按钮之间的动态区内
  * 从右往左排列（首个贴收起按钮左缘）；内容总宽超出动态区宽度时支持
  * 水平拖动与 fling 惯性滚动（GestureDetector + OverScroller，
@@ -79,10 +82,11 @@ class CandidateToolbarView @JvmOverloads constructor(
         private const val HIDE_LABEL = "\u2304"
         /** 固定收起按钮的无障碍描述 */
         private const val HIDE_DESCRIPTION = "收起键盘"
-        /** 常驻固定按钮：打开设置（不入 [ToolbarItem] 目录，不参与用户自定义） */
-        private const val SETTINGS_LABEL = "设"
-        /** 固定设置按钮的无障碍描述 */
-        private const val SETTINGS_DESCRIPTION = "打开设置"
+        /** 固定 Logo 按钮（左侧，应用图标）的无障碍描述：打开工具面板
+         *  （原固定设置按钮已替换，设置入口移入工具面板，见 [ToolPanelCatalog]） */
+        private const val LOGO_DESCRIPTION = "字由工具面板"
+        /** Logo 图标在单元格内的边长占胶囊高的比例（留白后视觉与文字胶囊对齐） */
+        private const val LOGO_SIZE_RATIO = 1.15f
     }
 
     /** 当前展示的动态按钮（配置驱动，经目录清洗后永不为空；不含两个固定按钮） */
@@ -94,12 +98,12 @@ class CandidateToolbarView @JvmOverloads constructor(
      */
     private val hideIndex: Int get() = items.size
 
-    /** 固定设置按钮（左侧）的虚拟索引：紧跟在固定收起按钮之后 */
-    private val settingsIndex: Int get() = items.size + 1
+    /** 固定 Logo 按钮（左侧）的虚拟索引：紧跟在固定收起按钮之后 */
+    private val logoIndex: Int get() = items.size + 1
 
-    /** 是否为常驻固定按钮的虚拟索引（收起 / 设置） */
+    /** 是否为常驻固定按钮的虚拟索引（收起 / Logo） */
     private fun isFixedIndex(index: Int): Boolean =
-        index == hideIndex || index == settingsIndex
+        index == hideIndex || index == logoIndex
 
     /** 按钮点击回调，参数为 [KeyCode] 自定义功能码（由 Service 统一处理） */
     var onButtonClick: ((keyCode: Int) -> Unit)? = null
@@ -145,6 +149,9 @@ class CandidateToolbarView @JvmOverloads constructor(
             }
         }
     }
+
+    /** 应用 Logo 图标（左侧固定按钮，替代原「设」文字胶囊，点击打开工具面板） */
+    private val logoDrawable = ContextCompat.getDrawable(context, R.mipmap.ic_launcher)
 
     /** 当前皮肤（画笔颜色的单一来源，见 [applySkin]） */
     private var skin: SkinTheme? = null
@@ -251,8 +258,8 @@ class CandidateToolbarView @JvmOverloads constructor(
 
         override fun getVisibleVirtualViews(virtualViewIds: MutableList<Int>) {
             for (i in items.indices) virtualViewIds.add(i)
-            virtualViewIds.add(hideIndex)     // 固定收起按钮始终可见
-            virtualViewIds.add(settingsIndex) // 固定设置按钮始终可见
+            virtualViewIds.add(hideIndex) // 固定收起按钮始终可见
+            virtualViewIds.add(logoIndex) // 固定 Logo 按钮始终可见
         }
 
         override fun onPopulateNodeForVirtualView(
@@ -309,7 +316,7 @@ class CandidateToolbarView @JvmOverloads constructor(
     // ===== 配置（数据层） =====
 
     /** 读取用户配置并经目录清洗映射为动态按钮列表（未知 id 剔除、空配置回退默认；
-     *  固定设置/收起按钮不在配置内） */
+     *  固定 Logo/收起按钮不在配置内） */
     private fun loadItems(): List<ToolbarItem> {
         val ids = ToolbarConfigLogic.sanitize(
             ToolbarConfigRepository.getItemIds(context),
@@ -404,8 +411,8 @@ class CandidateToolbarView @JvmOverloads constructor(
                 canvas.restore()
             }
 
-            // 固定按钮：设置始终绘在最左侧、收起始终绘在最右侧，不随滚动移动
-            drawButton(canvas, settingsIndex, cellRect(settingsIndex), vInset, hInset, textBaseline)
+            // 固定按钮：Logo 始终绘在最左侧、收起始终绘在最右侧，不随滚动移动
+            drawButton(canvas, logoIndex, cellRect(logoIndex), vInset, hInset, textBaseline)
             drawButton(canvas, hideIndex, cellRect(hideIndex), vInset, hInset, textBaseline)
         }
 
@@ -414,7 +421,8 @@ class CandidateToolbarView @JvmOverloads constructor(
         canvas.drawRect(0f, height - dividerHeight, width.toFloat(), height.toFloat(), dividerPaint)
     }
 
-    /** 绘制单个按钮（动态与固定按钮共用：胶囊 + 文字 + 按下态变色） */
+    /** 绘制单个按钮（动态与固定按钮共用：胶囊 + 文字 + 按下态变色；
+     *  Logo 按钮为图标绘制，常态无胶囊底，按下态保留胶囊高亮反馈） */
     private fun drawButton(
         canvas: Canvas,
         index: Int,
@@ -428,6 +436,19 @@ class CandidateToolbarView @JvmOverloads constructor(
         )
         val radius = pill.height() / 2f
         val pressed = index == pressedIndex
+        if (index == logoIndex && logoDrawable != null) {
+            // Logo 按钮：按下态先铺胶囊高亮，再居中绘应用图标（图标自带配色，不随皮肤变色）
+            if (pressed) canvas.drawRoundRect(pill, radius, radius, pressedPaint)
+            val size = pill.height() * LOGO_SIZE_RATIO
+            val cx = cell.centerX()
+            val cy = height / 2f
+            logoDrawable.setBounds(
+                (cx - size / 2f).toInt(), (cy - size / 2f).toInt(),
+                (cx + size / 2f).toInt(), (cy + size / 2f).toInt()
+            )
+            logoDrawable.draw(canvas)
+            return
+        }
         // 胶囊底色：常态为柔和层次色，按下换按键按下色
         canvas.drawRoundRect(pill, radius, radius, if (pressed) pressedPaint else pillPaint)
         // 文字：按下换主题强调色，形成明确的触达反馈
@@ -475,13 +496,13 @@ class CandidateToolbarView @JvmOverloads constructor(
         return true
     }
 
-    // ===== 几何工具（固定设置按钮贴左缘 + 固定收起按钮贴右缘 +
+    // ===== 几何工具（固定 Logo 按钮贴左缘 + 固定收起按钮贴右缘 +
     //       动态按钮在二者之间从右往左排列 + 滚动偏移） =====
 
     /** 单个按钮的固定单元宽（px，已含缩放因子） */
     private fun cellWidthPx(): Float = dp2px(CELL_WIDTH_DP)
 
-    /** 动态区左缘（px）：固定设置按钮单元的右缘 */
+    /** 动态区左缘（px）：固定 Logo 按钮单元的右缘 */
     private fun dynamicLeftEdge(): Float = cellWidthPx()
 
     /** 动态区右缘（px）：固定收起按钮单元的左缘 */
@@ -502,13 +523,13 @@ class CandidateToolbarView @JvmOverloads constructor(
 
     /**
      * 第 [index] 个按钮的单元格矩形（绘制、触摸命中与无障碍节点边界共用）。
-     * [settingsIndex] 为固定设置按钮：永远贴左缘；[hideIndex] 为固定收起按钮：
+     * [logoIndex] 为固定 Logo 按钮：永远贴左缘；[hideIndex] 为固定收起按钮：
      * 永远贴右缘；二者均不随滚动移动。动态按钮从右往左排列：index 0 贴收起
      * 按钮左缘，后续依次向左；[scrollOffset] 增大时动态按钮整体右移。
      */
     private fun cellRect(index: Int): RectF {
         val cell = cellWidthPx()
-        if (index == settingsIndex) {
+        if (index == logoIndex) {
             return RectF(0f, 0f, cell, height.toFloat())
         }
         if (index == hideIndex) {
@@ -519,11 +540,11 @@ class CandidateToolbarView @JvmOverloads constructor(
     }
 
     /** 根据视图内触摸坐标查找按钮索引（已计滚动偏移；左/右固定区分别返回
-     *  [settingsIndex] / [hideIndex]），命中空白区/越界返回 -1 */
+     *  [logoIndex] / [hideIndex]），命中空白区/越界返回 -1 */
     private fun buttonIndexAt(x: Float, y: Float): Int {
         if (y < 0 || y > height || x < 0 || x >= width) return -1
-        // 固定设置按钮区：最左侧一个单元宽，不受滚动影响
-        if (x < dynamicLeftEdge()) return settingsIndex
+        // 固定 Logo 按钮区：最左侧一个单元宽，不受滚动影响
+        if (x < dynamicLeftEdge()) return logoIndex
         // 固定收起按钮区：最右侧一个单元宽，不受滚动影响
         if (x >= dynamicRightEdge()) return hideIndex
         if (items.isEmpty()) return -1
@@ -538,7 +559,7 @@ class CandidateToolbarView @JvmOverloads constructor(
         if (isFixedIndex(index)) return
         val rect = cellRect(index)
         val delta = when {
-            // 藏在左侧固定设置按钮下：内容右移
+            // 藏在左侧固定 Logo 按钮下：内容右移
             rect.left < dynamicLeftEdge() -> dynamicLeftEdge() - rect.left
             // 藏在右侧固定收起按钮下：内容左移
             rect.right > dynamicRightEdge() -> dynamicRightEdge() - rect.right
@@ -552,26 +573,26 @@ class CandidateToolbarView @JvmOverloads constructor(
         }
     }
 
-    // ===== 按钮属性查询（动态按钮取自 [items]，[hideIndex]/[settingsIndex] 为固定按钮） =====
+    // ===== 按钮属性查询（动态按钮取自 [items]，[hideIndex]/[logoIndex] 为固定按钮） =====
 
-    /** 第 [index] 个按钮的展示文本 */
+    /** 第 [index] 个按钮的展示文本（Logo 按钮为图标绘制，无文本） */
     private fun labelAt(index: Int): String = when (index) {
         hideIndex -> HIDE_LABEL
-        settingsIndex -> SETTINGS_LABEL
+        logoIndex -> ""
         else -> items[index].label
     }
 
     /** 第 [index] 个按钮的无障碍描述 */
     private fun descriptionAt(index: Int): String = when (index) {
         hideIndex -> HIDE_DESCRIPTION
-        settingsIndex -> SETTINGS_DESCRIPTION
+        logoIndex -> LOGO_DESCRIPTION
         else -> items[index].description
     }
 
     /** 第 [index] 个按钮的 [KeyCode] 功能码 */
     private fun keyCodeAt(index: Int): Int = when (index) {
         hideIndex -> KeyCode.KEYCODE_HIDE_KEYBOARD
-        settingsIndex -> KeyCode.KEYCODE_OPEN_SETTINGS
+        logoIndex -> KeyCode.KEYCODE_TOOL_PANEL
         else -> items[index].keyCode
     }
 

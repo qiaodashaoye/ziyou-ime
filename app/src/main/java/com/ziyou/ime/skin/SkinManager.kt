@@ -25,8 +25,8 @@ import java.util.concurrent.CopyOnWriteArrayList
  * - 写路径（[setSkin] / [invalidate]）：IO 线程解析 + 解码 → 主线程通知监听者，
  *   由 Service 层走既有 setInputView(buildInputView) 重建路径套用新皮肤。
  *
- * 解锁沿用等级体系：内置皮肤按展示名查 [LevelEngine] 解锁表（Light/Dark/Material
- * 原解锁等级不变），导入皮肤不在表中 → 默认 Lv.1 解锁。
+ * 解锁沿用等级体系：内置皮肤按展示名查 [LevelEngine] 解锁表（原解锁等级不变），
+ * 导入皮肤不在表中 → 默认 Lv.1 解锁。
  */
 object SkinManager {
     private const val TAG = "SkinManager"
@@ -34,14 +34,23 @@ object SkinManager {
     /** 皮肤变更监听（快照就绪 / 切换 / 自定义保存 / 深浅色变化后回调，主线程）。 */
     fun interface SkinChangeListener {
         fun onSkinChanged(skin: SkinTheme)
+
+        /** 携带变更类型的回调（默认转发单参版本，兼容既有 lambda 实现）。 */
+        fun onSkinChanged(skin: SkinTheme, kind: SkinChangeKind) = onSkinChanged(skin)
     }
 
-    @Volatile
-    private var cached: SkinTheme? = null
+    /**
+     * 皮肤变更类型：[STYLE_ONLY] = 仅样式字段（颜色/字号/圆角等）变化且
+     * 背景图/字体引用不变，消费方可对现有视图原地 applySkin；
+     * [FULL] = 需全量重建输入视图（换皮肤/背景图/字体/布局类尺寸变化）。
+     */
+    enum class SkinChangeKind { FULL, STYLE_ONLY }
 
-    /** 缓存快照对应的 (skinId, isDark, 覆盖修订号)，任一变化即失效 */
+    /** 不可变快照对：单 volatile 字段原子读写，避免 theme/key 错位配对。 */
+    private class Snapshot(val theme: SkinTheme, val key: String)
+
     @Volatile
-    private var cachedKey: String? = null
+    private var snapshot: Snapshot? = null
 
     /** 覆盖修订号：自定义保存/重置时自增，废弃旧快照 */
     @Volatile
@@ -57,12 +66,11 @@ object SkinManager {
     fun getCurrentSkin(context: Context): SkinTheme {
         val appContext = context.applicationContext
         val key = currentKey(appContext)
-        cached?.let { if (cachedKey == key) return it }
+        snapshot?.let { if (it.key == key) return it.theme }
 
         // 轻量同步构建（无背景图/字体解码），失败回退内置默认皮肤
         val theme = buildTheme(appContext, includeAssets = false)
-        cached = theme
-        cachedKey = key
+        snapshot = Snapshot(theme, key)
         val needsAssets = theme.resolved.backgroundImage != null || theme.resolved.fontFamily != null
         if (needsAssets) {
             // 后台补齐资源后经监听者触发一次视图重建（与引擎异步部署+就绪重同步同模式）
@@ -108,7 +116,7 @@ object SkinManager {
      */
     fun onSystemDarkModeChanged(context: Context) {
         val appContext = context.applicationContext
-        if (cachedKey != currentKey(appContext)) {
+        if (snapshot?.key != currentKey(appContext)) {
             rebuildAsync(appContext)
         }
     }
@@ -180,7 +188,7 @@ object SkinManager {
         )
     }
 
-    /** IO 线程完整重建快照 → 主线程更新缓存并通知监听者。 */
+    /** IO 线程完整重建快照 → 主线程更新缓存并携变更类型通知监听者。 */
     private fun rebuildAsync(context: Context) {
         val key = currentKey(context)
         scope.launch {
@@ -190,16 +198,41 @@ object SkinManager {
                     // 构建期间目标皮肤/深浅色/覆盖又变了则丢弃本次结果（后到的重建自会覆盖）
                     val nowKey = currentKey(context)
                     if (nowKey == key) {
-                        cached = theme
-                        cachedKey = nowKey
+                        val kind = changeKind(snapshot?.theme, theme)
+                        snapshot = Snapshot(theme, nowKey)
                         for (listener in listeners) {
-                            listener.onSkinChanged(theme)
+                            listener.onSkinChanged(theme, kind)
                         }
                     }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "皮肤快照重建失败: ${e.message}", e)
             }
+        }
+    }
+
+    /**
+     * 新旧快照变更类型判定（保守策略：拿不准的一律 [SkinChangeKind.FULL]）。
+     * STYLE_ONLY 条件：同一皮肤 id、背景图 Bitmap 与 Typeface 引用相同、
+     * 背景节点（图/缩放/压暗）与布局类尺寸（键高/间距/内边距）均未变。
+     * 颜色/字号/圆角/描边/风格/透明度等纯样式字段变化由视图 applySkin 原地消化。
+     */
+    internal fun changeKind(old: SkinTheme?, new: SkinTheme): SkinChangeKind {
+        if (old == null) return SkinChangeKind.FULL
+        val o = old.resolved
+        val n = new.resolved
+        val sameAssets = old.backgroundBitmap === new.backgroundBitmap &&
+            old.typeface === new.typeface
+        val sameBackground = o.backgroundImage == n.backgroundImage &&
+            o.backgroundScaleMode == n.backgroundScaleMode &&
+            o.backgroundDim == n.backgroundDim
+        val sameLayoutDims = o.keyGapDp == n.keyGapDp &&
+            o.keyboardPaddingDp == n.keyboardPaddingDp &&
+            o.keyHeightScale == n.keyHeightScale
+        return if (o.id == n.id && sameAssets && sameBackground && sameLayoutDims) {
+            SkinChangeKind.STYLE_ONLY
+        } else {
+            SkinChangeKind.FULL
         }
     }
 }

@@ -60,6 +60,12 @@
             android:exported="false"
             android:label="技能开发文档" />
 
+        <!-- AI 知识库管理（导入/删除/同步知识条目） -->
+        <activity
+            android:name=".ui.KnowledgeActivity"
+            android:exported="false"
+            android:label="AI 知识库" />
+
         <!-- 等级体系详情 -->
         <activity
             android:name=".ui.LevelActivity"

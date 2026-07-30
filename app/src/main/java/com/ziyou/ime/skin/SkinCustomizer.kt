@@ -42,13 +42,23 @@ object SkinCustomizer {
 
     /**
      * 用临时覆盖合成皮肤快照（编辑器实时预览用，**不落盘**）。
-     * 越界值由解析器钳制，无需先过校验；含背景图/字体的同步加载
-     * （编辑器场景可接受，且资源大概率已在缓存中）。
+     * 越界值由解析器钳制，无需先过校验。
+     * @param includeAssets 是否同步加载背景图/字体（缓存未命中时有 IO + 解码）；
+     *   滑杆拖动等高频调用传 false 走纯样式合成零 IO，松手后传 true 补齐资源
+     *   （规格经 SkinRepository 进程级缓存，资源大概率已在 SkinAssetCache 中）。
      */
-    fun previewWith(context: Context, skinId: String, layer: SkinLayer): SkinTheme {
+    fun previewWith(
+        context: Context,
+        skinId: String,
+        layer: SkinLayer,
+        includeAssets: Boolean = true
+    ): SkinTheme {
         val spec = SkinRepository.loadSpec(context, skinId)
         val current = SkinManager.getCurrentSkin(context)
         val resolved = SkinResolver.resolve(spec, layer, systemDark = current.isDark)
+        if (!includeAssets) {
+            return SkinTheme(resolved)
+        }
         val skinDir = SkinRepository.skinDir(context, skinId)
         return SkinTheme(
             resolved = resolved,

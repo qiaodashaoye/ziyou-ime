@@ -10,7 +10,6 @@ import android.util.AttributeSet
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
-import com.ziyou.ime.core.CompositionProto
 import com.ziyou.ime.core.skin.SkinColor
 import com.ziyou.ime.core.skin.SkinKeyStyle
 import com.ziyou.ime.skin.SkinManager
@@ -28,7 +27,7 @@ import com.ziyou.ime.skin.SkinTheme
  * - 触摸按下高亮 + 触觉反馈
  * - 与 [SkinManager] 集成的皮肤着色（[applySkin]）
  * - 统一的按键回调 [onKeyPress]、键盘切换回调 [onSwitchKeyboard]
- * - 中英文模式、preedit 编码同步
+ * - 中英文模式同步（编码 preedit 显示由候选栏承担，不在键盘视图内绘制）
  *
  * 子类需实现：
  * - [rows]：布局定义
@@ -67,7 +66,9 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
         /** 是否为功能键（不同配色） */
         val isFunctional: Boolean = false,
         /** 九宫格多字母键所承载的字母序列，如 "abc"；普通键为 null */
-        val letters: String? = null
+        val letters: String? = null,
+        /** 纵向跨行数（默认 1）。如九宫格「换行」键跨第 3~4 行 */
+        val heightSpan: Int = 1
     )
 
     // ===== 回调 =====
@@ -99,9 +100,6 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
             }
         }
 
-    /** preedit 编码文本（编码区已移至候选栏，此处保留以兼容调用方） */
-    protected var compositionText: String? = null
-
     /**
      * 全局缩放因子（悬浮模式用）。影响按键高度/间距/圆角/内边距与文字大小，
      * 按键宽度随容器自适应无需缩放。默认 1.0，停靠模式零影响。
@@ -129,7 +127,9 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
         val row: Int,
         val col: Int
     )
-    private val keyRects = mutableListOf<KeyRect>()
+    /** 按键矩形位置缓存（子类可在 recalculateKeyPositions 中追加自定义矩形，
+     *  如数字键盘左列跨 3 行的 4 个快捷符号键，绘制/触摸/长按自动复用） */
+    protected val keyRects = mutableListOf<KeyRect>()
 
     /** 当前按下的按键索引 */
     private var pressedKeyIndex: Int = -1
@@ -296,6 +296,7 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
             val totalWeight = row.sumOf { it.width.toDouble() }.toFloat()
             val totalGapWidth = (row.size - 1) * keyGap
             val unitWidth = forcedUnitWidth
+                ?: rowUnitWidth(rowIndex, availableWidth)
                 ?: (availableWidth - totalGapWidth) / totalWeight
 
             var x = keyboardPadding + rowIndent(rowIndex, unitWidth)
@@ -304,7 +305,10 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
             for (colIndex in row.indices) {
                 val key = row[colIndex]
                 val keyWidth = unitWidth * key.width
-                val rect = RectF(x, y, x + keyWidth, y + keyHeight * keyHeightMultiplier)
+                // 跨行键高度 = span 行高 + 中间 (span-1) 个行间距
+                val spannedHeight = keyHeight * keyHeightMultiplier * key.heightSpan +
+                        keyGap * (key.heightSpan - 1)
+                val rect = RectF(x, y, x + keyWidth, y + spannedHeight)
                 keyRects.add(KeyRect(key, rect, rowIndex, colIndex))
                 x += keyWidth + keyGap
             }
@@ -315,6 +319,12 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
      * 整行左侧缩进（单位：px）。默认无缩进，子类可覆写实现如 QWERTY 第二行半键缩进。
      */
     protected open fun rowIndent(rowIndex: Int, unitWidth: Float): Float = 0f
+
+    /**
+     * 指定行的按键宽度单元值（px）。返回 null 使用默认（按整行可用宽度均摊）。
+     * 子类可覆写实现如九宫格底行只占据左侧 3 列区域（右侧被跨行键占用）。
+     */
+    protected open fun rowUnitWidth(rowIndex: Int, availableWidth: Float): Float? = null
 
     // ===== 绘制 =====
 
@@ -499,22 +509,6 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
     }
 
     // ===== 对外状态同步 =====
-
-    /** 更新编码区显示（子类可覆写以格式化 preedit） */
-    open fun updateComposition(composition: CompositionProto?) {
-        compositionText = composition?.preedit
-        invalidate()
-    }
-
-    /**
-     * 以外部计算好的预览串直接更新编码区。
-     * 由 Service 层推送与候选栏编码区同源的内容（如九宫格按候选读音还原的拼音），
-     * 避免键盘视图自行格式化 preedit 导致两处编码显示不一致。
-     */
-    fun updateCompositionPreview(preview: String?) {
-        compositionText = preview
-        invalidate()
-    }
 
     /** 设置中文模式状态（保留供 Java 调用；Kotlin 侧可直接对 [isChineseMode] 赋值） */
     fun updateChineseMode(chinese: Boolean) {

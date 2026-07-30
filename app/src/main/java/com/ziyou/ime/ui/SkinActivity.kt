@@ -328,8 +328,8 @@ class SkinActivity : AppCompatActivity() {
         content.addView(previewView, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, previewHeight))
 
-        fun renderPreview() {
-            effective = SkinCustomizer.previewWith(this, skinId, layer)
+        fun renderPreview(includeAssets: Boolean = true) {
+            effective = SkinCustomizer.previewWith(this, skinId, layer, includeAssets)
             previewView.setImageBitmap(
                 SkinPreviewRenderer.render(this, effective, previewWidth, previewHeight))
         }
@@ -358,11 +358,14 @@ class SkinActivity : AppCompatActivity() {
                         val value = range.start + (range.endInclusive - range.start) * p / 100f
                         labelView.text = "$label：${format(value)}"
                         onChange(value)
-                        renderPreview()
+                        // 拖动中走纯样式合成（零 IO），避免高频回调阻塞主线程
+                        renderPreview(includeAssets = false)
                     }
 
                     override fun onStartTrackingTouch(bar: SeekBar?) {}
-                    override fun onStopTrackingTouch(bar: SeekBar?) {}
+
+                    // 松手后补齐背景图/字体完整预览
+                    override fun onStopTrackingTouch(bar: SeekBar?) = renderPreview()
                 })
             })
         }
