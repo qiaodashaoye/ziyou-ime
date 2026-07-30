@@ -10,9 +10,10 @@ import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
-import com.ziyou.ime.config.KeyboardTheme
 import com.ziyou.ime.core.CandidateProto
 import com.ziyou.ime.core.ContextProto
+import com.ziyou.ime.core.skin.SkinColor
+import com.ziyou.ime.skin.SkinTheme
 
 /**
  * 候选词视图
@@ -36,7 +37,7 @@ class SimpleCandidatesView @JvmOverloads constructor(
         /** 视图高度（dp），紧凑显示以减少垂直空间占用；
          *  对模块内开放供 [CandidateToolbarView] 计算候选区总高 */
         internal const val VIEW_HEIGHT_DP = 32
-        /** 候选词字体大小（sp） */
+        /** 候选词字体默认大小（sp，皮肤可覆盖） */
         private const val CANDIDATE_TEXT_SIZE_SP = 16f
         /** 候选词水平内边距（dp） */
         private const val CANDIDATE_PADDING_H_DP = 12
@@ -48,6 +49,9 @@ class SimpleCandidatesView @JvmOverloads constructor(
     /** 翻页回调：true=下一页, false=上一页 */
     var onPageChange: ((forward: Boolean) -> Unit)? = null
 
+    /** 当前候选词字号（sp，随皮肤更新） */
+    private var textSizeSp = CANDIDATE_TEXT_SIZE_SP
+
     /**
      * 全局缩放因子（悬浮模式用）：同步缩小视图高度与候选词字号，
      * 与键盘视图的 scaleFactor 保持一致。默认 1.0，停靠模式零影响。
@@ -56,9 +60,7 @@ class SimpleCandidatesView @JvmOverloads constructor(
         set(value) {
             if (field != value) {
                 field = value
-                candidatePaint.textSize = sp2px(CANDIDATE_TEXT_SIZE_SP)
-                highlightedCandidatePaint.textSize = sp2px(CANDIDATE_TEXT_SIZE_SP)
-                predictionPaint.textSize = sp2px(CANDIDATE_TEXT_SIZE_SP)
+                applyTextSizes()
                 minimumHeight = dp2px(VIEW_HEIGHT_DP.toFloat()).toInt()
                 recalculateLayout()
                 requestLayout()
@@ -160,16 +162,30 @@ class SimpleCandidatesView @JvmOverloads constructor(
     }
 
     /**
-     * 应用主题，与键盘视图保持视觉一致（由 Service 层调用）
+     * 应用皮肤，与键盘视图保持视觉一致（由 Service 层调用）。
+     * 配色/字号/字体均取自皮肤；背景色按皮肤整体透明度调制（背景图透出）。
      */
-    fun applyTheme(theme: KeyboardTheme) {
-        bgPaint.color = theme.candidateBackground
-        candidatePaint.color = theme.candidateTextColor
+    fun applySkin(skin: SkinTheme) {
+        bgPaint.color = SkinColor.scaleAlpha(skin.candidateBackground, skin.backgroundAlpha)
+        candidatePaint.color = skin.candidateTextColor
         // 选中项仅通过高亮字体颜色表示，不再绘制背景框
-        highlightedCandidatePaint.color = theme.candidateHighlightColor
+        highlightedCandidatePaint.color = skin.candidateHighlightColor
         // 预测词与高亮项同色但不加粗，整栏统一强调色即代表预测态
-        predictionPaint.color = theme.candidateHighlightColor
+        predictionPaint.color = skin.candidateHighlightColor
+        candidatePaint.typeface = skin.textTypeface
+        highlightedCandidatePaint.typeface = Typeface.create(skin.textTypeface, Typeface.BOLD)
+        predictionPaint.typeface = skin.textTypeface
+        textSizeSp = skin.candidateTextSizeSp
+        applyTextSizes()
+        recalculateLayout()
         invalidate()
+    }
+
+    /** 按当前字号（sp）与缩放因子同步三支候选画笔的文字大小 */
+    private fun applyTextSizes() {
+        candidatePaint.textSize = sp2px(textSizeSp)
+        highlightedCandidatePaint.textSize = sp2px(textSizeSp)
+        predictionPaint.textSize = sp2px(textSizeSp)
     }
 
     /**

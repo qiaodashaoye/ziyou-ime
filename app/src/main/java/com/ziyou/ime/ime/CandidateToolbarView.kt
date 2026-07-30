@@ -20,7 +20,7 @@ import android.widget.OverScroller
 import androidx.core.view.ViewCompat
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import androidx.customview.widget.ExploreByTouchHelper
-import com.ziyou.ime.config.KeyboardTheme
+import com.ziyou.ime.skin.SkinTheme
 import com.ziyou.ime.core.toolbar.ToolbarConfigLogic
 import com.ziyou.ime.data.ToolbarConfigRepository
 
@@ -36,9 +36,9 @@ import com.ziyou.ime.data.ToolbarConfigRepository
  * 目录见 [ToolbarItem]；本视图注册 SharedPreferences 监听（观察者模式），
  * 设置页保存后无需重启输入法即时刷新。
  *
- * 遵循本项目「数据-主题-绘制」分离与 Canvas 纯绘制的既有风格
+ * 遵循本项目「数据-皮肤-绘制」分离与 Canvas 纯绘制的既有风格
  * （见 [BaseKeyboardView] / [SimpleCandidatesView]）：按钮绘制为主题化胶囊，
- * 全部配色取自 [KeyboardTheme]，无硬编码样式。点击通过 [onButtonClick] 回调
+ * 全部配色取自 [SkinTheme]，无硬编码样式。点击通过 [onButtonClick] 回调
  * 携带 [KeyCode] 自定义功能码向上抛出，由 Service 的 handleSoftKeyPress 统一路由，
  * View 层不持有 Service 引用。
  *
@@ -146,8 +146,8 @@ class CandidateToolbarView @JvmOverloads constructor(
         }
     }
 
-    /** 当前主题（画笔颜色的单一来源，见 [applyTheme]） */
-    private var theme: KeyboardTheme? = null
+    /** 当前皮肤（画笔颜色的单一来源，见 [applySkin]） */
+    private var skin: SkinTheme? = null
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = sp2px(BUTTON_TEXT_SIZE_SP)
@@ -346,17 +346,19 @@ class CandidateToolbarView @JvmOverloads constructor(
     // ===== 主题（样式层） =====
 
     /**
-     * 应用主题，与候选词视图和键盘视图保持视觉一致（由 Service 层调用）。
-     * 全部配色派生自 [KeyboardTheme]，主题切换后整栏自动换肤。
+     * 应用皮肤，与候选词视图和键盘视图保持视觉一致（由 Service 层调用）。
+     * 全部配色派生自 [SkinTheme]，皮肤切换后整栏自动换肤。
      */
-    fun applyTheme(theme: KeyboardTheme) {
-        this.theme = theme
-        bgPaint.color = theme.candidateBackground
-        textPaint.color = theme.candidateTextColor
-        pillPaint.color = blendColor(theme.candidateBackground, theme.borderColor, PILL_BLEND_RATIO)
-        pressedPaint.color = theme.keyPressedBackground
-        pressedTextColor = theme.candidateHighlightColor
-        dividerPaint.color = theme.borderColor
+    fun applySkin(skin: SkinTheme) {
+        this.skin = skin
+        bgPaint.color = com.ziyou.ime.core.skin.SkinColor.scaleAlpha(
+            skin.candidateBackground, skin.backgroundAlpha)
+        textPaint.color = skin.candidateTextColor
+        textPaint.typeface = Typeface.create(skin.textTypeface, Typeface.BOLD)
+        pillPaint.color = blendColor(skin.candidateBackground, skin.borderColor, PILL_BLEND_RATIO)
+        pressedPaint.color = skin.keyPressedBackground
+        pressedTextColor = skin.candidateHighlightColor
+        dividerPaint.color = skin.borderColor
         invalidate()
     }
 

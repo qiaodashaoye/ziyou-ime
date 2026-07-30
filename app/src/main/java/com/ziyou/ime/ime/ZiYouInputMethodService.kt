@@ -4,6 +4,7 @@ import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.ComponentCallbacks2
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.inputmethodservice.InputMethodService
 import android.os.Build
@@ -20,7 +21,7 @@ import androidx.core.content.FileProvider
 import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.config.DisplayModeManager
 import com.ziyou.ime.config.SchemaPreference
-import com.ziyou.ime.config.ThemeManager
+import com.ziyou.ime.skin.SkinManager
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.core.RimeMessage
 import com.ziyou.ime.core.RimeNative
@@ -343,6 +344,10 @@ class ZiYouInputMethodService : InputMethodService() {
             Log.w(TAG, "注册剪贴板监听失败: ${e.message}")
         }
 
+        // 皮肤快照就绪/变更监听：背景图异步补齐、设置页切换/自定义保存后
+        // 重建输入视图套用新皮肤（与形态切换同源路径），并重同步引擎状态
+        SkinManager.addListener(skinChangeListener)
+
         // 监听Rime消息（方案切换、选项变更等）
         serviceScope.launch {
             rime.messageFlow.collectLatest { message ->
@@ -400,7 +405,7 @@ class ZiYouInputMethodService : InputMethodService() {
         aiPanels.close()
         doodlePanels.close()
         clipboardPanels.close()
-        val theme = ThemeManager.getCurrentTheme(this)
+        val skin = SkinManager.getCurrentSkin(this)
         // 悬浮形态下键盘/候选/编码区统一缩放，停靠形态保持 1.0 零影响
         val scale = if (mode == DisplayMode.FLOATING) DisplayModeManager.FLOATING_SCALE else 1f
 
@@ -412,6 +417,9 @@ class ZiYouInputMethodService : InputMethodService() {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
+            // 皮肤背景图统一设在根容器（含压暗遮罩），各子视图不感知背景图；
+            // 无背景图时保持透明，由各视图自绘纯色背景（与迁移前一致）
+            background = skin.createBackgroundDrawable()
         }
         contentLayout = root
 
@@ -431,7 +439,7 @@ class ZiYouInputMethodService : InputMethodService() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
             scaleFactor = scale
-            applyTheme(theme)
+            applySkin(skin)
         }
 
         candidatesView = SimpleCandidatesView(this).apply {
@@ -442,7 +450,7 @@ class ZiYouInputMethodService : InputMethodService() {
             scaleFactor = scale
             onCandidateClick = { index -> handleCandidateClick(index) }
             onPageChange = { forward -> handlePageChange(forward) }
-            applyTheme(theme)
+            applySkin(skin)
         }
 
         // 编码区 + 候选词列表垂直堆叠，作为一个整体与按钮栏叠放
@@ -465,7 +473,7 @@ class ZiYouInputMethodService : InputMethodService() {
             )
             scaleFactor = scale
             onButtonClick = { keyCode -> handleSoftKeyPress(keyCode, 0) }
-            applyTheme(theme)
+            applySkin(skin)
         }
 
         val candidatesStack = FrameLayout(this).apply {
@@ -494,7 +502,7 @@ class ZiYouInputMethodService : InputMethodService() {
         installKeyboard(currentKeyboardType)
 
         // 悬浮形态：内容包裹进悬浮面板容器（拖拽/位置持久化/停靠按钮，委托控制器）
-        return displayModeCtrl.wrapContent(root, mode, theme)
+        return displayModeCtrl.wrapContent(root, mode, skin)
     }
 
     // ===== 显示形态（停靠 / 悬浮，委托 DisplayModeController）=====
@@ -511,6 +519,15 @@ class ZiYouInputMethodService : InputMethodService() {
      * 悬浮形态必须禁用，停靠形态禁用后横屏也能看到原应用界面（体验修复）。
      */
     override fun onEvaluateFullscreenMode(): Boolean = false
+
+    /**
+     * 系统配置变化（含深浅色切换）：通知皮肤管理器，
+     * darkMode=both 的皮肤据此重建快照并经 [skinChangeListener] 换肤。
+     */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        SkinManager.onSystemDarkModeChanged(this)
+    }
 
     // ===== 键盘布局管理 =====
 
@@ -944,9 +961,9 @@ class ZiYouInputMethodService : InputMethodService() {
                 openSettings()
             }
 
-            // 循环切换主题（候选区按钮栏）：在已解锁主题间依次切换
+            // 循环切换皮肤（候选区按钮栏）：在已解锁皮肤间依次切换
             KeyCode.KEYCODE_SWITCH_THEME -> {
-                cycleTheme()
+                cycleSkin()
             }
 
             // 循环切换全键盘输入方案（候选区按钮栏）：仅允许自选方案的布局生效
@@ -1060,11 +1077,11 @@ class ZiYouInputMethodService : InputMethodService() {
             return
         }
         Toast.makeText(this, "正在生成图片…", Toast.LENGTH_SHORT).show()
-        val theme = ThemeManager.getCurrentTheme(this)
+        val skin = SkinManager.getCurrentSkin(this)
         serviceScope.launch {
             try {
                 val file = withContext(Dispatchers.Default) {
-                    TextImageRenderer.renderToPng(applicationContext, content, theme)
+                    TextImageRenderer.renderToPng(applicationContext, content, skin)
                 }
                 val uri = FileProvider.getUriForFile(
                     this@ZiYouInputMethodService, "$packageName.imecontent", file)
@@ -1091,11 +1108,11 @@ class ZiYouInputMethodService : InputMethodService() {
             return
         }
         Toast.makeText(this, "正在生成图片…", Toast.LENGTH_SHORT).show()
-        val theme = ThemeManager.getCurrentTheme(this)
+        val skin = SkinManager.getCurrentSkin(this)
         serviceScope.launch {
             try {
                 val file = withContext(Dispatchers.Default) {
-                    TextImageRenderer.renderToPng(applicationContext, content, theme)
+                    TextImageRenderer.renderToPng(applicationContext, content, skin)
                 }
                 val ok = withContext(Dispatchers.IO) {
                     GalleryImageSaver.savePng(applicationContext, file.readBytes(), "ziyou_ai")
@@ -1232,22 +1249,32 @@ class ZiYouInputMethodService : InputMethodService() {
     }
 
     /**
-     * 在已解锁主题间循环切换（候选区按钮栏入口）。
-     * 切换后重建输入视图套用新主题（与形态切换同源路径），
-     * 并重同步引擎状态到新视图；引擎编码/方案不受影响。
+     * 在已解锁皮肤间循环切换（候选区按钮栏入口）。
+     * setSkin 成功后皮肤快照在 IO 线程重建，就绪后经 [skinChangeListener]
+     * 重建输入视图套用新皮肤并重同步引擎状态；引擎编码/方案不受影响。
      */
-    private fun cycleTheme() {
-        val unlocked = ThemeManager.getUnlockedThemeNames(this)
+    private fun cycleSkin() {
+        val unlocked = SkinManager.getUnlockedSkinIds(this)
         if (unlocked.size < 2) {
-            Toast.makeText(this, "暂无其他已解锁主题", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "暂无其他已解锁皮肤", Toast.LENGTH_SHORT).show()
             return
         }
-        val current = ThemeManager.getCurrentThemeName(this)
+        val current = SkinManager.getCurrentSkinId(this)
         val next = unlocked[(unlocked.indexOf(current) + 1) % unlocked.size]
-        if (!ThemeManager.setTheme(this, next)) return
-        keyboardView?.resetInputState()
-        setInputView(buildInputView(displayModeCtrl.currentMode))
-        scheduleEngineSync()
+        SkinManager.setSkin(this, next)
+    }
+
+    /**
+     * 皮肤快照就绪/变更回调（主线程）：重建输入视图套用新皮肤
+     * （与形态切换同源路径），并重同步引擎状态到新视图。
+     * 输入视图尚未创建时跳过（onCreateInputView 自会取最新快照）。
+     */
+    private val skinChangeListener = SkinManager.SkinChangeListener {
+        if (contentLayout != null) {
+            keyboardView?.resetInputState()
+            setInputView(buildInputView(displayModeCtrl.currentMode))
+            scheduleEngineSync()
+        }
     }
 
     /**
@@ -1388,6 +1415,8 @@ class ZiYouInputMethodService : InputMethodService() {
 
     override fun onDestroy() {
         Log.i(TAG, "InputMethodService onDestroy")
+        // 注销皮肤变更监听（与 onCreate 注册对称）
+        SkinManager.removeListener(skinChangeListener)
         // 注销剪贴板监听（与 onCreate 注册对称）
         try {
             getSystemService(ClipboardManager::class.java)

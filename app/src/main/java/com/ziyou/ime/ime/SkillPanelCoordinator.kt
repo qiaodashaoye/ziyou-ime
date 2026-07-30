@@ -9,8 +9,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.annotation.MainThread
-import com.ziyou.ime.config.ThemeManager
 import com.ziyou.ime.core.skill.SkillPanelSpec
+import com.ziyou.ime.skin.SkinManager
 import java.io.File
 
 /**
@@ -98,7 +98,7 @@ class SkillPanelCoordinator(
         }
         val container = host.keyboardContainer() ?: return
         host.onPanelWillOpen()
-        val newPanel = SkillPanelContainer(service, ThemeManager.getCurrentTheme(service), panelHost)
+        val newPanel = SkillPanelContainer(service, SkinManager.getCurrentSkin(service), panelHost)
         // 初始挂载：键盘叠层（技能列表阶段覆盖键盘区域）
         container.addView(newPanel, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))

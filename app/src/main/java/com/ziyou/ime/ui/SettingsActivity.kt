@@ -17,7 +17,7 @@ import com.ziyou.ime.ai.PersonaRepository
 import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.config.DisplayModeManager
 import com.ziyou.ime.config.SchemaPreference
-import com.ziyou.ime.config.ThemeManager
+import com.ziyou.ime.skin.SkinManager
 import com.ziyou.ime.di.AppContainer
 import com.ziyou.ime.data.AssociationManager
 import com.ziyou.ime.data.SideSymbol
@@ -37,7 +37,7 @@ import kotlinx.coroutines.withContext
  * 字由输入法 设置页面
  * 提供以下功能：
  * - 输入方案选择（列表展示可用schema）
- * - 主题切换（Light/Dark/Material三选一）
+ * - 皮肤管理（内置/导入皮肤、自定义外观，见 SkinActivity）
  * - 同步用户词典
  * - 关于信息（版本号等）
  * - 跳转系统输入法设置
@@ -145,13 +145,13 @@ class SettingsActivity : AppCompatActivity() {
         rootLayout.addView(schemaItem)
         rootLayout.addView(createDivider())
 
-        // ===== 主题设置 =====
+        // ===== 皮肤设置 =====
         rootLayout.addView(createSectionHeader("外观"))
         val themeItem = createSettingItemWithValue(
-            title = "键盘主题",
+            title = "键盘皮肤",
             valueHolder = { themeValueText = it }
         )
-        themeItem.setOnClickListener { showThemeSelector() }
+        themeItem.setOnClickListener { openSkinManager() }
         rootLayout.addView(themeItem)
         rootLayout.addView(createSettingItem(
             title = "自定义功能栏",
@@ -336,24 +336,9 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun showThemeSelector() {
-        val themeNames = ThemeManager.getAllThemeNames().toTypedArray()
-        val displayNames = arrayOf("Light（浅色）", "Dark（深色）", "Material（蓝色调）")
-        val currentTheme = ThemeManager.getCurrentThemeName(this)
-        val currentIndex = themeNames.indexOf(currentTheme)
-
-        AlertDialog.Builder(this)
-            .setTitle("选择键盘主题")
-            .setSingleChoiceItems(displayNames, currentIndex) { dialog, which ->
-                val selectedTheme = themeNames[which]
-                ThemeManager.setTheme(this, selectedTheme)
-                themeValueText.text = displayNames[which]
-                Log.i(TAG, "切换主题: $selectedTheme")
-                showToast("主题已切换为: ${displayNames[which]}")
-                dialog.dismiss()
-            }
-            .setNegativeButton("取消", null)
-            .show()
+    /** 打开皮肤管理页（预览/切换/导入/自定义）。 */
+    private fun openSkinManager() {
+        startActivity(Intent(this, SkinActivity::class.java))
     }
 
     // ===== 功能栏定制 =====
@@ -918,13 +903,10 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         if (::themeValueText.isInitialized) {
-            val themeName = ThemeManager.getCurrentThemeName(this)
-            themeValueText.text = when (themeName) {
-                ThemeManager.THEME_LIGHT -> "Light（浅色）"
-                ThemeManager.THEME_DARK -> "Dark（深色）"
-                ThemeManager.THEME_MATERIAL -> "Material（蓝色调）"
-                else -> themeName
-            }
+            // 展示当前皮肤名（含自定义标记）
+            val skin = SkinManager.getCurrentSkin(this)
+            val customized = com.ziyou.ime.skin.SkinCustomizer.hasOverride(this, skin.id)
+            themeValueText.text = if (customized) "${skin.name}（已自定义）" else skin.name
         }
 
         if (::levelValueText.isInitialized) {

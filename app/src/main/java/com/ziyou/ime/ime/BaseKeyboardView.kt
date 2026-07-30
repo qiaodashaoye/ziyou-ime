@@ -10,21 +10,23 @@ import android.util.AttributeSet
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
-import com.ziyou.ime.config.KeyboardTheme
-import com.ziyou.ime.config.ThemeManager
 import com.ziyou.ime.core.CompositionProto
+import com.ziyou.ime.core.skin.SkinColor
+import com.ziyou.ime.core.skin.SkinKeyStyle
+import com.ziyou.ime.skin.SkinManager
+import com.ziyou.ime.skin.SkinTheme
 
 /**
  * 键盘视图基类
  *
  * 抽象出所有键盘布局共用的能力，使新增键盘类型（全键盘、九宫格、符号、手写等）
- * 只需继承本类并提供布局与按键处理，而无需重复实现绘制 / 触摸 / 主题逻辑。
+ * 只需继承本类并提供布局与按键处理，而无需重复实现绘制 / 触摸 / 皮肤逻辑。
  *
  * 共用能力：
  * - 基于「行 × 相对宽度」的布局模型（[rows]）与自动尺寸计算
- * - Canvas 绘制（背景、圆角、阴影、文字）
+ * - Canvas 绘制（背景、圆角、阴影、文字，圆角/间距/阴影/字体均由皮肤参数化）
  * - 触摸按下高亮 + 触觉反馈
- * - 与 [ThemeManager] 集成的主题着色（[applyTheme]）
+ * - 与 [SkinManager] 集成的皮肤着色（[applySkin]）
  * - 统一的按键回调 [onKeyPress]、键盘切换回调 [onSwitchKeyboard]
  * - 中英文模式、preedit 编码同步
  *
@@ -43,18 +45,8 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
 ) : View(context, attrs, defStyleAttr) {
 
     companion object {
-        /** 按键高度（dp） */
+        /** 按键基准高度（dp，皮肤 keyHeightScale 乘在其上） */
         private const val KEY_HEIGHT_DP = 48
-        /** 按键间距（dp） */
-        private const val KEY_GAP_DP = 3
-        /** 按键圆角（dp） */
-        private const val KEY_RADIUS_DP = 5f
-        /** 普通按键文字大小（sp） */
-        private const val KEY_TEXT_SIZE_SP = 18f
-        /** 功能键文字大小（sp） */
-        private const val FUNC_TEXT_SIZE_SP = 12f
-        /** 键盘内边距（dp） */
-        private const val KEYBOARD_PADDING_DP = 3
         /** 长按触发连续重复前的初始延迟（ms） */
         private const val REPEAT_START_DELAY_MS = 400L
         /** 连续重复的触发间隔（ms） */
@@ -124,8 +116,8 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
             }
         }
 
-    /** 当前主题（默认取用户已保存的主题） */
-    protected var theme: KeyboardTheme = ThemeManager.getCurrentTheme(context)
+    /** 当前皮肤快照（默认取用户当前皮肤，缓存命中 O(1)） */
+    protected var skin: SkinTheme = SkinManager.getCurrentSkin(context)
 
     // ===== 布局定义（由子类提供） =====
     protected abstract val rows: List<List<Key>>
@@ -172,19 +164,22 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
         removeCallbacks(keyRepeatRunnable)
     }
 
-    // ===== 画笔（随主题重建） =====
+    // ===== 画笔（随皮肤重建）=====
     protected val keyBgPaint = fillPaint()
     protected val funcKeyBgPaint = fillPaint()
     protected val pressedKeyBgPaint = fillPaint()
     protected val accentBgPaint = fillPaint()
     protected val boardBgPaint = Paint().apply { style = Paint.Style.FILL }
     protected val keyShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#22000000")
         style = Paint.Style.FILL
     }
-    protected val keyTextPaint = textPaint(KEY_TEXT_SIZE_SP, Typeface.DEFAULT)
-    protected val funcTextPaint = textPaint(FUNC_TEXT_SIZE_SP, Typeface.DEFAULT)
-    protected val accentTextPaint = textPaint(FUNC_TEXT_SIZE_SP, Typeface.DEFAULT_BOLD)
+    /** 按键描边画笔（OUTLINE 风格 / keyBorderWidthDp > 0 时使用） */
+    protected val keyBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+    }
+    protected val keyTextPaint = textPaint(skin.keyTextSizeSp, Typeface.DEFAULT)
+    protected val funcTextPaint = textPaint(skin.funcTextSizeSp, Typeface.DEFAULT)
+    protected val accentTextPaint = textPaint(skin.funcTextSizeSp, Typeface.DEFAULT_BOLD)
 
     // ===== 尺寸缓存 =====
     protected var keyHeight = 0f
@@ -203,54 +198,75 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
     var forcedUnitWidth: Float? = null
 
     init {
-        keyHeight = dp2px(KEY_HEIGHT_DP.toFloat())
-        keyGap = dp2px(KEY_GAP_DP.toFloat())
-        keyRadius = dp2px(KEY_RADIUS_DP)
-        keyboardPadding = dp2px(KEYBOARD_PADDING_DP.toFloat())
+        refreshDimensions()
         isHapticFeedbackEnabled = true
         rebuildPaints()
     }
 
-    // ===== 缩放 =====
+    // ===== 尺寸 / 缩放 =====
 
-    /** 按当前 [scaleFactor] 重算尺寸缓存与文字画笔（dp2px/sp2px 已含因子） */
+    /**
+     * 按当前皮肤与 [scaleFactor] 重算尺寸缓存与文字画笔大小
+     * （dp2px/sp2px 已含缩放因子，皮肤尺寸为 dp/sp 语义 → 悬浮缩放自动生效）
+     */
+    private fun refreshDimensions() {
+        keyHeight = dp2px(KEY_HEIGHT_DP.toFloat()) * skin.keyHeightScale
+        keyGap = dp2px(skin.keyGapDp)
+        keyRadius = dp2px(skin.keyCornerRadiusDp)
+        keyboardPadding = dp2px(skin.keyboardPaddingDp)
+        keyTextPaint.textSize = sp2px(skin.keyTextSizeSp)
+        funcTextPaint.textSize = sp2px(skin.funcTextSizeSp)
+        accentTextPaint.textSize = sp2px(skin.funcTextSizeSp)
+    }
+
+    /** 按当前 [scaleFactor] 重算尺寸缓存与文字画笔 */
     private fun applyScale() {
-        keyHeight = dp2px(KEY_HEIGHT_DP.toFloat())
-        keyGap = dp2px(KEY_GAP_DP.toFloat())
-        keyRadius = dp2px(KEY_RADIUS_DP)
-        keyboardPadding = dp2px(KEYBOARD_PADDING_DP.toFloat())
-        keyTextPaint.textSize = sp2px(KEY_TEXT_SIZE_SP)
-        funcTextPaint.textSize = sp2px(FUNC_TEXT_SIZE_SP)
-        accentTextPaint.textSize = sp2px(FUNC_TEXT_SIZE_SP)
+        refreshDimensions()
         onScaleChanged()
     }
 
     /** 缩放因子变更回调：子类在此同步自有画笔（如九宫格数字/字母画笔）的文字大小 */
     protected open fun onScaleChanged() {}
 
-    // ===== 主题 =====
+    // ===== 皮肤 =====
 
     /**
-     * 应用主题并刷新（由 Service 层在创建 / 切换主题时调用）
+     * 应用皮肤并刷新（由 Service 层在创建 / 切换皮肤时调用）。
+     * 皮肤可能改变尺寸（圆角/间距/键高/字号），故同步重算布局。
      */
-    open fun applyTheme(newTheme: KeyboardTheme) {
-        theme = newTheme
+    open fun applySkin(newSkin: SkinTheme) {
+        skin = newSkin
+        refreshDimensions()
         rebuildPaints()
+        recalculateKeyPositions()
+        requestLayout()
         invalidate()
     }
 
-    /** 根据当前主题重建画笔颜色 */
+    /** 根据当前皮肤重建画笔颜色与字体（全部派生计算已前置到解析期） */
     protected open fun rebuildPaints() {
-        boardBgPaint.color = theme.keyboardBackground
-        keyBgPaint.color = theme.keyBackground
-        pressedKeyBgPaint.color = theme.keyPressedBackground
-        // 功能键：在按键色与边框色之间取中间值，形成层次
-        funcKeyBgPaint.color = blendColor(theme.keyBackground, theme.borderColor, 0.55f)
-        accentBgPaint.color = theme.candidateHighlightColor
-        keyTextPaint.color = theme.keyTextColor
-        funcTextPaint.color = theme.keyTextColor
+        // 键面类颜色按皮肤整体透明度调制（背景图透出 / 游戏悬浮半透明场景）
+        boardBgPaint.color = skinAlpha(skin.keyboardBackground)
+        keyBgPaint.color = skinAlpha(skin.keyBackground)
+        pressedKeyBgPaint.color = skinAlpha(skin.keyPressedBackground)
+        funcKeyBgPaint.color = skinAlpha(skin.funcKeyBackground)
+        accentBgPaint.color = skin.candidateHighlightColor
+        keyShadowPaint.color = skin.keyShadowColor
+        keyBorderPaint.color = skin.borderColor
+        // OUTLINE 风格未声明描边宽时默认 1dp，保证键面可见
+        keyBorderPaint.strokeWidth =
+            dp2px(if (skin.keyBorderWidthDp > 0f) skin.keyBorderWidthDp else 1f)
+        keyTextPaint.color = skin.keyTextColor
+        keyTextPaint.typeface = skin.keyTypeface
+        funcTextPaint.color = skin.keyTextColor
+        funcTextPaint.typeface = skin.textTypeface
         accentTextPaint.color = Color.WHITE
+        accentTextPaint.typeface = Typeface.create(skin.textTypeface, Typeface.BOLD)
     }
+
+    /** 键面类颜色按皮肤整体透明度调制（1.0 = 原色，零开销） */
+    protected fun skinAlpha(color: Int): Int =
+        if (skin.backgroundAlpha >= 1f) color else SkinColor.scaleAlpha(color, skin.backgroundAlpha)
 
     // ===== 布局测量 =====
 
@@ -310,17 +326,38 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
         }
     }
 
-    /** 绘制单个按键（背景 + 阴影 + 内容） */
+    /** 绘制单个按键（按皮肤 keyStyle 分支：填充 / 描边 / 无键面） */
     private fun drawKey(canvas: Canvas, keyRect: KeyRect, isPressed: Boolean) {
         val rect = keyRect.rect
 
-        // 阴影（向下偏移 1dp）
-        val shadowOffset = dp2px(1f)
-        val shadowRect = RectF(rect.left, rect.top + shadowOffset, rect.right, rect.bottom + shadowOffset)
-        canvas.drawRoundRect(shadowRect, keyRadius, keyRadius, keyShadowPaint)
-
-        // 背景
-        canvas.drawRoundRect(rect, keyRadius, keyRadius, backgroundPaintFor(keyRect.key, isPressed))
+        when (skin.keyStyle) {
+            SkinKeyStyle.FILLED -> {
+                // 阴影（皮肤可关闭；dx/dy 为 dp 语义，默认向下偏移 1dp 与迁移前一致）
+                val shadow = skin.keyShadow
+                if (shadow != null) {
+                    val shadowRect = RectF(rect)
+                    shadowRect.offset(dp2px(shadow.dxDp), dp2px(shadow.dyDp))
+                    canvas.drawRoundRect(shadowRect, keyRadius, keyRadius, keyShadowPaint)
+                }
+                canvas.drawRoundRect(rect, keyRadius, keyRadius, backgroundPaintFor(keyRect.key, isPressed))
+                if (skin.keyBorderWidthDp > 0f) {
+                    canvas.drawRoundRect(rect, keyRadius, keyRadius, keyBorderPaint)
+                }
+            }
+            SkinKeyStyle.OUTLINE -> {
+                // 描边风格：无填充无阴影，按下态仍绘高亮底
+                if (isPressed) {
+                    canvas.drawRoundRect(rect, keyRadius, keyRadius, pressedKeyBgPaint)
+                }
+                canvas.drawRoundRect(rect, keyRadius, keyRadius, keyBorderPaint)
+            }
+            SkinKeyStyle.FLAT -> {
+                // 无键面风格（Gboard 无边框）：仅按下态绘高亮底
+                if (isPressed) {
+                    canvas.drawRoundRect(rect, keyRadius, keyRadius, pressedKeyBgPaint)
+                }
+            }
+        }
 
         // 内容
         drawKeyContent(canvas, keyRect, isPressed)
@@ -502,13 +539,5 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
         textSize = sp2px(sizeSp)
         textAlign = Paint.Align.CENTER
         typeface = tf
-    }
-
-    /** 按比例混合两种颜色（ratio 越大越偏向 color2） */
-    private fun blendColor(color1: Int, color2: Int, ratio: Float): Int {
-        val r = (Color.red(color1) * (1 - ratio) + Color.red(color2) * ratio).toInt()
-        val g = (Color.green(color1) * (1 - ratio) + Color.green(color2) * ratio).toInt()
-        val b = (Color.blue(color1) * (1 - ratio) + Color.blue(color2) * ratio).toInt()
-        return Color.rgb(r, g, b)
     }
 }

@@ -7,7 +7,7 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.annotation.MainThread
-import com.ziyou.ime.config.ThemeManager
+import com.ziyou.ime.skin.SkinManager
 import com.ziyou.ime.ui.SettingsActivity
 
 /**
@@ -80,7 +80,7 @@ class AiPanelCoordinator(
         if (panel != null) return
         val content = host.contentLayout() ?: return
         host.onPanelWillOpen()
-        val newPanel = AiPanelView(service, ThemeManager.getCurrentTheme(service), panelHost)
+        val newPanel = AiPanelView(service, SkinManager.getCurrentSkin(service), panelHost)
         // 索引 0 = 整个输入视图最顶部（编码区之上），提问态紧凑高度
         content.addView(newPanel, 0, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))

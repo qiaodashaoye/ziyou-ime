@@ -11,7 +11,7 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import com.ziyou.ime.config.KeyboardTheme
+import com.ziyou.ime.skin.SkinTheme
 
 /**
  * 涂鸦画板面板：内部结构为「工具栏 + 画布区 + 操作栏」（无独立标题栏，
@@ -27,14 +27,14 @@ import com.ziyou.ime.config.KeyboardTheme
  * 可收图时为「发送」（commitContent 直发），否则为「保存」（存入系统相册）。
  * 画布支持**双指拖拽平移**浏览的无限画布
  * （单指绘制、双指平移，见 [DoodleCanvasView]），空画布时发送置灰不可点。
- * 配色全部映射自当前 [KeyboardTheme]，与 [AiPanelView] 同一视觉语言；
+ * 配色全部映射自当前 [SkinTheme]，与 [AiPanelView] 同一视觉语言；
  * 画布纸面固定白底（导出图在深色主题下依然清晰）。
  * 面板整体 clickable，阻断触摸穿透到下层视图。
  */
 @SuppressLint("ViewConstructor")
 class DoodlePanelView(
     context: Context,
-    private val theme: KeyboardTheme,
+    private val theme: SkinTheme,
     private val host: Host
 ) : LinearLayout(context) {
 

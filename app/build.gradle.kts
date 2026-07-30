@@ -152,6 +152,8 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.mockk)
+    // 皮肤 skin.json 解码/皮肤包校验测试需真实 org.json（优先于 android.jar 桩）
+    testImplementation(libs.json)
 
     // ===== 仪器化测试 =====
     androidTestImplementation(platform(libs.androidx.compose.bom))

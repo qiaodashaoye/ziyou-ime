@@ -12,7 +12,7 @@ import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
 import android.view.MotionEvent
 import android.view.View
-import com.ziyou.ime.config.KeyboardTheme
+import com.ziyou.ime.skin.SkinTheme
 
 /**
  * 自由涂鸦画布（画布键盘核心视图）—— 支持双指拖拽平移的无限画布。
@@ -41,7 +41,7 @@ import com.ziyou.ime.config.KeyboardTheme
 @SuppressLint("ViewConstructor")
 class DoodleCanvasView(
     context: Context,
-    private val theme: KeyboardTheme
+    private val theme: SkinTheme
 ) : View(context) {
 
     companion object {

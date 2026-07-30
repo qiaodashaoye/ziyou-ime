@@ -11,9 +11,9 @@ import android.view.GestureDetector
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
-import com.ziyou.ime.config.KeyboardTheme
-import com.ziyou.ime.config.ThemeManager
 import com.ziyou.ime.data.SideSymbol
+import com.ziyou.ime.skin.SkinManager
+import com.ziyou.ime.skin.SkinTheme
 
 /**
  * 九宫格拼音侧栏视图（键盘左侧竖排）。
@@ -72,7 +72,7 @@ class PinyinSideBarView @JvmOverloads constructor(
     /** 符号模式下展示的自定义符号 */
     private var sideSymbols: List<SideSymbol> = emptyList()
 
-    private var theme: KeyboardTheme = ThemeManager.getCurrentTheme(context)
+    private var skin: SkinTheme = SkinManager.getCurrentSkin(context)
 
     /** 每个可点击单元的矩形（含末尾「＋」页脚），绘制与命中检测共用 */
     private val itemRects = mutableListOf<RectF>()
@@ -129,20 +129,21 @@ class PinyinSideBarView @JvmOverloads constructor(
         addPaint.textSize = sp2px(TEXT_SIZE_SP + 4f)
     }
 
-    // ===== 主题 =====
+    // ===== 皮肤 =====
 
-    /** 应用主题（由 Service 层在创建 / 切换主题时调用），与键盘视觉保持一致 */
-    fun applyTheme(newTheme: KeyboardTheme) {
-        theme = newTheme
+    /** 应用皮肤（由 Service 层在创建 / 切换皮肤时调用），与键盘视觉保持一致 */
+    fun applySkin(newSkin: SkinTheme) {
+        skin = newSkin
         rebuildPaints()
         invalidate()
     }
 
     private fun rebuildPaints() {
-        boardBgPaint.color = theme.keyboardBackground
-        itemBgPaint.color = theme.keyBackground
-        textPaint.color = theme.keyTextColor
-        addPaint.color = theme.candidateHighlightColor
+        boardBgPaint.color = skin.keyboardBackground
+        itemBgPaint.color = skin.keyBackground
+        textPaint.color = skin.keyTextColor
+        textPaint.typeface = skin.textTypeface
+        addPaint.color = skin.candidateHighlightColor
     }
 
     // ===== 数据更新 =====

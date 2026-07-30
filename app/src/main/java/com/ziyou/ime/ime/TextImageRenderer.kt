@@ -8,7 +8,7 @@ import android.text.Layout
 import android.text.SpannableStringBuilder
 import android.text.StaticLayout
 import android.text.TextPaint
-import com.ziyou.ime.config.KeyboardTheme
+import com.ziyou.ime.skin.SkinTheme
 import java.io.File
 
 /**
@@ -16,7 +16,7 @@ import java.io.File
  *
  * 将富文本内容（支持 Spanned，如 [com.ziyou.ime.ai.MarkdownRenderer] 的解析结果，
  * 粗体/列表/代码块样式随 Span 一并绘制）渲染为固定宽度的 PNG 卡片：
- * 顶部主题强调色条 + 正文 + 分隔线 + 品牌页脚，配色全部取自当前 [KeyboardTheme]，
+ * 顶部主题强调色条 + 正文 + 分隔线 + 品牌页脚，配色全部取自当前 [SkinTheme]，
  * 与键盘视觉一致。输出写入 cache 下 [ImeImageCache.CACHE_DIR_NAME] 目录
  * （FileProvider 已暴露该目录，可直接经 commitContent 提交）。
  *
@@ -47,7 +47,7 @@ object TextImageRenderer {
      * @param theme 当前键盘主题（背景/文字/强调色取色来源）
      * @return 生成的 PNG 文件（位于 FileProvider 已暴露的缓存子目录）
      */
-    fun renderToPng(context: Context, content: CharSequence, theme: KeyboardTheme): File {
+    fun renderToPng(context: Context, content: CharSequence, theme: SkinTheme): File {
         val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = theme.keyTextColor
             textSize = TEXT_SIZE

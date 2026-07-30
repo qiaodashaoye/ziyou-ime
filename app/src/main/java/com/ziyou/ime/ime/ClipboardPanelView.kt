@@ -10,7 +10,7 @@ import android.view.View
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import com.ziyou.ime.config.KeyboardTheme
+import com.ziyou.ime.skin.SkinTheme
 import com.ziyou.ime.core.clipboard.ClipboardEntry
 import com.ziyou.ime.core.clipboard.ClipboardHistoryLogic
 
@@ -26,13 +26,13 @@ import com.ziyou.ime.core.clipboard.ClipboardHistoryLogic
  * 列表区：ScrollView 纵向滚动（容量上限 10 条，无需 RecyclerView），
  * 每行 = 文本（最多两行省略）+ 相对时间 + 删除 ✕；空态显示占位文案。
  *
- * 配色全部映射自当前 [KeyboardTheme]，与 [DoodlePanelView] 同一视觉语言；
+ * 配色全部映射自当前 [SkinTheme]，与 [DoodlePanelView] 同一视觉语言；
  * 面板整体 clickable，阻断触摸穿透到下层视图。
  */
 @SuppressLint("ViewConstructor")
 class ClipboardPanelView(
     context: Context,
-    private val theme: KeyboardTheme,
+    private val theme: SkinTheme,
     private val host: Host
 ) : LinearLayout(context) {
 

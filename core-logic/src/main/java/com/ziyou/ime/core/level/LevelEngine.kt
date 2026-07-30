@@ -16,8 +16,8 @@ object LevelEngine {
     /** MVP 阶段的等级上限（1–10 级）。 */
     const val MAX_LEVEL = 10
 
-    // 主题名（与 com.ziyou.ime.config.ThemeManager 的常量保持一致）。
-    // 此处以字面量声明，避免纯逻辑模块反向依赖 Android 配置层（ThemeManager）。
+    // 皮肤名（与 com.ziyou.ime.core.skin.SkinDefaults 内置皮肤的 meta.name 保持一致）。
+    // 此处以字面量声明，避免等级域与皮肤域产生编译期耦合。
     private const val THEME_LIGHT = "Light"
     private const val THEME_DARK = "Dark"
     private const val THEME_MATERIAL = "Material"
@@ -159,6 +159,9 @@ object LevelEngine {
         val required = THEME_UNLOCK_LEVEL[themeName] ?: 1
         return level >= required
     }
+
+    /** 指定皮肤的解锁所需等级（未在表中的皮肤为 Lv.1），供皮肤管理页展示角标。 */
+    fun themeUnlockLevel(themeName: String): Int = THEME_UNLOCK_LEVEL[themeName] ?: 1
 
     /** 当前等级下已解锁的皮肤名称集合。 */
     fun unlockedThemes(level: Int): List<String> =

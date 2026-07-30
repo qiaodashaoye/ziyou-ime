@@ -1,0 +1,56 @@
+{
+  "specVersion": 1,
+
+  "meta": {
+    "id": "com.ziyou.cloudcream",
+    "name": "云朵奶油",
+    "author": "ziyou",
+    "version": "1.0.0",
+    "minSpecVersion": 1,
+    "darkMode": "light"
+  },
+
+  "colors": {
+    "light": {
+      "keyboardBackground":      "#E3E5F1",
+      "keyBackground":           "#FFFFFF",
+      "keyTextColor":            "#26262B",
+      "keyPressedBackground":    "#E9EAF3",
+      "funcKeyBackground":       "#D9DCEF",
+      "candidateBackground":     "#F3F4FA",
+      "candidateTextColor":      "#26262B",
+      "candidateHighlightColor": "#E8879C",
+      "preeditTextColor":        "#8B8DA3",
+      "borderColor":             "#D5D8E8",
+      "keyShadowColor":          "#1A272B45"
+    }
+  },
+
+  "dimens": {
+    "keyCornerRadiusDp": 14.0,
+    "keyGapDp":          6.0,
+    "keyboardPaddingDp": 6.0,
+    "keyHeightScale":    1.05,
+    "keyBorderWidthDp":  0.0
+  },
+
+  "typography": {
+    "keyTextSizeSp":       20.0,
+    "funcTextSizeSp":      12.0,
+    "candidateTextSizeSp": 17.0,
+    "preeditTextSizeSp":   12.0,
+    "keyTextBold":         true
+  },
+
+  "effects": {
+    "keyStyle": "filled",
+    "keyShadow": { "enabled": true, "radiusDp": 0.0, "dxDp": 0.0, "dyDp": 2.0 },
+    "backgroundAlpha": 1.0
+  },
+
+  "background": {
+    "image": "images/bg.png",
+    "scaleMode": "fitXY",
+    "dimAmount": 0.0
+  }
+}

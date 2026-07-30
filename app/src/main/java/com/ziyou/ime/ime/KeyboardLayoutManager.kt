@@ -4,8 +4,8 @@ import android.content.Context
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import com.ziyou.ime.config.ThemeManager
 import com.ziyou.ime.data.SideSymbolRepository
+import com.ziyou.ime.skin.SkinManager
 
 /**
  * 键盘视图装载器。
@@ -47,7 +47,7 @@ class KeyboardLayoutManager(
     }
 
     /**
-     * 安装指定类型的键盘到容器，完成回调绑定、主题、缩放与布局组装。
+     * 安装指定类型的键盘到容器，完成回调绑定、皮肤、缩放与布局组装。
      *
      * 停靠形态下九宫格在键盘左侧挂载 [PinyinSideBarView]（`侧栏 : 网格 ≈ 18 : 82` 权重），
      * 下方挂载全宽 [NineGridBottomBarView]，并在布局完成后同步底栏按键宽度与网格一致。
@@ -61,9 +61,9 @@ class KeyboardLayoutManager(
         floating: Boolean = false,
         scale: Float = 1f
     ): Installed {
-        val theme = ThemeManager.getCurrentTheme(context)
+        val skin = SkinManager.getCurrentSkin(context)
         val view = createKeyboardView(type).apply {
-            applyTheme(theme)
+            applySkin(skin)
             scaleFactor = scale
             onKeyPress = { keyCode, mask -> callbacks.onKeyPress(keyCode, mask) }
             onSwitchKeyboard = { target -> callbacks.onSwitchKeyboard(target) }
@@ -103,7 +103,7 @@ class KeyboardLayoutManager(
 
         // 左侧拼音侧栏（高度与三行网格匹配，底部与数字键行对齐）
         val sideBar = PinyinSideBarView(context).apply {
-            applyTheme(theme)
+            applySkin(skin)
             setSideSymbols(SideSymbolRepository.getPinyinSideSymbols(context))
             onPinyinSelect = { pinyin -> callbacks.onPinyinSelect(pinyin) }
             onSymbolInput = { value -> callbacks.onSideSymbolInput(value) }
@@ -119,7 +119,7 @@ class KeyboardLayoutManager(
 
         // 底栏视图：全宽横跨屏幕，延伸至屏幕最左侧边缘
         val bottomBar = NineGridBottomBarView(context).apply {
-            applyTheme(theme)
+            applySkin(skin)
             onKeyPress = { keyCode, mask -> callbacks.onKeyPress(keyCode, mask) }
             onSwitchKeyboard = { target -> callbacks.onSwitchKeyboard(target) }
             onSwitchToQwertyEnglish = { callbacks.onSwitchToQwertyEnglish() }

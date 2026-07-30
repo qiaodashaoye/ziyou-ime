@@ -66,6 +66,12 @@
             android:exported="false"
             android:label="我的等级" />
 
+        <!-- 皮肤管理（预览/切换/导入/自定义） -->
+        <activity
+            android:name=".ui.SkinActivity"
+            android:exported="false"
+            android:label="键盘皮肤" />
+
         <!--
           FileProvider：把 cache/ime_images/ 下的待发送图片（涂鸦导出 / AI 答案转图 /
           技能图片输出）暴露为 content:// URI，

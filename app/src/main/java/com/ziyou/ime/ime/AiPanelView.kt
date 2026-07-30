@@ -19,7 +19,7 @@ import com.ziyou.ime.ai.AiPersona
 import com.ziyou.ime.ai.ChatMessage
 import com.ziyou.ime.ai.MarkdownRenderer
 import com.ziyou.ime.ai.PersonaRepository
-import com.ziyou.ime.config.KeyboardTheme
+import com.ziyou.ime.skin.SkinTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -45,7 +45,7 @@ import kotlinx.coroutines.launch
 @SuppressLint("ViewConstructor")
 class AiPanelView(
     context: Context,
-    private val theme: KeyboardTheme,
+    private val theme: SkinTheme,
     private val host: Host
 ) : LinearLayout(context) {
 

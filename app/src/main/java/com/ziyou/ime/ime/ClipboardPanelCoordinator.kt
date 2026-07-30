@@ -7,7 +7,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.annotation.MainThread
-import com.ziyou.ime.config.ThemeManager
+import com.ziyou.ime.skin.SkinManager
 import com.ziyou.ime.core.clipboard.ClipboardEntry
 import com.ziyou.ime.data.ClipboardHistoryRepository
 
@@ -95,7 +95,7 @@ class ClipboardPanelCoordinator(
         keyboard.visibility = View.GONE
         candidates.visibility = View.GONE
 
-        val newPanel = ClipboardPanelView(service, ThemeManager.getCurrentTheme(service), panelHost)
+        val newPanel = ClipboardPanelView(service, SkinManager.getCurrentSkin(service), panelHost)
         newPanel.submitEntries(ClipboardHistoryRepository.getEntries(service))
         // 索引 0 = 整个输入视图最顶部，固定高度接管键盘+候选区空间
         content.addView(newPanel, 0, LinearLayout.LayoutParams(

@@ -15,7 +15,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import com.ziyou.ime.config.KeyboardTheme
+import com.ziyou.ime.skin.SkinTheme
 import com.ziyou.ime.skill.SkillBridge
 import com.ziyou.ime.skill.SkillInfo
 import com.ziyou.ime.skill.SkillManager
@@ -37,7 +37,7 @@ import com.ziyou.ime.skill.SkillWebViewFactory
  */
 class SkillPanelContainer(
     context: Context,
-    private val theme: KeyboardTheme,
+    private val theme: SkinTheme,
     private val host: Host
 ) : LinearLayout(context), SkillRuntime.Host {
 
@@ -281,7 +281,7 @@ class SkillPanelContainer(
 @SuppressLint("ViewConstructor")
 private class SkillListView(
     context: Context,
-    private val theme: KeyboardTheme,
+    private val theme: SkinTheme,
     private val skills: List<SkillInfo>,
     private val onSkillClick: (SkillInfo) -> Unit
 ) : View(context) {

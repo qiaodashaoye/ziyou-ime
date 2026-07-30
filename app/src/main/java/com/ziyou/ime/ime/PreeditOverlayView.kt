@@ -7,7 +7,8 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.util.AttributeSet
 import android.view.View
-import com.ziyou.ime.config.KeyboardTheme
+import com.ziyou.ime.core.skin.SkinColor
+import com.ziyou.ime.skin.SkinTheme
 
 /**
  * 编码区视图
@@ -25,7 +26,7 @@ class PreeditOverlayView @JvmOverloads constructor(
 ) : View(context, attrs, defStyleAttr) {
 
     companion object {
-        /** 编码区字体大小（sp） */
+        /** 编码区字体默认大小（sp，皮肤可覆盖） */
         private const val TEXT_SIZE_SP = 12f
         /** 水平内边距（dp） */
         private const val PADDING_H_DP = 12
@@ -38,6 +39,9 @@ class PreeditOverlayView @JvmOverloads constructor(
     /** 当前显示的编码文本 */
     private var displayText: String? = null
 
+    /** 当前编码字号（sp，随皮肤更新） */
+    private var textSizeSp = TEXT_SIZE_SP
+
     /**
      * 全局缩放因子（悬浮模式用）：同步缩小视图高度与编码字号，
      * 与键盘/候选视图的 scaleFactor 保持一致。默认 1.0，停靠模式零影响。
@@ -46,7 +50,7 @@ class PreeditOverlayView @JvmOverloads constructor(
         set(value) {
             if (field != value) {
                 field = value
-                textPaint.textSize = sp2px(TEXT_SIZE_SP)
+                textPaint.textSize = sp2px(textSizeSp)
                 requestLayout()
                 invalidate()
             }
@@ -77,11 +81,15 @@ class PreeditOverlayView @JvmOverloads constructor(
     }
 
     /**
-     * 应用主题，与候选词视图和键盘视图保持视觉一致（由 Service 层调用）
+     * 应用皮肤，与候选词视图和键盘视图保持视觉一致（由 Service 层调用）。
+     * 背景色按皮肤整体透明度调制，与下方候选词区保持同一背景视觉连续。
      */
-    fun applyTheme(theme: KeyboardTheme) {
-        textPaint.color = theme.preeditTextColor
-        bgPaint.color = theme.candidateBackground
+    fun applySkin(skin: SkinTheme) {
+        textPaint.color = skin.preeditTextColor
+        textPaint.typeface = skin.textTypeface
+        textSizeSp = skin.preeditTextSizeSp
+        textPaint.textSize = sp2px(textSizeSp)
+        bgPaint.color = SkinColor.scaleAlpha(skin.candidateBackground, skin.backgroundAlpha)
         invalidate()
     }
 

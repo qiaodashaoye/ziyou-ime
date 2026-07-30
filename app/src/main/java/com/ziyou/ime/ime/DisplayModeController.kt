@@ -6,8 +6,8 @@ import android.inputmethodservice.InputMethodService
 import android.view.View
 import androidx.annotation.MainThread
 import com.ziyou.ime.config.DisplayModeManager
-import com.ziyou.ime.config.KeyboardTheme
 import com.ziyou.ime.core.floating.FloatingPanelGeometry
+import com.ziyou.ime.skin.SkinTheme
 
 /**
  * 显示形态控制器（停靠 / 悬浮）。
@@ -102,7 +102,7 @@ class DisplayModeController(
      * 停靠形态：原样返回内容根并清空悬浮容器引用。
      * 由 Service 的 buildInputView 末尾调用。
      */
-    fun wrapContent(root: View, mode: DisplayMode, theme: KeyboardTheme): View {
+    fun wrapContent(root: View, mode: DisplayMode, theme: SkinTheme): View {
         return if (mode == DisplayMode.FLOATING) {
             FloatingPanelContainer(service, root, theme).also { container ->
                 container.onRequestDock = { switchTo(DisplayMode.DOCKED) }

@@ -7,7 +7,7 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.annotation.MainThread
-import com.ziyou.ime.config.ThemeManager
+import com.ziyou.ime.skin.SkinManager
 
 /**
  * 涂鸦画板面板协调器。
@@ -90,7 +90,7 @@ class DoodlePanelCoordinator(
         keyboard.visibility = View.GONE
         candidates.visibility = View.GONE
 
-        val newPanel = DoodlePanelView(service, ThemeManager.getCurrentTheme(service), panelHost)
+        val newPanel = DoodlePanelView(service, SkinManager.getCurrentSkin(service), panelHost)
         // 按当前编辑器图片能力初始化按钮态（「发送」/「保存」）
         newPanel.setImageSupport(host.imageSupportsSend())
         // 索引 0 = 整个输入视图最顶部，固定高度接管键盘+候选区空间

@@ -10,7 +10,7 @@ import android.view.GestureDetector
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.widget.Toast
-import com.ziyou.ime.config.KeyboardTheme
+import com.ziyou.ime.skin.SkinTheme
 import com.ziyou.ime.data.SymbolCategory
 import com.ziyou.ime.data.SymbolRepository
 
@@ -151,8 +151,8 @@ class SymbolKeyboardView @JvmOverloads constructor(
 
     // ===== 主题 / 缩放 =====
 
-    override fun applyTheme(newTheme: KeyboardTheme) {
-        super.applyTheme(newTheme)
+    override fun applySkin(newSkin: SkinTheme) {
+        super.applySkin(newSkin)
         applySymbolPaints()
     }
 
@@ -163,13 +163,13 @@ class SymbolKeyboardView @JvmOverloads constructor(
     /** 同步自有画笔的颜色与（缩放后）文字大小 */
     private fun applySymbolPaints() {
         symbolPaint.textSize = sp2px(SYMBOL_TEXT_SIZE_SP)
-        symbolPaint.color = theme.keyTextColor
+        symbolPaint.color = skin.keyTextColor
         categoryPaint.textSize = sp2px(CATEGORY_TEXT_SIZE_SP)
-        categoryPaint.color = theme.keyTextColor
+        categoryPaint.color = skin.keyTextColor
         categorySelectedPaint.textSize = sp2px(CATEGORY_TEXT_SIZE_SP)
         categorySelectedPaint.color = android.graphics.Color.WHITE
         hintPaint.textSize = sp2px(HINT_TEXT_SIZE_SP)
-        hintPaint.color = theme.preeditTextColor
+        hintPaint.color = skin.preeditTextColor
     }
 
     // ===== 数据 =====

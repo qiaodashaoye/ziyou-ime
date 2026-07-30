@@ -13,9 +13,9 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.ziyou.ime.config.DisplayModeManager
-import com.ziyou.ime.config.KeyboardTheme
 import com.ziyou.ime.core.floating.FloatingPanelGeometry
 import com.ziyou.ime.core.floating.PanelPoint
+import com.ziyou.ime.skin.SkinTheme
 
 /**
  * 悬浮面板容器（FLOATING 形态的输入视图根）
@@ -40,7 +40,7 @@ import com.ziyou.ime.core.floating.PanelPoint
 class FloatingPanelContainer(
     context: Context,
     content: View,
-    theme: KeyboardTheme
+    theme: SkinTheme
 ) : FrameLayout(context) {
 
     companion object {
@@ -138,7 +138,7 @@ class FloatingPanelContainer(
     // ===== 拖动条 =====
 
     @SuppressLint("ClickableViewAccessibility")
-    private fun createDragHandle(theme: KeyboardTheme): View {
+    private fun createDragHandle(theme: SkinTheme): View {
         val handle = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL

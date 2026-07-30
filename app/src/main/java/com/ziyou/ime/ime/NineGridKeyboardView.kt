@@ -127,7 +127,7 @@ class NineGridKeyboardView @JvmOverloads constructor(
         textSize = sp2px(LETTER_TEXT_SIZE_SP)
         textAlign = Paint.Align.CENTER
         typeface = Typeface.DEFAULT
-        color = theme.keyTextColor
+        color = skin.keyTextColor
         alpha = 160
     }
 
@@ -136,13 +136,13 @@ class NineGridKeyboardView @JvmOverloads constructor(
         textSize = sp2px(DIGIT_TEXT_SIZE_SP)
         textAlign = Paint.Align.CENTER
         typeface = Typeface.DEFAULT
-        color = theme.keyTextColor
+        color = skin.keyTextColor
     }
 
-    override fun applyTheme(newTheme: com.ziyou.ime.config.KeyboardTheme) {
-        super.applyTheme(newTheme)
-        letterPaint.apply { color = theme.keyTextColor; alpha = 160 }
-        digitPaint.color = theme.keyTextColor
+    override fun applySkin(newSkin: com.ziyou.ime.skin.SkinTheme) {
+        super.applySkin(newSkin)
+        letterPaint.apply { color = skin.keyTextColor; typeface = skin.textTypeface; alpha = 160 }
+        digitPaint.apply { color = skin.keyTextColor; typeface = skin.keyTypeface }
     }
 
     /** 悬浮缩放时同步九宫格自有画笔（数字/字母）的文字大小 */
