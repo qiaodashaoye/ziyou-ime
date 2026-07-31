@@ -29,9 +29,11 @@ object DictDownloader {
     /** Gitee 仓库原始文件基础 URL */
     private const val BASE_URL = "https://gitee.com/qiaodashaoye/ziyou-ime-dicts/raw/main"
 
-    /** 下载源域名白名单（与 BASE_URL 同源）：catalog 中的 url 必须命中，
-     *  防目录被篡改后外链投毒（与技能 fetch 代理的白名单基线对齐） */
-    private val ALLOWED_HOSTS = setOf("gitee.com")
+    /** 下载源域名白名单：catalog 中的 url 与每一跳重定向都必须命中，
+     *  防目录被篡改后外链投毒（与技能 fetch 代理的白名单基线对齐）。
+     *  注意：gitee.com 的 raw 路径会 302 跳到 raw.giteeusercontent.com（真正的文件 CDN），
+     *  两者都必须在白名单内，否则受控重定向会在第一跳就被拒绝。 */
+    private val ALLOWED_HOSTS = setOf("gitee.com", "raw.giteeusercontent.com")
 
     /** catalog.json 响应上限（字节），超出即拒绝（目录必须完整才能解析） */
     private const val MAX_CATALOG_BYTES = 1L * 1024 * 1024
