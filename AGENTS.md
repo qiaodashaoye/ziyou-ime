@@ -10,7 +10,7 @@ This file provides guidance to Qoder (qoder.com) when working with code in this 
 # 编译 debug APK
 ./gradlew :app:assembleDebug
 
-# 全部单元测试（纯 JVM，无需设备；基线 38+ 用例，只增不减）
+# 全部单元测试（纯 JVM，无需设备；用例数基线见 scripts/unit-test-baseline.txt，只增不减）
 ./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest
 
 # 运行单个测试类 / 单个方法

@@ -100,4 +100,4 @@ Android Jetpack Compose / View 体系的生产级实现，特征：
 - 崩溃率极低，生命周期资源无泄漏
 - 核心功能内存占用保持低位
 - 电池消耗控制在合理水平
-- 【ziyou-ime】测试基线（38 个用例）持续增长且全绿
+- 【ziyou-ime】测试基线（`scripts/unit-test-baseline.txt`）持续增长且全绿

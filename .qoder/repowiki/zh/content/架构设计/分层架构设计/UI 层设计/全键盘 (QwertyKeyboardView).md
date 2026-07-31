@@ -1,8 +1,8 @@
-# 简易键盘 (SimpleKeyboardView)
+# 全键盘 (QwertyKeyboardView)
 
 <cite>
 **本文引用的文件**   
-- [SimpleKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleKeyboardView.kt)
+- [QwertyKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/QwertyKeyboardView.kt)
 - [BaseKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/BaseKeyboardView.kt)
 - [KeyCode.kt](file://app/src/main/java/com/ziyou/ime/ime/KeyCode.kt)
 - [KeyboardType.kt](file://app/src/main/java/com/ziyou/ime/ime/KeyboardType.kt)
@@ -37,10 +37,10 @@
 10. [附录](#附录)
 
 ## 简介
-本文件面向 SimpleKeyboardView（简易键盘）的实现原理与布局设计，重点说明标准 QWERTY 键盘的按键映射、字符输入逻辑与特殊功能键处理。文档涵盖大小写切换、符号输入、空格与回车键的功能实现，并提供键盘样式定制、按键音效与震动反馈的配置方法。读者无需深入 Android 输入法开发经验即可理解整体设计与扩展方式。
+本文件面向 QwertyKeyboardView（全键盘）的实现原理与布局设计，重点说明标准 QWERTY 键盘的按键映射、字符输入逻辑与特殊功能键处理。文档涵盖大小写切换、符号输入、空格与回车键的功能实现，并提供键盘样式定制、按键音效与震动反馈的配置方法。读者无需深入 Android 输入法开发经验即可理解整体设计与扩展方式。
 
 ## 项目结构
-SimpleKeyboardView 位于 ime 包中，作为自定义 View 负责渲染与交互；其通过 InputMethodService 与 Rime 引擎协作完成候选词与上屏逻辑；主题与配置由 config 包管理；数据层提供侧边符号与按键历史栈等辅助能力。
+QwertyKeyboardView 位于 ime 包中，作为自定义 View 负责渲染与交互；其通过 InputMethodService 与 Rime 引擎协作完成候选词与上屏逻辑；主题与配置由 config 包管理；数据层提供侧边符号与按键历史栈等辅助能力。
 
 ```mermaid
 graph TB
@@ -49,7 +49,7 @@ IMS["SimpleRimeInputMethodService"]
 end
 subgraph "键盘视图"
 BKV["BaseKeyboardView"]
-SKV["SimpleKeyboardView"]
+SKV["QwertyKeyboardView"]
 NGK["NineGridKeyboardView"]
 SCV["SimpleCandidatesView"]
 POV["PreeditOverlayView"]
@@ -90,7 +90,7 @@ NGK --> RCM
 
 图表来源
 - [SimpleRimeInputMethodService.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleRimeInputMethodService.kt)
-- [SimpleKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleKeyboardView.kt)
+- [QwertyKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/QwertyKeyboardView.kt)
 - [BaseKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/BaseKeyboardView.kt)
 - [NineGridKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/NineGridKeyboardView.kt)
 - [SimpleCandidatesView.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleCandidatesView.kt)
@@ -109,7 +109,7 @@ NGK --> RCM
 
 章节来源
 - [SimpleRimeInputMethodService.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleRimeInputMethodService.kt)
-- [SimpleKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleKeyboardView.kt)
+- [QwertyKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/QwertyKeyboardView.kt)
 - [BaseKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/BaseKeyboardView.kt)
 - [NineGridKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/NineGridKeyboardView.kt)
 - [SimpleCandidatesView.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleCandidatesView.kt)
@@ -127,7 +127,7 @@ NGK --> RCM
 - [T9PinYinUtils.kt](file://app/src/main/java/com/ziyou/ime/util/T9PinYinUtils.kt)
 
 ## 核心组件
-- SimpleKeyboardView：QWERTY 键盘视图，负责按键布局绘制、触摸事件分发、状态切换（字母/符号）、以及将按键动作转化为输入事件或引擎调用。
+- QwertyKeyboardView：QWERTY 键盘视图，负责按键布局绘制、触摸事件分发、状态切换（字母/符号）、以及将按键动作转化为输入事件或引擎调用。
 - BaseKeyboardView：键盘基类，封装通用绘制、布局计算、按键命中检测与动画/反馈基础能力。
 - NineGridKeyboardView：九宫格键盘视图，用于数字/拼音九宫格模式。
 - SimpleCandidatesView：候选词面板，展示 Rime 返回的候选项并支持选择上屏。
@@ -142,7 +142,7 @@ NGK --> RCM
 - T9PinYinUtils：T9 拼音工具，辅助九宫格输入场景。
 
 章节来源
-- [SimpleKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleKeyboardView.kt)
+- [QwertyKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/QwertyKeyboardView.kt)
 - [BaseKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/BaseKeyboardView.kt)
 - [NineGridKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/NineGridKeyboardView.kt)
 - [SimpleCandidatesView.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleCandidatesView.kt)
@@ -160,12 +160,12 @@ NGK --> RCM
 - [T9PinYinUtils.kt](file://app/src/main/java/com/ziyou/ime/util/T9PinYinUtils.kt)
 
 ## 架构总览
-SimpleKeyboardView 作为 UI 层，接收用户触摸事件，根据当前键盘类型（字母/QWERTY、符号、数字/九宫格）决定输入行为。对于普通字符，直接通过输入法框架上屏；对于特殊键（如大小写切换、符号切换、退格、回车、空格），执行相应状态机转换或调用 Rime 引擎进行分词/上屏。候选词面板与预编辑区由服务层统一管理，保证多视图同步。
+QwertyKeyboardView 作为 UI 层，接收用户触摸事件，根据当前键盘类型（字母/QWERTY、符号、数字/九宫格）决定输入行为。对于普通字符，直接通过输入法框架上屏；对于特殊键（如大小写切换、符号切换、退格、回车、空格），执行相应状态机转换或调用 Rime 引擎进行分词/上屏。候选词面板与预编辑区由服务层统一管理，保证多视图同步。
 
 ```mermaid
 sequenceDiagram
 participant U as "用户"
-participant SKV as "SimpleKeyboardView"
+participant SKV as "QwertyKeyboardView"
 participant IMS as "SimpleRimeInputMethodService"
 participant RA as "RimeApi"
 participant SRI as "SimpleRimeImpl"
@@ -192,7 +192,7 @@ end
 ```
 
 图表来源
-- [SimpleKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleKeyboardView.kt)
+- [QwertyKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/QwertyKeyboardView.kt)
 - [SimpleRimeInputMethodService.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleRimeInputMethodService.kt)
 - [RimeApi.kt](file://app/src/main/java/com/ziyou/ime/core/RimeApi.kt)
 - [RimeDispatcher.kt](file://app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt)
@@ -202,7 +202,7 @@ end
 
 ## 详细组件分析
 
-### SimpleKeyboardView：QWERTY 键盘视图
+### QwertyKeyboardView：QWERTY 键盘视图
 - 布局设计：按行组织字母键，包含 Shift、Space、Enter、Backspace、符号切换等关键功能键；支持横竖屏自适应与不同 DPI 的按键尺寸计算。
 - 按键映射：维护 QWERTY 标准映射，区分大小写态；符号态下映射到常用标点与数学符号集合。
 - 输入逻辑：
@@ -236,12 +236,12 @@ EnterAction --> End
 ```
 
 图表来源
-- [SimpleKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleKeyboardView.kt)
+- [QwertyKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/QwertyKeyboardView.kt)
 - [KeyCode.kt](file://app/src/main/java/com/ziyou/ime/ime/KeyCode.kt)
 - [KeyboardType.kt](file://app/src/main/java/com/ziyou/ime/ime/KeyboardType.kt)
 
 章节来源
-- [SimpleKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleKeyboardView.kt)
+- [QwertyKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/QwertyKeyboardView.kt)
 - [KeyCode.kt](file://app/src/main/java/com/ziyou/ime/ime/KeyCode.kt)
 - [KeyboardType.kt](file://app/src/main/java/com/ziyou/ime/ime/KeyboardType.kt)
 
@@ -332,7 +332,7 @@ EnterAction --> End
 
 ```mermaid
 classDiagram
-class SimpleKeyboardView {
+class QwertyKeyboardView {
 +处理按键事件()
 +切换键盘模式()
 +提交字符()
@@ -379,11 +379,11 @@ class RimeSession {
 +维护上下文()
 +调用底层librime()
 }
-SimpleKeyboardView --|> BaseKeyboardView
+QwertyKeyboardView --|> BaseKeyboardView
 NineGridKeyboardView --|> BaseKeyboardView
-SimpleKeyboardView --> ThemeManager : "读取主题"
-SimpleKeyboardView --> RimeConfigManager : "读取配置"
-SimpleKeyboardView --> RimeApi : "调用引擎"
+QwertyKeyboardView --> ThemeManager : "读取主题"
+QwertyKeyboardView --> RimeConfigManager : "读取配置"
+QwertyKeyboardView --> RimeApi : "调用引擎"
 RimeApi --> RimeDispatcher : "调度"
 RimeDispatcher --> SimpleRimeImpl : "实现"
 SimpleRimeImpl --> RimeSession : "会话"
@@ -393,7 +393,7 @@ PinyinSideBarView --> RimeApi : "定位候选"
 ```
 
 图表来源
-- [SimpleKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleKeyboardView.kt)
+- [QwertyKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/QwertyKeyboardView.kt)
 - [BaseKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/BaseKeyboardView.kt)
 - [NineGridKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/NineGridKeyboardView.kt)
 - [SimpleCandidatesView.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleCandidatesView.kt)
@@ -407,7 +407,7 @@ PinyinSideBarView --> RimeApi : "定位候选"
 - [RimeSession.kt](file://app/src/main/java/com/ziyou/ime/daemon/RimeSession.kt)
 
 章节来源
-- [SimpleKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleKeyboardView.kt)
+- [QwertyKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/QwertyKeyboardView.kt)
 - [BaseKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/BaseKeyboardView.kt)
 - [NineGridKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/NineGridKeyboardView.kt)
 - [SimpleCandidatesView.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleCandidatesView.kt)
@@ -445,7 +445,7 @@ PinyinSideBarView --> RimeApi : "定位候选"
 - [AssetDeployer.kt](file://app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt)
 
 ## 结论
-SimpleKeyboardView 以清晰的职责划分与模块化设计实现了标准 QWERTY 键盘的核心功能，并通过 Rime 引擎提供强大的中文输入能力。主题与配置分离使得外观与行为易于定制；候选面板与预编辑区提升了输入体验。遵循本文档的扩展建议，可进一步丰富按键映射、增强反馈与优化性能。
+QwertyKeyboardView 以清晰的职责划分与模块化设计实现了标准 QWERTY 键盘的核心功能，并通过 Rime 引擎提供强大的中文输入能力。主题与配置分离使得外观与行为易于定制；候选面板与预编辑区提升了输入体验。遵循本文档的扩展建议，可进一步丰富按键映射、增强反馈与优化性能。
 
 [本节为总结性内容，不直接分析具体文件]
 
@@ -464,7 +464,7 @@ SimpleKeyboardView 以清晰的职责划分与模块化设计实现了标准 QWE
   - 中文模式：构造编码并交由 Rime 处理，候选面板展示结果。
 
 章节来源
-- [SimpleKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleKeyboardView.kt)
+- [QwertyKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/QwertyKeyboardView.kt)
 - [KeyCode.kt](file://app/src/main/java/com/ziyou/ime/ime/KeyCode.kt)
 - [KeyboardType.kt](file://app/src/main/java/com/ziyou/ime/ime/KeyboardType.kt)
 
@@ -491,7 +491,7 @@ SimpleKeyboardView 以清晰的职责划分与模块化设计实现了标准 QWE
 - 组合键：长按某些键弹出备选字符（如带音调的字母或特殊符号）。
 
 章节来源
-- [SimpleKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleKeyboardView.kt)
+- [QwertyKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/QwertyKeyboardView.kt)
 - [SideSymbol.kt](file://app/src/main/java/com/ziyou/ime/data/SideSymbol.kt)
 
 ### 空格与回车键功能实现
@@ -500,7 +500,7 @@ SimpleKeyboardView 以清晰的职责划分与模块化设计实现了标准 QWE
 - 行为差异：根据输入框类型与应用上下文动态调整行为。
 
 章节来源
-- [SimpleKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/SimpleKeyboardView.kt)
+- [QwertyKeyboardView.kt](file://app/src/main/java/com/ziyou/ime/ime/QwertyKeyboardView.kt)
 
 ### 与输入法服务的集成
 - 服务职责：管理键盘视图生命周期、候选面板与预编辑区、与 Rime 引擎通信。

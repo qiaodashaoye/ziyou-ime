@@ -229,7 +229,7 @@ librime 通知回调
 
 #### 配置与主题
 - `RimeConfigManager`：封装 JNI 配置操作，提供 `getDefaultInt/String`、`getSchemaInt/String` 及 RAII 风格 `withConfig/withSchema`
-- `ThemeManager`：管理 Light / Dark / Material 三套 `KeyboardTheme`，SharedPreferences 持久化用户选择
+- `SkinManager`（`skin/`）：皮肤系统门面，内置悬浮立体（默认）/ 云雾拟态 / Material 三套皮肤，支持导入 `.zyskin` 皮肤包，SharedPreferences 持久化用户选择
 - `AssetDeployer`：首次启动/版本升级时把 `assets/rime/*` 递归复制到 `{filesDir}/rime/`，通过版本号对比避免重复复制
 
 ### IME 层
@@ -463,7 +463,7 @@ JNI 回调经 `SharedFlow.tryEmit()` 线程安全传递；引擎初始化的资�
 | `:core-logic` | `LevelEngineTest` | 11 | 分段计分/封顶、签到奖励、等级判定与进度、权益解锁 |
 | `:app` | `PinyinHintProviderTest` | 13 | 数字段还原拼音、回退 comment、预览优先高亮候选、空上下文 |
 
-运行：`./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest`（共 38 用例）。
+运行：`./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest`（用例总数以 `scripts/unit-test-baseline.txt` 为准，发布脚本会比对实测值，低于基线即失败）。
 引擎接口化后，涉及引擎的逻辑可通过 `AppContainer.overrideRimeEngine()` 注入 fake 实现进行测试。
 
 ## 关键设计决策
@@ -561,12 +561,12 @@ Rime 只组织光标之前的编码片段。若把选定拼音追加到编码串
 | `getSchemaInt/String(schemaId, key)` | 读取方案配置 |
 | `withConfig(id, block)` / `withSchema(id, block)` | RAII 方式使用配置 |
 
-### ThemeManager（主题管理）
+### SkinManager（皮肤管理）
 | 方法 | 说明 |
 |------|------|
-| `getCurrentTheme(context)` / `getCurrentThemeName(context)` | 获取当前主题 / 名称 |
-| `setTheme(context, name)` | 设置主题 |
-| `getAllThemeNames()` | 获取全部主题名（Light/Dark/Material） |
+| `getCurrentSkin(context)` | 获取当前皮肤快照（缓存命中 O(1)） |
+| `setSkin(context, skinId)` | 切换皮肤（校验存在性与等级解锁） |
+| `getInstalledSkins(context)` | 全部可用皮肤（内置悬浮立体/云雾拟态/Material + 导入） |
 
 ### LevelRepository / LevelEngine（等级体系）
 | 方法 | 说明 |

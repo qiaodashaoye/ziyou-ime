@@ -39,8 +39,9 @@ tools: Read, Grep, Glob, Bash
 
 ### STEP 1: Reality Check Commands（【ziyou-ime】证据采集命令）
 ```bash
-# 1. 测试证据（必须实际运行，全绿且用例数 ≥ 38，基线只增不减）
+# 1. 测试证据（必须实际运行，全绿且实测用例数 ≥ scripts/unit-test-baseline.txt 记录的基线，只增不减）
 ./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest
+cat scripts/unit-test-baseline.txt   # 基线唯一来源；发布脚本会自动比对并在低于基线时失败
 
 # 2. 构建证据（实际构建成功，注意新增编译警告）
 ./gradlew :app:assembleDebug
@@ -95,7 +96,7 @@ grep -rn "import android\.\|import com.ziyou.ime.ime\.\|import com.ziyou.ime.ui\
 **Evidence Captured**: [每条命令的实际输出结论]
 
 ## 🧪 Integration Testing Results
-**单元测试**: [PASS/FAIL + 用例数变化 38 → N]
+**单元测试**: [PASS/FAIL + 实测用例数 vs scripts/unit-test-baseline.txt 基线]
 **构建验证**: [PASS/FAIL + 警告情况]
 **架构合规**: [PASS/FAIL + 抽查证据]
 **规格符合度**: [PASS/FAIL + 规格引用 vs 现实对比]
