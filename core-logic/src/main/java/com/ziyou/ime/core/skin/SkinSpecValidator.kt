@@ -95,6 +95,13 @@ object SkinSpecValidator {
             }
         }
 
+        layer.toolbar?.let { t ->
+            checkRange(errors, prefix, "toolbar.buttonCornerRadiusDp", t.buttonCornerRadiusDp, CORNER_RADIUS_RANGE)
+            checkRange(errors, prefix, "toolbar.buttonBorderWidthDp", t.buttonBorderWidthDp, BORDER_WIDTH_RANGE)
+            checkRange(errors, prefix, "toolbar.buttonSpacingDp", t.buttonSpacingDp, KEY_GAP_RANGE)
+            checkRange(errors, prefix, "toolbar.textSizeSp", t.textSizeSp, TEXT_SIZE_RANGE)
+        }
+
         layer.background?.let { b ->
             checkRange(errors, prefix, "background.dimAmount", b.dimAmount, BACKGROUND_DIM_RANGE)
             b.image?.let { path ->

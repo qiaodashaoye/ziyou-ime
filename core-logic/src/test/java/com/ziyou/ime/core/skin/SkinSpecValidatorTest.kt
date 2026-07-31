@@ -56,6 +56,22 @@ class SkinSpecValidatorTest {
     }
 
     @Test
+    fun validate_toolbarOutOfRange_rejectedWithFieldName() {
+        val bad = spec(
+            layer = SkinLayer(
+                toolbar = SkinToolbarSpec(buttonCornerRadiusDp = 99f, textSizeSp = 100f)
+            )
+        )
+        val errors = SkinSpecValidator.validate(bad)
+        assertEquals(2, errors.size)
+        assertTrue(errors.any { it.contains("toolbar.buttonCornerRadiusDp") })
+        assertTrue(errors.any { it.contains("toolbar.textSizeSp") })
+        // 合法 toolbar 节点通过
+        val ok = spec(layer = SkinLayer(toolbar = SkinToolbarSpec(buttonCornerRadiusDp = 12f)))
+        assertEquals(emptyList<String>(), SkinSpecValidator.validate(ok))
+    }
+
+    @Test
     fun validate_outOfRangeValues_rejectedWithFieldName() {
         val bad = spec(
             layer = SkinLayer(

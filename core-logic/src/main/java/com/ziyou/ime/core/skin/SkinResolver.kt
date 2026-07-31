@@ -48,6 +48,8 @@ object SkinResolver {
         val se = s.effects
         val ob = o?.background
         val sb = s.background
+        val otb = o?.toolbar
+        val stb = s.toolbar
 
         // 背景图：覆盖层声明了 background 节点即整体接管（含"清除背景图"语义），
         // 否则取规格层按深浅色变体选定的图
@@ -56,6 +58,17 @@ object SkinResolver {
         } else {
             pickImage(sb, isDark)
         }
+
+        // 候选区配色与功能键字号先落定，供工具栏缺省派生复用
+        val candidateBackground = oc?.candidateBackground ?: sc?.candidateBackground
+            ?: dc.candidateBackground!!
+        val candidateTextColor = oc?.candidateTextColor ?: sc?.candidateTextColor
+            ?: dc.candidateTextColor!!
+        val funcTextSizeSp = (ot?.funcTextSizeSp ?: st?.funcTextSizeSp
+            ?: SkinDefaults.FUNC_TEXT_SIZE_SP).coerceIn(SkinSpecValidator.TEXT_SIZE_RANGE)
+        // 工具栏配色：显式声明优先，缺省从候选区配色派生（现行视觉零回归）
+        val toolbarBackground = oc?.toolbarBackground ?: sc?.toolbarBackground
+            ?: candidateBackground
 
         return ResolvedSkin(
             id = spec.meta.id,
@@ -70,10 +83,8 @@ object SkinResolver {
             // 功能键底色：显式声明优先，缺省按现行混色规则派生
             funcKeyBackground = oc?.funcKeyBackground ?: sc?.funcKeyBackground
                 ?: SkinColor.blend(keyBackground, borderColor, SkinDefaults.FUNC_KEY_BLEND_RATIO),
-            candidateBackground = oc?.candidateBackground ?: sc?.candidateBackground
-                ?: dc.candidateBackground!!,
-            candidateTextColor = oc?.candidateTextColor ?: sc?.candidateTextColor
-                ?: dc.candidateTextColor!!,
+            candidateBackground = candidateBackground,
+            candidateTextColor = candidateTextColor,
             candidateHighlightColor = oc?.candidateHighlightColor ?: sc?.candidateHighlightColor
                 ?: dc.candidateHighlightColor!!,
             preeditTextColor = oc?.preeditTextColor ?: sc?.preeditTextColor
@@ -99,8 +110,7 @@ object SkinResolver {
 
             keyTextSizeSp = (ot?.keyTextSizeSp ?: st?.keyTextSizeSp
                 ?: SkinDefaults.KEY_TEXT_SIZE_SP).coerceIn(SkinSpecValidator.TEXT_SIZE_RANGE),
-            funcTextSizeSp = (ot?.funcTextSizeSp ?: st?.funcTextSizeSp
-                ?: SkinDefaults.FUNC_TEXT_SIZE_SP).coerceIn(SkinSpecValidator.TEXT_SIZE_RANGE),
+            funcTextSizeSp = funcTextSizeSp,
             candidateTextSizeSp = (ot?.candidateTextSizeSp ?: st?.candidateTextSizeSp
                 ?: SkinDefaults.CANDIDATE_TEXT_SIZE_SP).coerceIn(SkinSpecValidator.TEXT_SIZE_RANGE),
             preeditTextSizeSp = (ot?.preeditTextSizeSp ?: st?.preeditTextSizeSp
@@ -118,7 +128,29 @@ object SkinResolver {
             backgroundScaleMode = ob?.scaleMode ?: sb?.scaleMode
                 ?: SkinBackgroundScaleMode.CENTER_CROP,
             backgroundDim = (ob?.dimAmount ?: sb?.dimAmount ?: SkinDefaults.BACKGROUND_DIM)
-                .coerceIn(SkinSpecValidator.BACKGROUND_DIM_RANGE)
+                .coerceIn(SkinSpecValidator.BACKGROUND_DIM_RANGE),
+
+            // ===== 工具栏：颜色缺省从候选区配色派生，样式缺省即现行视觉 =====
+            toolbarBackground = toolbarBackground,
+            toolbarButtonBackground = oc?.toolbarButtonBackground ?: sc?.toolbarButtonBackground
+                ?: SkinColor.blend(toolbarBackground, borderColor,
+                    SkinDefaults.TOOLBAR_PILL_BLEND_RATIO),
+            toolbarTextColor = oc?.toolbarTextColor ?: sc?.toolbarTextColor
+                ?: candidateTextColor,
+            toolbarButtonCornerRadiusDp = (otb?.buttonCornerRadiusDp ?: stb?.buttonCornerRadiusDp)
+                ?.coerceIn(SkinSpecValidator.CORNER_RADIUS_RANGE)
+                ?: SkinDefaults.TOOLBAR_CAPSULE_RADIUS,
+            toolbarButtonShadow = otb?.buttonShadow ?: stb?.buttonShadow ?: false,
+            toolbarButtonBorderWidthDp = (otb?.buttonBorderWidthDp ?: stb?.buttonBorderWidthDp
+                ?: 0f).coerceIn(SkinSpecValidator.BORDER_WIDTH_RANGE),
+            toolbarButtonSpacingDp = (otb?.buttonSpacingDp ?: stb?.buttonSpacingDp
+                ?: SkinDefaults.TOOLBAR_BUTTON_SPACING_DP)
+                .coerceIn(SkinSpecValidator.KEY_GAP_RANGE),
+            toolbarTextSizeSp = (otb?.textSizeSp ?: stb?.textSizeSp
+                ?: (funcTextSizeSp + SkinDefaults.TOOLBAR_TEXT_DELTA_SP))
+                .coerceIn(SkinSpecValidator.TEXT_SIZE_RANGE),
+            toolbarTextBold = otb?.textBold ?: stb?.textBold ?: true,
+            toolbarShowDivider = otb?.showDivider ?: stb?.showDivider ?: true
         )
     }
 

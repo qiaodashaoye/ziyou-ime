@@ -1,6 +1,7 @@
 package com.ziyou.ime.ime
 
 import android.content.Context
+import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -50,6 +51,8 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
         private const val REPEAT_START_DELAY_MS = 400L
         /** 连续重复的触发间隔（ms） */
         private const val REPEAT_INTERVAL_MS = 60L
+        /** 强调键按下态的压暗比例（向黑色混色） */
+        private const val ACCENT_PRESSED_DARKEN = 0.18f
     }
 
     // ===== Shift 状态枚举（供全键盘等使用） =====
@@ -169,6 +172,8 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
     protected val funcKeyBgPaint = fillPaint()
     protected val pressedKeyBgPaint = fillPaint()
     protected val accentBgPaint = fillPaint()
+    /** 强调键（回车等）按下态：强调色压暗，保持白字可读 */
+    protected val accentPressedBgPaint = fillPaint()
     protected val boardBgPaint = Paint().apply { style = Paint.Style.FILL }
     protected val keyShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
@@ -217,6 +222,14 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
         keyTextPaint.textSize = sp2px(skin.keyTextSizeSp)
         funcTextPaint.textSize = sp2px(skin.funcTextSizeSp)
         accentTextPaint.textSize = sp2px(skin.funcTextSizeSp)
+        // 弥散投影：radiusDp > 0 时挂模糊滤镜（随缩放因子重建）。
+        // API < 28 的硬件加速画布会忽略 maskFilter，自动退化为实心偏移投影
+        val shadowRadius = skin.keyShadow?.radiusDp ?: 0f
+        keyShadowPaint.maskFilter = if (shadowRadius > 0f) {
+            BlurMaskFilter(dp2px(shadowRadius), BlurMaskFilter.Blur.NORMAL)
+        } else {
+            null
+        }
     }
 
     /** 按当前 [scaleFactor] 重算尺寸缓存与文字画笔 */
@@ -251,6 +264,8 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
         pressedKeyBgPaint.color = skinAlpha(skin.keyPressedBackground)
         funcKeyBgPaint.color = skinAlpha(skin.funcKeyBackground)
         accentBgPaint.color = skin.candidateHighlightColor
+        accentPressedBgPaint.color =
+            SkinColor.blend(skin.candidateHighlightColor, Color.BLACK, ACCENT_PRESSED_DARKEN)
         keyShadowPaint.color = skin.keyShadowColor
         keyBorderPaint.color = skin.borderColor
         // OUTLINE 风格未声明描边宽时默认 1dp，保证键面可见
@@ -342,9 +357,10 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
 
         when (skin.keyStyle) {
             SkinKeyStyle.FILLED -> {
-                // 阴影（皮肤可关闭；dx/dy 为 dp 语义，默认向下偏移 1dp 与迁移前一致）
+                // 阴影（皮肤可关闭；dx/dy 为 dp 语义，默认向下偏移 1dp 与迁移前一致）。
+                // 按下态跳过投影：「抬起悬浮 / 按下落地」的动态深度反馈
                 val shadow = skin.keyShadow
-                if (shadow != null) {
+                if (shadow != null && !isPressed) {
                     val shadowRect = RectF(rect)
                     shadowRect.offset(dp2px(shadow.dxDp), dp2px(shadow.dyDp))
                     canvas.drawRoundRect(shadowRect, keyRadius, keyRadius, keyShadowPaint)
@@ -387,16 +403,20 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
         canvas.drawText(displayText, textX, textY, textPaint)
     }
 
-    /** 选择按键背景画笔。默认：按下 > 功能键 > 普通键 */
+    /** 选择按键背景画笔。默认：回车强调色 > 按下 > 功能键 > 普通键 */
     protected open fun backgroundPaintFor(key: Key, isPressed: Boolean): Paint = when {
+        key.code == KeyCode.XK_Return -> if (isPressed) accentPressedBgPaint else accentBgPaint
         isPressed -> pressedKeyBgPaint
         key.isFunctional -> funcKeyBgPaint
         else -> keyBgPaint
     }
 
-    /** 选择按键文字画笔。默认：功能键用小号字，其余用普通字 */
-    protected open fun textPaintFor(key: Key): Paint =
-        if (key.isFunctional) funcTextPaint else keyTextPaint
+    /** 选择按键文字画笔。默认：回车用白色强调字，功能键用小号字，其余用普通字 */
+    protected open fun textPaintFor(key: Key): Paint = when {
+        key.code == KeyCode.XK_Return -> accentTextPaint
+        key.isFunctional -> funcTextPaint
+        else -> keyTextPaint
+    }
 
     /** 按键显示文本。默认返回 label，子类可根据状态覆写 */
     protected open fun getKeyDisplayText(key: Key): String = key.label

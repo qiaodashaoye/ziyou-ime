@@ -13,6 +13,7 @@ import com.ziyou.ime.core.skin.SkinMeta
 import com.ziyou.ime.core.skin.SkinShadowSpec
 import com.ziyou.ime.core.skin.SkinSpec
 import com.ziyou.ime.core.skin.SkinSpecValidator
+import com.ziyou.ime.core.skin.SkinToolbarSpec
 import com.ziyou.ime.core.skin.SkinTypography
 import org.json.JSONObject
 
@@ -127,6 +128,18 @@ object SkinSpecCodec {
             })
         }
 
+        layer.toolbar?.let { t ->
+            obj.put("toolbar", JSONObject().apply {
+                putFloat("buttonCornerRadiusDp", t.buttonCornerRadiusDp)
+                t.buttonShadow?.let { put("buttonShadow", it) }
+                putFloat("buttonBorderWidthDp", t.buttonBorderWidthDp)
+                putFloat("buttonSpacingDp", t.buttonSpacingDp)
+                putFloat("textSizeSp", t.textSizeSp)
+                t.textBold?.let { put("textBold", it) }
+                t.showDivider?.let { put("showDivider", it) }
+            })
+        }
+
         return obj.toString()
     }
 
@@ -183,6 +196,17 @@ object SkinSpecCodec {
                     },
                     dimAmount = b.floatOrNull("dimAmount")
                 )
+            },
+            toolbar = obj.optJSONObject("toolbar")?.let { t ->
+                SkinToolbarSpec(
+                    buttonCornerRadiusDp = t.floatOrNull("buttonCornerRadiusDp"),
+                    buttonShadow = if (t.has("buttonShadow")) t.optBoolean("buttonShadow") else null,
+                    buttonBorderWidthDp = t.floatOrNull("buttonBorderWidthDp"),
+                    buttonSpacingDp = t.floatOrNull("buttonSpacingDp"),
+                    textSizeSp = t.floatOrNull("textSizeSp"),
+                    textBold = if (t.has("textBold")) t.optBoolean("textBold") else null,
+                    showDivider = if (t.has("showDivider")) t.optBoolean("showDivider") else null
+                )
             }
         )
     }
@@ -198,7 +222,10 @@ object SkinSpecCodec {
         candidateHighlightColor = obj.colorOrNull("candidateHighlightColor", node),
         preeditTextColor = obj.colorOrNull("preeditTextColor", node),
         borderColor = obj.colorOrNull("borderColor", node),
-        keyShadowColor = obj.colorOrNull("keyShadowColor", node)
+        keyShadowColor = obj.colorOrNull("keyShadowColor", node),
+        toolbarBackground = obj.colorOrNull("toolbarBackground", node),
+        toolbarButtonBackground = obj.colorOrNull("toolbarButtonBackground", node),
+        toolbarTextColor = obj.colorOrNull("toolbarTextColor", node)
     )
 
     private fun encodeColors(scheme: SkinColorScheme): JSONObject = JSONObject().apply {
@@ -213,6 +240,9 @@ object SkinSpecCodec {
         putColor("preeditTextColor", scheme.preeditTextColor)
         putColor("borderColor", scheme.borderColor)
         putColor("keyShadowColor", scheme.keyShadowColor)
+        putColor("toolbarBackground", scheme.toolbarBackground)
+        putColor("toolbarButtonBackground", scheme.toolbarButtonBackground)
+        putColor("toolbarTextColor", scheme.toolbarTextColor)
     }
 
     // ===== JSON 小工具（区分"字段缺失"与"字段非法"）=====

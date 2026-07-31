@@ -2,6 +2,7 @@ package com.ziyou.ime.skin
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
@@ -76,7 +77,14 @@ object SkinPreviewRenderer {
         val rowHeight = (h - rowsTop - padding - gap * (previewRows.size - 1)) / previewRows.size
 
         val keyPaint = fillPaint(applyAlpha(skin.keyBackground, alpha))
-        val shadowPaint = fillPaint(skin.keyShadowColor)
+        val shadowPaint = fillPaint(skin.keyShadowColor).apply {
+            // 与视图层同步：radiusDp > 0 时弥散投影（软件画布完整支持 maskFilter）
+            skin.keyShadow?.let { s ->
+                if (s.radiusDp > 0f) {
+                    maskFilter = BlurMaskFilter(s.radiusDp * density, BlurMaskFilter.Blur.NORMAL)
+                }
+            }
+        }
         val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             color = skin.borderColor

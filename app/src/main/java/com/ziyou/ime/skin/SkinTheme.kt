@@ -60,6 +60,28 @@ class SkinTheme(
     /** 键面整体透明度（背景图透出 / 悬浮半透明场景），1.0 = 完全不透明 */
     val backgroundAlpha: Float get() = resolved.backgroundAlpha
 
+    // ===== 工具栏（解析期已落定，缺省时从候选区/键盘配色派生）=====
+    val toolbarBackground: Int get() = resolved.toolbarBackground
+    val toolbarButtonBackground: Int get() = resolved.toolbarButtonBackground
+    val toolbarTextColor: Int get() = resolved.toolbarTextColor
+    /** 按钮圆角（dp）；负值 = 胶囊全圆角（高度一半） */
+    val toolbarButtonCornerRadiusDp: Float get() = resolved.toolbarButtonCornerRadiusDp
+    val toolbarButtonShadow: Boolean get() = resolved.toolbarButtonShadow
+    val toolbarButtonBorderWidthDp: Float get() = resolved.toolbarButtonBorderWidthDp
+    val toolbarButtonSpacingDp: Float get() = resolved.toolbarButtonSpacingDp
+    val toolbarTextSizeSp: Float get() = resolved.toolbarTextSizeSp
+    val toolbarTextBold: Boolean get() = resolved.toolbarTextBold
+    val toolbarShowDivider: Boolean get() = resolved.toolbarShowDivider
+
+    /** 工具栏文字字体（bold 变体已按 toolbarTextBold 合成） */
+    val toolbarTypeface: Typeface
+        get() = when {
+            typeface != null && toolbarTextBold -> Typeface.create(typeface, Typeface.BOLD)
+            typeface != null -> typeface
+            toolbarTextBold -> Typeface.DEFAULT_BOLD
+            else -> Typeface.DEFAULT
+        }
+
     /** 普通按键文字字体（bold 变体已合成） */
     val keyTypeface: Typeface
         get() = when {

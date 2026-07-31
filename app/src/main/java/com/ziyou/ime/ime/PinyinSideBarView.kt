@@ -2,6 +2,7 @@ package com.ziyou.ime.ime
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
@@ -12,6 +13,7 @@ import android.view.GestureDetector
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import com.ziyou.ime.core.skin.SkinColor
 import com.ziyou.ime.data.SideSymbol
 import com.ziyou.ime.skin.SkinManager
 import com.ziyou.ime.skin.SkinTheme
@@ -49,10 +51,11 @@ class PinyinSideBarView @JvmOverloads constructor(
         private const val ITEM_HEIGHT_DP = 40f
         /** 单元间距（dp） */
         private const val ITEM_MARGIN_DP = 2f
-        /** 单元圆角（dp） */
-        private const val ITEM_RADIUS_DP = 4f
-        /** 文字大小（sp） */
-        private const val TEXT_SIZE_SP = 15f
+        /** 文字字号相对皮肤功能键字号的增量（sp）：
+         *  Light 基线 12+3=15，与皮肤化前硬编码值一致，零视觉回归 */
+        private const val TEXT_SIZE_DELTA_SP = 3f
+        /** 「＋」页脚相对正文的字号增量（sp） */
+        private const val ADD_SIZE_DELTA_SP = 4f
         /** 「＋」页脚符号 */
         private const val ADD_FOOTER_LABEL = "\uFF0B"
         /** 底部固定「符号」键文案 */
@@ -108,6 +111,8 @@ class PinyinSideBarView @JvmOverloads constructor(
 
     private val boardBgPaint = Paint().apply { style = Paint.Style.FILL }
     private val itemBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    /** 单元阴影画笔（与键盘按键同源：皮肤阴影色 + 可选弥散模糊） */
+    private val itemShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER
         typeface = Typeface.DEFAULT
@@ -116,6 +121,9 @@ class PinyinSideBarView @JvmOverloads constructor(
         textAlign = Paint.Align.CENTER
         typeface = Typeface.DEFAULT_BOLD
     }
+
+    /** 正文字号（sp，随皮肤更新） */
+    private var textSizeSp = 15f
 
     // ===== 手势：点击选择 + 竖向滚动 =====
 
@@ -152,8 +160,6 @@ class PinyinSideBarView @JvmOverloads constructor(
     init {
         isHapticFeedbackEnabled = true
         rebuildPaints()
-        textPaint.textSize = sp2px(TEXT_SIZE_SP)
-        addPaint.textSize = sp2px(TEXT_SIZE_SP + 4f)
     }
 
     // ===== 皮肤 =====
@@ -166,13 +172,29 @@ class PinyinSideBarView @JvmOverloads constructor(
     }
 
     private fun rebuildPaints() {
-        boardBgPaint.color = skin.keyboardBackground
+        // 背景类颜色按皮肤整体透明度调制（与键盘视图 skinAlpha 同源规则）
+        boardBgPaint.color = SkinColor.scaleAlpha(skin.keyboardBackground, skin.backgroundAlpha)
         // 侧栏单元与功能键同色，与右侧功能列形成对称的灏灰背景
-        itemBgPaint.color = skin.funcKeyBackground
+        itemBgPaint.color = SkinColor.scaleAlpha(skin.funcKeyBackground, skin.backgroundAlpha)
         textPaint.color = skin.keyTextColor
         textPaint.typeface = skin.textTypeface
         addPaint.color = skin.candidateHighlightColor
+        // 字号随皮肤功能键字号联动（增量映射，Light 基线零回归）
+        textSizeSp = skin.funcTextSizeSp + TEXT_SIZE_DELTA_SP
+        textPaint.textSize = sp2px(textSizeSp)
+        addPaint.textSize = sp2px(textSizeSp + ADD_SIZE_DELTA_SP)
+        // 阴影与键盘按键同源：皮肤阴影色，radiusDp > 0 时弥散模糊
+        itemShadowPaint.color = skin.keyShadowColor
+        val shadowRadius = skin.keyShadow?.radiusDp ?: 0f
+        itemShadowPaint.maskFilter = if (shadowRadius > 0f) {
+            BlurMaskFilter(dp2px(shadowRadius), BlurMaskFilter.Blur.NORMAL)
+        } else {
+            null
+        }
     }
+
+    /** 单元/列表外轮廓圆角（px）：与键盘按键圆角同源，随皮肤变化 */
+    private fun itemRadius(): Float = dp2px(skin.keyCornerRadiusDp)
 
     // ===== 数据更新 =====
 
@@ -296,9 +318,18 @@ class PinyinSideBarView @JvmOverloads constructor(
         canvas.save()
         // 整体圆角裁剪：圆角只作用于列表外轮廓，项间无缝衔接；
         // 同时限制在底部「符号」键之上，避免滚动时覆盖固定键
-        val radius = dp2px(ITEM_RADIUS_DP)
+        val radius = itemRadius()
         val first = itemRects.first()
         val visibleBottom = minOf(contentBottom() - scrollOffset, listBottom())
+        // 列表整体投影（皮肤可关闭）：与键盘按键同源的偏移 + 弥散参数，
+        // 画在裁剪之前，使投影落在轮廓外
+        skin.keyShadow?.let { s ->
+            canvas.drawRoundRect(
+                first.left + dp2px(s.dxDp), listTop + dp2px(s.dyDp),
+                first.right + dp2px(s.dxDp), visibleBottom + dp2px(s.dyDp),
+                radius, radius, itemShadowPaint
+            )
+        }
         listClipPath.rewind()
         listClipPath.addRoundRect(
             first.left, listTop, first.right, visibleBottom, radius, radius, Path.Direction.CW
@@ -320,10 +351,15 @@ class PinyinSideBarView @JvmOverloads constructor(
         canvas.restore()
     }
 
-    /** 绘制底部固定「符号」键（不参与列表滚动） */
+    /** 绘制底部固定「符号」键（不参与列表滚动；圆角/阴影与键盘按键同源） */
     private fun drawBottomSymbolKey(canvas: Canvas) {
         if (symbolKeyRect.height() <= 0f) return
-        val radius = dp2px(ITEM_RADIUS_DP)
+        val radius = itemRadius()
+        skin.keyShadow?.let { s ->
+            val shadowRect = RectF(symbolKeyRect)
+            shadowRect.offset(dp2px(s.dxDp), dp2px(s.dyDp))
+            canvas.drawRoundRect(shadowRect, radius, radius, itemShadowPaint)
+        }
         canvas.drawRoundRect(symbolKeyRect, radius, radius, itemBgPaint)
         drawCenteredText(canvas, SYMBOL_KEY_LABEL, symbolKeyRect, textPaint)
     }
@@ -338,7 +374,7 @@ class PinyinSideBarView @JvmOverloads constructor(
      * 绘制后恢复基础字号，避免影响后续单元。
      */
     private fun drawFittedText(canvas: Canvas, text: String, rect: RectF) {
-        val baseSize = sp2px(TEXT_SIZE_SP)
+        val baseSize = sp2px(textSizeSp)
         val maxWidth = rect.width() - dp2px(4f)
         textPaint.textSize = baseSize
         val measured = textPaint.measureText(text)

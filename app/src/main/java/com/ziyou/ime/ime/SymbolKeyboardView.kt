@@ -342,13 +342,9 @@ class SymbolKeyboardView @JvmOverloads constructor(
         for (i in bottomRow.indices) {
             val key = bottomRow[i]
             val rect = bottomKeyRects.getOrNull(i) ?: continue
-            val bgPaint = when {
-                i == pressedBottomKey -> pressedKeyBgPaint
-                key.isFunctional -> funcKeyBgPaint
-                else -> keyBgPaint
-            }
-            canvas.drawRoundRect(rect, keyRadius, keyRadius, bgPaint)
-            val textPaint = if (key.isFunctional) funcTextPaint else keyTextPaint
+            // 复用基类配色选择（回车强调色 > 按下 > 功能键 > 普通键）
+            canvas.drawRoundRect(rect, keyRadius, keyRadius, backgroundPaintFor(key, i == pressedBottomKey))
+            val textPaint = textPaintFor(key)
             val y = rect.centerY() - (textPaint.descent() + textPaint.ascent()) / 2f
             canvas.drawText(key.label, rect.centerX(), y, textPaint)
         }

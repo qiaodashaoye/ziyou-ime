@@ -68,10 +68,9 @@ class QwertyKeyboardView @JvmOverloads constructor(
     override fun rowIndent(rowIndex: Int, unitWidth: Float): Float =
         if (rowIndex == 1) unitWidth * 0.5f else 0f
 
-    // ===== 配色：Shift 键激活时高亮 =====
+    // ===== 配色：Shift 键激活时高亮（回车强调色/按下态等由基类统一处理）=====
     override fun backgroundPaintFor(key: Key, isPressed: Boolean): Paint = when {
-        isPressed -> pressedKeyBgPaint
-        key.code == KeyCode.XK_Shift_L && shiftState != ShiftState.OFF -> accentBgPaint
+        !isPressed && key.code == KeyCode.XK_Shift_L && shiftState != ShiftState.OFF -> accentBgPaint
         else -> super.backgroundPaintFor(key, isPressed)
     }
 

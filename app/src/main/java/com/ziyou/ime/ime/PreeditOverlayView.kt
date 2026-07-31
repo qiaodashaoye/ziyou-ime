@@ -8,6 +8,7 @@ import android.graphics.Typeface
 import android.util.AttributeSet
 import android.view.View
 import com.ziyou.ime.core.skin.SkinColor
+import com.ziyou.ime.skin.SkinManager
 import com.ziyou.ime.skin.SkinTheme
 
 /**
@@ -65,6 +66,12 @@ class PreeditOverlayView @JvmOverloads constructor(
     private val bgPaint = Paint().apply {
         color = Color.parseColor("#F5F5F5")
         style = Paint.Style.FILL
+    }
+
+    init {
+        // 构造期即接当前皮肤（快照命中 O(1)），避免首帧硬编码灰打底；
+        // Service 层切皮肤时仍会再次下发 applySkin
+        applySkin(SkinManager.getCurrentSkin(context))
     }
 
     /**

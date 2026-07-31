@@ -73,6 +73,92 @@ class SkinResolverTest {
         assertEquals(SkinColor.parse("#FFC107"), material.candidateHighlightColor)
     }
 
+    /** 悬浮立体皮肤（builtin.float3d）：解析结果应与设计规格逐一一致（视觉回归锚点）。 */
+    @Test
+    fun resolve_float3dSkin_matchesDesignSpec() {
+        val light = SkinResolver.resolve(
+            SkinDefaults.builtinSpec(SkinDefaults.ID_FLOAT3D)!!, systemDark = false
+        )
+        assertFalse(light.isDark)
+        assertEquals("悬浮立体", light.name)
+        assertEquals(SkinColor.parse("#E4E6ED"), light.keyboardBackground)
+        assertEquals(SkinColor.parse("#FDFDFF"), light.keyBackground)
+        assertEquals(SkinColor.parse("#C9CCD6"), light.funcKeyBackground)
+        assertEquals(SkinColor.parse("#3D6BFF"), light.candidateHighlightColor)
+        assertEquals(SkinColor.parse("#2E9AA0B3"), light.keyShadowColor)
+        // 一体化不变量：候选区 = 工具栏 = 键盘底板同色（无输入态接缝/显隐闪变）
+        assertEquals(light.keyboardBackground, light.candidateBackground)
+        assertEquals(light.keyboardBackground, light.toolbarBackground)
+        assertEquals(12f, light.keyCornerRadiusDp, 0f)
+        assertEquals(7f, light.keyGapDp, 0f)
+        assertEquals(1.05f, light.keyHeightScale, 0f)
+        assertFalse(light.keyTextBold)
+        // 弥散下投影：悬浮感核心参数
+        assertEquals(
+            SkinShadowSpec(enabled = true, radiusDp = 6f, dxDp = 0f, dyDp = 3f),
+            light.keyShadow
+        )
+
+        val dark = SkinResolver.resolve(
+            SkinDefaults.builtinSpec(SkinDefaults.ID_FLOAT3D)!!, systemDark = true
+        )
+        assertTrue(dark.isDark)
+        assertEquals(SkinColor.parse("#1F2126"), dark.keyboardBackground)
+        assertEquals(SkinColor.parse("#5C82FF"), dark.candidateHighlightColor)
+        assertEquals(SkinColor.parse("#66000000"), dark.keyShadowColor)
+        // 深色变体同样保持三区同色的一体化规则
+        assertEquals(dark.keyboardBackground, dark.candidateBackground)
+        assertEquals(dark.keyboardBackground, dark.toolbarBackground)
+    }
+
+    /** 工具栏缺省值链：颜色从候选区配色派生，样式落到现行视觉（零回归锚点）。 */
+    @Test
+    fun resolve_toolbarDefaults_deriveFromCandidateColors() {
+        val resolved = SkinResolver.resolve(
+            SkinSpec(specVersion = 1, meta = SkinMeta(id = "test.tb", name = "Tb"))
+        )
+        assertEquals(resolved.candidateBackground, resolved.toolbarBackground)
+        assertEquals(
+            SkinColor.blend(
+                resolved.toolbarBackground, resolved.borderColor,
+                SkinDefaults.TOOLBAR_PILL_BLEND_RATIO
+            ),
+            resolved.toolbarButtonBackground
+        )
+        assertEquals(resolved.candidateTextColor, resolved.toolbarTextColor)
+        assertEquals(
+            resolved.funcTextSizeSp + SkinDefaults.TOOLBAR_TEXT_DELTA_SP,
+            resolved.toolbarTextSizeSp, 0f
+        )
+        assertEquals(SkinDefaults.TOOLBAR_CAPSULE_RADIUS, resolved.toolbarButtonCornerRadiusDp, 0f)
+        assertEquals(SkinDefaults.TOOLBAR_BUTTON_SPACING_DP, resolved.toolbarButtonSpacingDp, 0f)
+        assertEquals(0f, resolved.toolbarButtonBorderWidthDp, 0f)
+        assertFalse(resolved.toolbarButtonShadow)
+        assertTrue(resolved.toolbarTextBold)
+        assertTrue(resolved.toolbarShowDivider)
+    }
+
+    /** 悬浮立体的一体化工具栏规格 + 覆盖层对 toolbar 节点的优先级。 */
+    @Test
+    fun resolve_toolbarSpecAndOverride() {
+        val f3 = SkinResolver.resolve(SkinDefaults.builtinSpec(SkinDefaults.ID_FLOAT3D)!!)
+        // 一体化：工具栏与键盘底板同色，按钮按悬浮键面规格绘制
+        assertEquals(f3.keyboardBackground, f3.toolbarBackground)
+        assertEquals(f3.keyBackground, f3.toolbarButtonBackground)
+        assertEquals(12f, f3.toolbarButtonCornerRadiusDp, 0f)
+        assertTrue(f3.toolbarButtonShadow)
+        assertFalse(f3.toolbarTextBold)
+        assertFalse(f3.toolbarShowDivider)
+
+        val override = SkinLayer(
+            toolbar = SkinToolbarSpec(buttonCornerRadiusDp = 8f, showDivider = true)
+        )
+        val merged = SkinResolver.resolve(SkinDefaults.builtinSpec(SkinDefaults.ID_FLOAT3D)!!, override)
+        assertEquals(8f, merged.toolbarButtonCornerRadiusDp, 0f)      // 覆盖 > 规格
+        assertTrue(merged.toolbarShowDivider)                            // 覆盖 > 规格
+        assertTrue(merged.toolbarButtonShadow)                           // 未覆盖字段沿用规格
+    }
+
     /** 覆盖层优先于规格层，规格层优先于默认值。 */
     @Test
     fun resolve_overrideBeatsSpecBeatsDefaults() {

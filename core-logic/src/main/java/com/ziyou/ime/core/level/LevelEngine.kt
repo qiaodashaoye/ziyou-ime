@@ -20,6 +20,7 @@ object LevelEngine {
     // 此处以字面量声明，避免等级域与皮肤域产生编译期耦合。
     private const val THEME_LIGHT = "Light"
     private const val THEME_YUNWU = "云雾拟态"
+    private const val THEME_FLOAT3D = "悬浮立体"
     private const val THEME_MATERIAL = "Material"
 
     /**
@@ -137,11 +138,13 @@ object LevelEngine {
 
     /**
      * 皮肤（主题）解锁所需等级。
-     * Light 为默认皮肤（Lv.1 起可用）；云雾拟态于 Lv.2 解锁；Material 于 Lv.7 解锁。
+     * Light 为默认皮肤（Lv.1 起可用）；云雾拟态于 Lv.2 解锁；
+     * 悬浮立体于 Lv.3 解锁；Material 于 Lv.7 解锁。
      */
     private val THEME_UNLOCK_LEVEL: Map<String, Int> = mapOf(
         THEME_LIGHT to 1,
         THEME_YUNWU to 2,
+        THEME_FLOAT3D to 3,
         THEME_MATERIAL to 7
     )
 

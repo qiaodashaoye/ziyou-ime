@@ -13,6 +13,7 @@ import android.view.View
 import com.ziyou.ime.core.CandidateProto
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.core.skin.SkinColor
+import com.ziyou.ime.skin.SkinManager
 import com.ziyou.ime.skin.SkinTheme
 
 /**
@@ -159,6 +160,9 @@ class SimpleCandidatesView @JvmOverloads constructor(
     init {
         // 设置最小高度
         minimumHeight = dp2px(VIEW_HEIGHT_DP.toFloat()).toInt()
+        // 构造期即接当前皮肤（快照命中 O(1)），避免首帧硬编码灰打底；
+        // Service 层切皮肤时仍会再次下发 applySkin
+        applySkin(SkinManager.getCurrentSkin(context))
     }
 
     /**

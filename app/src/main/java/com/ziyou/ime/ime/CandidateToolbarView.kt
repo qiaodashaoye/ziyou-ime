@@ -2,6 +2,7 @@ package com.ziyou.ime.ime
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -22,6 +23,8 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import androidx.customview.widget.ExploreByTouchHelper
 import com.ziyou.ime.R
+import com.ziyou.ime.core.skin.SkinColor
+import com.ziyou.ime.skin.SkinManager
 import com.ziyou.ime.skin.SkinTheme
 import com.ziyou.ime.core.toolbar.ToolbarConfigLogic
 import com.ziyou.ime.data.ToolbarConfigRepository
@@ -66,18 +69,14 @@ class CandidateToolbarView @JvmOverloads constructor(
          *  整体高度一致，显隐切换时无高度跳动（高度常量单一来源于各自视图） */
         private const val VIEW_HEIGHT_DP =
             PreeditOverlayView.VIEW_HEIGHT_DP + SimpleCandidatesView.VIEW_HEIGHT_DP
-        /** 按钮文字大小（sp） */
-        private const val BUTTON_TEXT_SIZE_SP = 14f
+        /** 按钮文字相对皮肤功能键字号的增量、胶囊混色比与左右留白均已皮肤化
+         *  （见 SkinToolbarSpec / SkinDefaults.TOOLBAR_*），本类不再持有对应常量 */
         /** 单个按钮的固定单元宽度（dp）：从右往左排列，超宽时水平滚动 */
         private const val CELL_WIDTH_DP = 52f
         /** 胶囊上下留白（dp）：胶囊高 = 视图高 - 2 * 该值 */
         private const val PILL_V_INSET_DP = 8f
-        /** 胶囊在单元格内的左右留白（dp） */
-        private const val PILL_H_INSET_DP = 5f
         /** 底部分隔细线高度（dp） */
         private const val DIVIDER_HEIGHT_DP = 0.5f
-        /** 胶囊底色向边框色靠拢的混合比（形成与背景的柔和层次） */
-        private const val PILL_BLEND_RATIO = 0.16f
         /** 常驻固定按钮：收起键盘（不入 [ToolbarItem] 目录，不参与用户自定义） */
         private const val HIDE_LABEL = "\u2304"
         /** 固定收起按钮的无障碍描述 */
@@ -108,6 +107,9 @@ class CandidateToolbarView @JvmOverloads constructor(
     /** 按钮点击回调，参数为 [KeyCode] 自定义功能码（由 Service 统一处理） */
     var onButtonClick: ((keyCode: Int) -> Unit)? = null
 
+    /** 当前按钮字号（sp，随皮肤更新；缩放时以此为基准重算） */
+    private var buttonTextSizeSp = 14f
+
     /**
      * 全局缩放因子（悬浮模式用）：同步缩小视图高度与按钮字号，
      * 与键盘/候选视图的 scaleFactor 保持一致。默认 1.0，停靠模式零影响。
@@ -116,7 +118,7 @@ class CandidateToolbarView @JvmOverloads constructor(
         set(value) {
             if (field != value) {
                 field = value
-                textPaint.textSize = sp2px(BUTTON_TEXT_SIZE_SP)
+                textPaint.textSize = sp2px(buttonTextSizeSp)
                 minimumHeight = dp2px(VIEW_HEIGHT_DP.toFloat()).toInt()
                 // 单元宽随缩放变化，滚动位置归零重新右对齐
                 abortFling()
@@ -153,11 +155,11 @@ class CandidateToolbarView @JvmOverloads constructor(
     /** 应用 Logo 图标（左侧固定按钮，替代原「设」文字胶囊，点击打开工具面板） */
     private val logoDrawable = ContextCompat.getDrawable(context, R.mipmap.ic_launcher)
 
-    /** 当前皮肤（画笔颜色的单一来源，见 [applySkin]） */
-    private var skin: SkinTheme? = null
+    /** 当前皮肤（画笔颜色与工具栏样式的单一来源，见 [applySkin]） */
+    private var skin: SkinTheme = SkinManager.getCurrentSkin(context)
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = sp2px(BUTTON_TEXT_SIZE_SP)
+        textSize = sp2px(14f)
         color = Color.DKGRAY
         typeface = Typeface.DEFAULT_BOLD
         textAlign = Paint.Align.CENTER
@@ -177,6 +179,16 @@ class CandidateToolbarView @JvmOverloads constructor(
     private val pressedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#E0E0E0")
         style = Paint.Style.FILL
+    }
+
+    /** 按钮投影画笔（皮肤 toolbarButtonShadow 开启时与键盘按键同源绘制） */
+    private val pillShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+
+    /** 按钮描边画笔（皮肤 toolbarButtonBorderWidthDp > 0 时使用） */
+    private val pillBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
     }
 
     /** 按下态文字强调色（取主题候选高亮色） */
@@ -311,6 +323,9 @@ class CandidateToolbarView @JvmOverloads constructor(
     init {
         minimumHeight = dp2px(VIEW_HEIGHT_DP.toFloat()).toInt()
         ViewCompat.setAccessibilityDelegate(this, touchHelper)
+        // 构造期即接当前皮肤（快照命中 O(1)），避免首帧硬编码灰打底；
+        // Service 层切皮肤时仍会再次下发 applySkin
+        applySkin(SkinManager.getCurrentSkin(context))
     }
 
     // ===== 配置（数据层） =====
@@ -354,18 +369,31 @@ class CandidateToolbarView @JvmOverloads constructor(
 
     /**
      * 应用皮肤，与候选词视图和键盘视图保持视觉一致（由 Service 层调用）。
-     * 全部配色派生自 [SkinTheme]，皮肤切换后整栏自动换肤。
+     * 工具栏全部外观（背景/按钮底色/圆角/投影/描边/字号/字重/间距/分隔线）
+     * 均由 [SkinTheme] 工具栏字段驱动，缺省值链在解析期已从候选区/键盘配色
+     * 派生落定，皮肤切换后整栏自动换肤。
      */
     fun applySkin(skin: SkinTheme) {
         this.skin = skin
-        bgPaint.color = com.ziyou.ime.core.skin.SkinColor.scaleAlpha(
-            skin.candidateBackground, skin.backgroundAlpha)
-        textPaint.color = skin.candidateTextColor
-        textPaint.typeface = Typeface.create(skin.textTypeface, Typeface.BOLD)
-        pillPaint.color = blendColor(skin.candidateBackground, skin.borderColor, PILL_BLEND_RATIO)
-        pressedPaint.color = skin.keyPressedBackground
+        bgPaint.color = SkinColor.scaleAlpha(skin.toolbarBackground, skin.backgroundAlpha)
+        textPaint.color = skin.toolbarTextColor
+        textPaint.typeface = skin.toolbarTypeface
+        buttonTextSizeSp = skin.toolbarTextSizeSp
+        textPaint.textSize = sp2px(buttonTextSizeSp)
+        pillPaint.color = SkinColor.scaleAlpha(skin.toolbarButtonBackground, skin.backgroundAlpha)
+        pressedPaint.color = SkinColor.scaleAlpha(skin.keyPressedBackground, skin.backgroundAlpha)
         pressedTextColor = skin.candidateHighlightColor
         dividerPaint.color = skin.borderColor
+        // 按钮投影与键盘按键同源：皮肤阴影色，radiusDp > 0 时弥散模糊
+        pillShadowPaint.color = skin.keyShadowColor
+        val shadowRadius = skin.keyShadow?.radiusDp ?: 0f
+        pillShadowPaint.maskFilter = if (shadowRadius > 0f) {
+            BlurMaskFilter(dp2px(shadowRadius), BlurMaskFilter.Blur.NORMAL)
+        } else {
+            null
+        }
+        pillBorderPaint.color = skin.borderColor
+        pillBorderPaint.strokeWidth = dp2px(skin.toolbarButtonBorderWidthDp)
         invalidate()
     }
 
@@ -394,7 +422,7 @@ class CandidateToolbarView @JvmOverloads constructor(
 
         if (width > 0) {
             val vInset = dp2px(PILL_V_INSET_DP)
-            val hInset = dp2px(PILL_H_INSET_DP)
+            val hInset = dp2px(skin.toolbarButtonSpacingDp)
             val textBaseline = height / 2f - (textPaint.descent() + textPaint.ascent()) / 2f
 
             // 动态按钮：裁剪到两侧固定按钮之间，滚动时不侵入固定区
@@ -416,12 +444,16 @@ class CandidateToolbarView @JvmOverloads constructor(
             drawButton(canvas, hideIndex, cellRect(hideIndex), vInset, hInset, textBaseline)
         }
 
-        // 底部细线：与下方键盘区形成视觉分隔
-        val dividerHeight = dp2px(DIVIDER_HEIGHT_DP).coerceAtLeast(1f)
-        canvas.drawRect(0f, height - dividerHeight, width.toFloat(), height.toFloat(), dividerPaint)
+        // 底部细线：与下方键盘区形成视觉分隔（一体化皮肤可关闭，
+        // 关闭后工具栏背景与键盘底板无缝衔接）
+        if (skin.toolbarShowDivider) {
+            val dividerHeight = dp2px(DIVIDER_HEIGHT_DP).coerceAtLeast(1f)
+            canvas.drawRect(0f, height - dividerHeight, width.toFloat(), height.toFloat(), dividerPaint)
+        }
     }
 
     /** 绘制单个按钮（动态与固定按钮共用：胶囊 + 文字 + 按下态变色；
+     *  圆角/投影/描边均由皮肤工具栏参数驱动；
      *  Logo 按钮为图标绘制，常态无胶囊底，按下态保留胶囊高亮反馈） */
     private fun drawButton(
         canvas: Canvas,
@@ -434,7 +466,12 @@ class CandidateToolbarView @JvmOverloads constructor(
         val pill = RectF(
             cell.left + hInset, vInset, cell.right - hInset, height - vInset
         )
-        val radius = pill.height() / 2f
+        // 圆角：皮肤声明 dp 值；负值（缺省）= 胶囊全圆角（现行视觉）
+        val radius = if (skin.toolbarButtonCornerRadiusDp < 0f) {
+            pill.height() / 2f
+        } else {
+            dp2px(skin.toolbarButtonCornerRadiusDp)
+        }
         val pressed = index == pressedIndex
         if (index == logoIndex && logoDrawable != null) {
             // Logo 按钮：按下态先铺胶囊高亮，再居中绘应用图标（图标自带配色，不随皮肤变色）
@@ -449,8 +486,18 @@ class CandidateToolbarView @JvmOverloads constructor(
             logoDrawable.draw(canvas)
             return
         }
-        // 胶囊底色：常态为柔和层次色，按下换按键按下色
+        // 投影（皮肤开启时与键盘按键同源：偏移 + 弥散；按下态跳过，与按键沉降一致）
+        val shadow = skin.keyShadow
+        if (skin.toolbarButtonShadow && shadow != null && !pressed) {
+            val shadowRect = RectF(pill)
+            shadowRect.offset(dp2px(shadow.dxDp), dp2px(shadow.dyDp))
+            canvas.drawRoundRect(shadowRect, radius, radius, pillShadowPaint)
+        }
+        // 胶囊底色：常态为皮肤按钮底色，按下换按键按下色
         canvas.drawRoundRect(pill, radius, radius, if (pressed) pressedPaint else pillPaint)
+        if (skin.toolbarButtonBorderWidthDp > 0f) {
+            canvas.drawRoundRect(pill, radius, radius, pillBorderPaint)
+        }
         // 文字：按下换主题强调色，形成明确的触达反馈
         val normalColor = textPaint.color
         if (pressed) textPaint.color = pressedTextColor
@@ -601,12 +648,4 @@ class CandidateToolbarView @JvmOverloads constructor(
     private fun dp2px(dp: Float): Float = dp * resources.displayMetrics.density * scaleFactor
 
     private fun sp2px(sp: Float): Float = sp * resources.displayMetrics.scaledDensity * scaleFactor
-
-    /** 按比例混合两种颜色（ratio 越大越偏向 color2），与 [BaseKeyboardView] 同款算法 */
-    private fun blendColor(color1: Int, color2: Int, ratio: Float): Int {
-        val r = (Color.red(color1) * (1 - ratio) + Color.red(color2) * ratio).toInt()
-        val g = (Color.green(color1) * (1 - ratio) + Color.green(color2) * ratio).toInt()
-        val b = (Color.blue(color1) * (1 - ratio) + Color.blue(color2) * ratio).toInt()
-        return Color.rgb(r, g, b)
-    }
 }

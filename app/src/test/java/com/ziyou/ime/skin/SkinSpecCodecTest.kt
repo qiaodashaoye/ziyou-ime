@@ -10,6 +10,7 @@ import com.ziyou.ime.core.skin.SkinEffects
 import com.ziyou.ime.core.skin.SkinKeyStyle
 import com.ziyou.ime.core.skin.SkinLayer
 import com.ziyou.ime.core.skin.SkinShadowSpec
+import com.ziyou.ime.core.skin.SkinToolbarSpec
 import com.ziyou.ime.core.skin.SkinTypography
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -49,6 +50,11 @@ class SkinSpecCodecTest {
             "imageDark": "images/bg_dark.png",
             "scaleMode": "tile",
             "dimAmount": 0.3
+          },
+          "toolbar": {
+            "buttonCornerRadiusDp": 12.0,
+            "buttonShadow": true,
+            "showDivider": false
           }
         }
     """.trimIndent()
@@ -74,6 +80,10 @@ class SkinSpecCodecTest {
         assertEquals("images/bg.png", spec.layer.background?.image)
         assertEquals(SkinBackgroundScaleMode.TILE, spec.layer.background?.scaleMode)
         assertEquals(0.3f, spec.layer.background?.dimAmount)
+        assertEquals(12f, spec.layer.toolbar?.buttonCornerRadiusDp)
+        assertEquals(true, spec.layer.toolbar?.buttonShadow)
+        assertEquals(false, spec.layer.toolbar?.showDivider)
+        assertNull(spec.layer.toolbar?.textSizeSp) // 未声明字段保持 null
     }
 
     @Test
@@ -123,7 +133,10 @@ class SkinSpecCodecTest {
         val layer = SkinLayer(
             colorsLight = SkinColorScheme(
                 keyBackground = SkinColor.parse("#80FFFFFF"),
-                candidateHighlightColor = SkinColor.parse("#1976D2")
+                candidateHighlightColor = SkinColor.parse("#1976D2"),
+                toolbarBackground = SkinColor.parse("#E4E6ED"),
+                toolbarButtonBackground = SkinColor.parse("#FDFDFF"),
+                toolbarTextColor = SkinColor.parse("#2A2C33")
             ),
             colorsDark = SkinColorScheme(keyboardBackground = SkinColor.parse("#101010")),
             dimens = SkinDimens(keyCornerRadiusDp = 16f, keyHeightScale = 1.1f),
@@ -137,6 +150,15 @@ class SkinSpecCodecTest {
                 image = "custom_bg.png",
                 scaleMode = SkinBackgroundScaleMode.CENTER_CROP,
                 dimAmount = 0.2f
+            ),
+            toolbar = SkinToolbarSpec(
+                buttonCornerRadiusDp = 10f,
+                buttonShadow = true,
+                buttonBorderWidthDp = 1f,
+                buttonSpacingDp = 4f,
+                textSizeSp = 15f,
+                textBold = false,
+                showDivider = false
             )
         )
         val decoded = SkinSpecCodec.decodeLayerString(SkinSpecCodec.encodeLayer(layer))

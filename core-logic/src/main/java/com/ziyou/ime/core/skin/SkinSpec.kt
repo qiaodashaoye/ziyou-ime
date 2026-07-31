@@ -87,7 +87,13 @@ data class SkinColorScheme(
     val candidateHighlightColor: Int? = null,
     val preeditTextColor: Int? = null,
     val borderColor: Int? = null,
-    val keyShadowColor: Int? = null
+    val keyShadowColor: Int? = null,
+    /** 工具栏背景色；缺省沿用 candidateBackground（与候选区连续，现行视觉） */
+    val toolbarBackground: Int? = null,
+    /** 工具栏按钮底色；缺省按 toolbarBackground 与 borderColor 混色派生（现行胶囊规则） */
+    val toolbarButtonBackground: Int? = null,
+    /** 工具栏文字色；缺省沿用 candidateTextColor */
+    val toolbarTextColor: Int? = null
 ) {
     /** 是否所有字段均未声明（用于 darkMode=both 的完整性校验）。 */
     fun isEmpty(): Boolean =
@@ -95,7 +101,9 @@ data class SkinColorScheme(
             keyPressedBackground == null && funcKeyBackground == null &&
             candidateBackground == null && candidateTextColor == null &&
             candidateHighlightColor == null && preeditTextColor == null &&
-            borderColor == null && keyShadowColor == null
+            borderColor == null && keyShadowColor == null &&
+            toolbarBackground == null && toolbarButtonBackground == null &&
+            toolbarTextColor == null
 }
 
 /** 尺寸参数（dp 语义）。 */
@@ -128,6 +136,29 @@ data class SkinEffects(
     val backgroundAlpha: Float? = null
 )
 
+/**
+ * 工具栏（候选区功能按钮栏）样式参数（全部可缺省）。
+ *
+ * 颜色类字段位于 [SkinColorScheme]（随深浅色变体切换），本节点只承载
+ * 形状/字体/布局类样式；缺省值链保证空节点 ≈ 现行工具栏视觉（零回归）。
+ */
+data class SkinToolbarSpec(
+    /** 按钮圆角（dp）；null = 胶囊全圆角（现行视觉），声明后与按键圆角同语义 */
+    val buttonCornerRadiusDp: Float? = null,
+    /** 按钮是否绘制投影（沿用 effects.keyShadow 参数）；缺省 false */
+    val buttonShadow: Boolean? = null,
+    /** 按钮描边宽度（dp，描边色取 borderColor）；缺省 0 = 不描边 */
+    val buttonBorderWidthDp: Float? = null,
+    /** 按钮在单元格内的左右留白（dp，即按钮间距的一半）；缺省 5dp（现行） */
+    val buttonSpacingDp: Float? = null,
+    /** 文字字号（sp）；缺省 = funcTextSizeSp + 2（现行增量映射） */
+    val textSizeSp: Float? = null,
+    /** 文字粗体；缺省 true（现行） */
+    val textBold: Boolean? = null,
+    /** 是否绘制底部与键盘区的分隔细线；缺省 true；一体化皮肤设 false */
+    val showDivider: Boolean? = null
+)
+
 /** 键盘整体背景（图片）参数。 */
 data class SkinBackgroundSpec(
     /** 包内背景图相对路径（浅色变体） */
@@ -149,7 +180,8 @@ data class SkinLayer(
     val dimens: SkinDimens? = null,
     val typography: SkinTypography? = null,
     val effects: SkinEffects? = null,
-    val background: SkinBackgroundSpec? = null
+    val background: SkinBackgroundSpec? = null,
+    val toolbar: SkinToolbarSpec? = null
 ) {
     /** 按深浅色变体选取配色（深色缺失时回退浅色）。 */
     fun colorsFor(isDark: Boolean): SkinColorScheme? =
@@ -158,7 +190,8 @@ data class SkinLayer(
     /** 是否所有字段均未声明（空覆盖等价于无覆盖）。 */
     fun isEmpty(): Boolean =
         colorsLight == null && colorsDark == null && dimens == null &&
-            typography == null && effects == null && background == null
+            typography == null && effects == null && background == null &&
+            toolbar == null
 
     companion object {
         val EMPTY = SkinLayer()
@@ -215,5 +248,17 @@ data class ResolvedSkin(
     /** 包内背景图相对路径（已按深浅色变体选定）；null = 纯色背景 */
     val backgroundImage: String?,
     val backgroundScaleMode: SkinBackgroundScaleMode,
-    val backgroundDim: Float
+    val backgroundDim: Float,
+    // ===== 工具栏（全部已落定，缺省时由解析期从候选区/键盘配色派生）=====
+    val toolbarBackground: Int,
+    val toolbarButtonBackground: Int,
+    val toolbarTextColor: Int,
+    /** 按钮圆角（dp）；负值 = 胶囊全圆角（高度一半，现行视觉） */
+    val toolbarButtonCornerRadiusDp: Float,
+    val toolbarButtonShadow: Boolean,
+    val toolbarButtonBorderWidthDp: Float,
+    val toolbarButtonSpacingDp: Float,
+    val toolbarTextSizeSp: Float,
+    val toolbarTextBold: Boolean,
+    val toolbarShowDivider: Boolean
 )
