@@ -16,13 +16,17 @@ class ToolPanelCatalogTest {
     fun `面板全量覆盖功能栏目录且含设置入口`() {
         val tools = ToolPanelCatalog.allTools()
         val codes = tools.map { it.keyCode }
-        // 功能栏目录逐项入面板（顺序一致）
+        // 功能栏目录逐项入面板（顺序一致，toolbarId 回指目录 id 供编辑模式增删排序）
         for ((index, item) in ToolbarItem.entries.withIndex()) {
             assertEquals("面板第 $index 项应与功能栏目录同序同码",
                 item.keyCode, tools[index].keyCode)
+            assertEquals("面板第 $index 项 toolbarId 应回指目录 id",
+                item.id, tools[index].toolbarId)
         }
-        // 设置入口为面板专属追加项
+        // 设置入口为面板专属追加项（不参与功能栏自定义，toolbarId 为 null）
         assertTrue("面板必须包含设置入口", KeyCode.KEYCODE_OPEN_SETTINGS in codes)
+        val settings = tools.first { it.keyCode == KeyCode.KEYCODE_OPEN_SETTINGS }
+        assertEquals("设置项不参与功能栏自定义", null, settings.toolbarId)
         assertEquals("面板条目 = 功能栏目录 + 设置", ToolbarItem.entries.size + 1, tools.size)
     }
 

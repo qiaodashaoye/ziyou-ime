@@ -13,20 +13,27 @@ package com.ziyou.ime.ime
  */
 object ToolPanelCatalog {
 
-    /** 工具面板单个条目：图标字符 + 名称（兼无障碍描述）+ 功能码 */
+    /** 工具面板单个条目：图标 + 名称（兼无障碍描述）+ 功能码 */
     data class Tool(
-        /** 面板图标位展示字符（与功能栏 label 同源） */
+        /** 面板图标位展示字符（与功能栏 label 同源；面板已改绘矢量图标 [icon]，
+         *  本字段保留作目录数据与兼容用途） */
         val label: String,
         /** 条目名称（图标下方文本，亦作为无障碍朗读描述） */
         val name: String,
+        /** 面板图标位绘制图标（[ToolbarIconDrawer] 目录，与功能栏同一视觉规格） */
+        val icon: ToolbarIconDrawer.Icon,
         /** [KeyCode] 自定义功能码 */
-        val keyCode: Int
+        val keyCode: Int,
+        /** 对应的 [ToolbarItem] 持久化 id（面板编辑模式的增删排序目标）；
+         *  面板专属追加项（如设置）为 null，不参与功能栏自定义 */
+        val toolbarId: String? = null
     )
 
     /** 面板专属追加项：打开设置页（不入 [ToolbarItem] 功能栏目录） */
-    private val SETTINGS_TOOL = Tool("设", "设置", KeyCode.KEYCODE_OPEN_SETTINGS)
+    private val SETTINGS_TOOL =
+        Tool("设", "设置", ToolbarIconDrawer.Icon.SETTINGS, KeyCode.KEYCODE_OPEN_SETTINGS)
 
     /** 面板展示的全部工具项（顺序：完整功能栏目录 → 面板专属项） */
     fun allTools(): List<Tool> =
-        ToolbarItem.entries.map { Tool(it.label, it.description, it.keyCode) } + SETTINGS_TOOL
+        ToolbarItem.entries.map { Tool(it.label, it.description, it.icon, it.keyCode, it.id) } + SETTINGS_TOOL
 }

@@ -58,13 +58,25 @@ class ToolbarConfigTest {
     }
 
     @Test
-    fun `默认配置按钮顺序符合预期`() {
-        // 设置（settings）与收起键盘（hide）已改为功能栏常驻固定按钮，
-        // 中英切换（language）、符号键盘（symbol）与图片选择（image）已移除，
-        // 粘贴板（clipboard）与方案切换（schema）为新增按钮，其余按钮保持历史顺序不变
+    fun `默认配置为三核心按钮且顺序符合预期`() {
+        // 默认配置收敛为三核心：技能/粘贴板/AI 问答（功能栏从右往左排列，
+        // 视觉左起为 AI→粘贴板→技能）；其余按钮由用户在设置页或键盘内
+        // 工具面板编辑模式自行添加；已自定义的存量用户不受默认值变更影响
         assertEquals(
-            listOf("theme", "schema", "doodle", "skill", "ai", "clipboard", "floating"),
+            listOf("skill", "clipboard", "ai"),
             ToolbarConfigRepository.DEFAULT_IDS
+        )
+    }
+
+    @Test
+    fun `全功能预设覆盖完整目录`() {
+        // 默认配置收敛后，「全功能」预设是一键恢复全部按钮的唯一模板，
+        // 新增目录按钮时由本测试保证预设不脱节
+        val full = ToolbarConfigRepository.PRESETS.firstOrNull { it.name == "全功能" }
+        assertTrue("必须存在「全功能」预设", full != null)
+        assertEquals(
+            "「全功能」预设必须覆盖全部目录按钮",
+            ToolbarItem.ALL_IDS.toSet(), full!!.itemIds.toSet()
         )
     }
 

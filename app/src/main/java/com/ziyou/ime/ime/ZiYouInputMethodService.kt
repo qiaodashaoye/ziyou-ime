@@ -246,6 +246,32 @@ class ZiYouInputMethodService : InputMethodService() {
         override fun onPanelWillOpen() = clearCompositionForPanel()
     }
 
+    /** 键盘选择面板协调器（功能栏「键盘切换」入口，与其他面板同一拆分纪律） */
+    private val keyboardPickers by lazy {
+        KeyboardPickerCoordinator(this, keyboardPickerHost)
+    }
+
+    /** 提供给 [KeyboardPickerCoordinator] 的宿主能力：容器访问与布局切换出口。 */
+    private val keyboardPickerHost = object : KeyboardPickerCoordinator.Host {
+        override fun contentLayout(): LinearLayout? = this@ZiYouInputMethodService.contentLayout
+
+        override fun keyboardContainer(): FrameLayout? =
+            this@ZiYouInputMethodService.keyboardContainer
+
+        override fun candidatesContainer(): LinearLayout? =
+            this@ZiYouInputMethodService.candidatesContainer
+
+        override fun keyboardView(): BaseKeyboardView? = this@ZiYouInputMethodService.keyboardView
+
+        override fun currentKeyboardType(): KeyboardType =
+            this@ZiYouInputMethodService.currentKeyboardType
+
+        override fun switchKeyboard(type: KeyboardType) =
+            this@ZiYouInputMethodService.switchKeyboard(type)
+
+        override fun onPanelWillOpen() = clearCompositionForPanel()
+    }
+
     /** 剪贴板变更监听：复制即收录历史（持强引用，onCreate 注册 / onDestroy 注销） */
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
         captureClipboardToHistory()
@@ -584,6 +610,17 @@ class ZiYouInputMethodService : InputMethodService() {
         keyboardView = installed.keyboardView
         pinyinSideBar = installed.pinyinSideBar
         currentKeyboardType = type
+        // 新建的视图按当前编辑器同步换行键文案（搜索 / 发送 / 换行…）
+        syncEnterKeyLabel()
+    }
+
+    /**
+     * 同步换行键键面文案：按当前编辑器的 imeOptions/inputType 解析
+     * （多行或无动作显示「换行」，声明了动作则显示「搜索」「发送」等），
+     * 与 [InputLogicController] 中回车键的实际落地语义同源（[EnterKeyBehavior]）。
+     */
+    private fun syncEnterKeyLabel() {
+        keyboardView?.enterKeyLabel = EnterKeyBehavior.labelOf(currentInputEditorInfo)
     }
 
     /**
@@ -769,6 +806,9 @@ class ZiYouInputMethodService : InputMethodService() {
         // 刷新涂鸦面板「发送/保存」按钮（同应用内切换输入框时面板可能仍打开）
         doodlePanels.refreshImageSupport()
 
+        // 换行键文案随编辑器动作变化（如微信搜索框显示「搜索」），与实际落地语义一致
+        syncEnterKeyLabel()
+
         // 兜底同步当前剪贴板（服务重启期间漏听的复制在此补收；去重逻辑保证幂等零 IO）
         captureClipboardToHistory()
 
@@ -915,25 +955,27 @@ class ZiYouInputMethodService : InputMethodService() {
                 displayModeCtrl.toggle()
             }
 
-            // 技能面板开关：覆盖/移除键盘区域上的技能面板（与 AI/涂鸦/粘贴板/工具面板互斥）
+            // 技能面板开关：覆盖/移除键盘区域上的技能面板（与其他面板互斥）
             KeyCode.KEYCODE_SKILL_PANEL -> {
                 aiPanels.close()
                 doodlePanels.close()
                 clipboardPanels.close()
                 toolPanels.close()
+                keyboardPickers.close()
                 skillPanels.toggle()
             }
             
-            // AI 问答面板开关：编码区上方展示输入框/答案区（与技能/涂鸦/粘贴板/工具面板互斥）
+            // AI 问答面板开关：编码区上方展示输入框/答案区（与其他面板互斥）
             KeyCode.KEYCODE_AI_ASSISTANT -> {
                 skillPanels.close()
                 doodlePanels.close()
                 clipboardPanels.close()
                 toolPanels.close()
+                keyboardPickers.close()
                 aiPanels.toggle()
             }
             
-            // 涂鸦画板开关：收起键盘展示画布（与技能/AI/粘贴板/工具面板互斥）；
+            // 涂鸦画板开关：收起键盘展示画布（与其他面板互斥）；
             // 编辑器不收图片时面板按钮转为「保存」（存相册兑底），
             // 仅当发送/保存两条出路都不可用（Android 10 以下且不收图）时拦截不开面板
             KeyCode.KEYCODE_DOODLE_PANEL -> {
@@ -945,28 +987,43 @@ class ZiYouInputMethodService : InputMethodService() {
                     aiPanels.close()
                     clipboardPanels.close()
                     toolPanels.close()
+                    keyboardPickers.close()
                     doodlePanels.toggle()
                 }
             }
             
-            // 粘贴板历史面板开关：收起键盘展示历史列表（与技能/AI/涂鸦/工具面板互斥）；
+            // 粘贴板历史面板开关：收起键盘展示历史列表（与其他面板互斥）；
             // 点击条目经 commitDirectToEditor 直达宿主输入框，不接管 commitTarget
             KeyCode.KEYCODE_CLIPBOARD_PANEL -> {
                 skillPanels.close()
                 aiPanels.close()
                 doodlePanels.close()
                 toolPanels.close()
+                keyboardPickers.close()
                 clipboardPanels.toggle()
             }
 
             // 工具面板开关（候选区按钮栏 Logo 键）：收起键盘网格展示全部工具项
-            //（与技能/AI/涂鸦/粘贴板面板互斥）；选中工具后先关面板再回到本方法统一路由
+            //（与其他面板互斥）；选中工具后先关面板再回到本方法统一路由
             KeyCode.KEYCODE_TOOL_PANEL -> {
                 skillPanels.close()
                 aiPanels.close()
                 doodlePanels.close()
                 clipboardPanels.close()
+                keyboardPickers.close()
                 toolPanels.toggle()
+            }
+
+            // 键盘选择面板开关（功能栏「键盘切换」按钮）：收起键盘列表展示
+            // 可选主键盘布局（与其他面板互斥）；选中后先关面板再走
+            // switchKeyboard 统一切换路径，不触碰编辑器文本与光标
+            KeyCode.KEYCODE_KEYBOARD_PICKER -> {
+                skillPanels.close()
+                aiPanels.close()
+                doodlePanels.close()
+                clipboardPanels.close()
+                toolPanels.close()
+                keyboardPickers.toggle()
             }
 
             // 收起键盘（候选区按钮栏）

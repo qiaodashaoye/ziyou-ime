@@ -34,6 +34,24 @@ object ToolbarConfigLogic {
         return result
     }
 
+    /**
+     * 追加 [id] 到列表末尾（键盘内编辑面板「添加」操作）；
+     * 已存在时原样返回（幂等，不产生重复项）。
+     */
+    fun add(ids: List<String>, id: String): List<String> =
+        if (id in ids) ids else ids + id
+
+    /**
+     * 移除 [id]（键盘内编辑面板「移除」操作）；不存在时原样返回；
+     * 移除后为空时同样原样返回，保证功能栏永不为空
+     * （与设置页「至少保留一个功能按钮」约束一致）。
+     */
+    fun remove(ids: List<String>, id: String): List<String> {
+        if (id !in ids) return ids
+        val result = ids.filter { it != id }
+        return result.ifEmpty { ids }
+    }
+
     /** 序列化为持久化字符串（逗号分隔）。 */
     fun encode(ids: List<String>): String = ids.joinToString(SEPARATOR)
 

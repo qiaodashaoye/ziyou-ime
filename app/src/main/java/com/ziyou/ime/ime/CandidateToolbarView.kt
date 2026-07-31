@@ -8,7 +8,6 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
-import android.graphics.Typeface
 import android.os.Bundle
 import android.util.AttributeSet
 import android.view.GestureDetector
@@ -18,11 +17,9 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
 import android.widget.OverScroller
-import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import androidx.customview.widget.ExploreByTouchHelper
-import com.ziyou.ime.R
 import com.ziyou.ime.core.skin.SkinColor
 import com.ziyou.ime.skin.SkinManager
 import com.ziyou.ime.skin.SkinTheme
@@ -39,11 +36,13 @@ import com.ziyou.ime.data.ToolbarConfigRepository
  *
  * 按钮内容与顺序由用户在设置页自定义（[ToolbarConfigRepository]），
  * 目录见 [ToolbarItem]；本视图注册 SharedPreferences 监听（观察者模式），
- * 设置页保存后无需重启输入法即时刷新。左侧固定按钮为应用 Logo，
- * 点击打开工具面板（全量工具目录见 [ToolPanelCatalog]，设置入口已移入其中）。
+ * 设置页保存后无需重启输入法即时刷新。左侧固定按钮为极简「字」字标 Logo
+ * （矢量绘制，随皮肤染色），点击打开工具面板（全量工具目录见
+ * [ToolPanelCatalog]，设置入口已移入其中）。
  *
  * 遵循本项目「数据-皮肤-绘制」分离与 Canvas 纯绘制的既有风格
  * （见 [BaseKeyboardView] / [SimpleCandidatesView]）：按钮绘制为主题化胶囊，
+ * 胶囊内绘矢量图标（[ToolbarIconDrawer]，图标色跟随皮肤 toolbarTextColor），
  * 全部配色取自 [SkinTheme]，无硬编码样式。点击通过 [onButtonClick] 回调
  * 携带 [KeyCode] 自定义功能码向上抛出，由 Service 的 handleSoftKeyPress 统一路由，
  * View 层不持有 Service 引用。
@@ -69,23 +68,22 @@ class CandidateToolbarView @JvmOverloads constructor(
          *  整体高度一致，显隐切换时无高度跳动（高度常量单一来源于各自视图） */
         private const val VIEW_HEIGHT_DP =
             PreeditOverlayView.VIEW_HEIGHT_DP + SimpleCandidatesView.VIEW_HEIGHT_DP
-        /** 按钮文字相对皮肤功能键字号的增量、胶囊混色比与左右留白均已皮肤化
-         *  （见 SkinToolbarSpec / SkinDefaults.TOOLBAR_*），本类不再持有对应常量 */
+        /** 胶囊混色比与左右留白均已皮肤化（见 SkinToolbarSpec /
+         *  SkinDefaults.TOOLBAR_*）；按钮内容已由文字标签改为矢量图标
+         *  （[ToolbarIconDrawer]），皮肤字号/字重字段不再参与本视图绘制 */
+        /** 图标边长占胶囊高的比例（胶囊随缩放变化，图标等比跟随） */
+        private const val ICON_SIZE_RATIO = 0.62f
         /** 单个按钮的固定单元宽度（dp）：从右往左排列，超宽时水平滚动 */
         private const val CELL_WIDTH_DP = 52f
         /** 胶囊上下留白（dp）：胶囊高 = 视图高 - 2 * 该值 */
         private const val PILL_V_INSET_DP = 8f
         /** 底部分隔细线高度（dp） */
         private const val DIVIDER_HEIGHT_DP = 0.5f
-        /** 常驻固定按钮：收起键盘（不入 [ToolbarItem] 目录，不参与用户自定义） */
-        private const val HIDE_LABEL = "\u2304"
-        /** 固定收起按钮的无障碍描述 */
+        /** 固定收起按钮（不入 [ToolbarItem] 目录，不参与用户自定义）的无障碍描述 */
         private const val HIDE_DESCRIPTION = "收起键盘"
-        /** 固定 Logo 按钮（左侧，应用图标）的无障碍描述：打开工具面板
+        /** 固定 Logo 按钮（左侧，极简字标）的无障碍描述：打开工具面板
          *  （原固定设置按钮已替换，设置入口移入工具面板，见 [ToolPanelCatalog]） */
         private const val LOGO_DESCRIPTION = "字由工具面板"
-        /** Logo 图标在单元格内的边长占胶囊高的比例（留白后视觉与文字胶囊对齐） */
-        private const val LOGO_SIZE_RATIO = 1.15f
     }
 
     /** 当前展示的动态按钮（配置驱动，经目录清洗后永不为空；不含两个固定按钮） */
@@ -107,18 +105,15 @@ class CandidateToolbarView @JvmOverloads constructor(
     /** 按钮点击回调，参数为 [KeyCode] 自定义功能码（由 Service 统一处理） */
     var onButtonClick: ((keyCode: Int) -> Unit)? = null
 
-    /** 当前按钮字号（sp，随皮肤更新；缩放时以此为基准重算） */
-    private var buttonTextSizeSp = 14f
-
     /**
-     * 全局缩放因子（悬浮模式用）：同步缩小视图高度与按钮字号，
+     * 全局缩放因子（悬浮模式用）：同步缩小视图高度与按钮图标，
      * 与键盘/候选视图的 scaleFactor 保持一致。默认 1.0，停靠模式零影响。
+     * （图标边长按胶囊高比例派生，胶囊随 dp2px 缩放，无需单独重算）
      */
     var scaleFactor: Float = 1f
         set(value) {
             if (field != value) {
                 field = value
-                textPaint.textSize = sp2px(buttonTextSizeSp)
                 minimumHeight = dp2px(VIEW_HEIGHT_DP.toFloat()).toInt()
                 // 单元宽随缩放变化，滚动位置归零重新右对齐
                 abortFling()
@@ -152,18 +147,14 @@ class CandidateToolbarView @JvmOverloads constructor(
         }
     }
 
-    /** 应用 Logo 图标（左侧固定按钮，替代原「设」文字胶囊，点击打开工具面板） */
-    private val logoDrawable = ContextCompat.getDrawable(context, R.mipmap.ic_launcher)
-
     /** 当前皮肤（画笔颜色与工具栏样式的单一来源，见 [applySkin]） */
     private var skin: SkinTheme = SkinManager.getCurrentSkin(context)
 
-    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = sp2px(14f)
-        color = Color.DKGRAY
-        typeface = Typeface.DEFAULT_BOLD
-        textAlign = Paint.Align.CENTER
-    }
+    /** 矢量图标绘制器（路径构造期缓存，逐帧绘制零分配） */
+    private val iconDrawer = ToolbarIconDrawer()
+
+    /** 图标常态颜色（跟随皮肤 toolbarTextColor，即原按钮文字色） */
+    private var iconColor = Color.DKGRAY
 
     private val bgPaint = Paint().apply {
         color = Color.parseColor("#F5F5F5")
@@ -191,7 +182,7 @@ class CandidateToolbarView @JvmOverloads constructor(
         style = Paint.Style.STROKE
     }
 
-    /** 按下态文字强调色（取主题候选高亮色） */
+    /** 按下态图标强调色（取主题候选高亮色） */
     private var pressedTextColor = Color.DKGRAY
 
     private val dividerPaint = Paint().apply {
@@ -376,10 +367,7 @@ class CandidateToolbarView @JvmOverloads constructor(
     fun applySkin(skin: SkinTheme) {
         this.skin = skin
         bgPaint.color = SkinColor.scaleAlpha(skin.toolbarBackground, skin.backgroundAlpha)
-        textPaint.color = skin.toolbarTextColor
-        textPaint.typeface = skin.toolbarTypeface
-        buttonTextSizeSp = skin.toolbarTextSizeSp
-        textPaint.textSize = sp2px(buttonTextSizeSp)
+        iconColor = skin.toolbarTextColor
         pillPaint.color = SkinColor.scaleAlpha(skin.toolbarButtonBackground, skin.backgroundAlpha)
         pressedPaint.color = SkinColor.scaleAlpha(skin.keyPressedBackground, skin.backgroundAlpha)
         pressedTextColor = skin.candidateHighlightColor
@@ -423,7 +411,6 @@ class CandidateToolbarView @JvmOverloads constructor(
         if (width > 0) {
             val vInset = dp2px(PILL_V_INSET_DP)
             val hInset = dp2px(skin.toolbarButtonSpacingDp)
-            val textBaseline = height / 2f - (textPaint.descent() + textPaint.ascent()) / 2f
 
             // 动态按钮：裁剪到两侧固定按钮之间，滚动时不侵入固定区
             if (items.isNotEmpty()) {
@@ -434,14 +421,14 @@ class CandidateToolbarView @JvmOverloads constructor(
                     // 仅绘制视口内可见按钮（滚动时跳过两侧移出的单元）
                     if (cell.right <= dynamicLeftEdge()) break // 从右往左排列，后续单元更靠左，均不可见
                     if (cell.left >= dynamicRightEdge()) continue
-                    drawButton(canvas, i, cell, vInset, hInset, textBaseline)
+                    drawButton(canvas, i, cell, vInset, hInset)
                 }
                 canvas.restore()
             }
 
             // 固定按钮：Logo 始终绘在最左侧、收起始终绘在最右侧，不随滚动移动
-            drawButton(canvas, logoIndex, cellRect(logoIndex), vInset, hInset, textBaseline)
-            drawButton(canvas, hideIndex, cellRect(hideIndex), vInset, hInset, textBaseline)
+            drawButton(canvas, logoIndex, cellRect(logoIndex), vInset, hInset)
+            drawButton(canvas, hideIndex, cellRect(hideIndex), vInset, hInset)
         }
 
         // 底部细线：与下方键盘区形成视觉分隔（一体化皮肤可关闭，
@@ -452,16 +439,16 @@ class CandidateToolbarView @JvmOverloads constructor(
         }
     }
 
-    /** 绘制单个按钮（动态与固定按钮共用：胶囊 + 文字 + 按下态变色；
-     *  圆角/投影/描边均由皮肤工具栏参数驱动；
-     *  Logo 按钮为图标绘制，常态无胶囊底，按下态保留胶囊高亮反馈） */
+    /** 绘制单个按钮（动态与固定按钮共用：胶囊 + 矢量图标 + 按下态变色；
+     *  圆角/投影/描边均由皮肤工具栏参数驱动；图标经 [ToolbarIconDrawer]
+     *  以皮肤 toolbarTextColor 单色染色；
+     *  Logo 按钮为应用图标绘制，常态无胶囊底，按下态保留胶囊高亮反馈） */
     private fun drawButton(
         canvas: Canvas,
         index: Int,
         cell: RectF,
         vInset: Float,
-        hInset: Float,
-        textBaseline: Float
+        hInset: Float
     ) {
         val pill = RectF(
             cell.left + hInset, vInset, cell.right - hInset, height - vInset
@@ -473,17 +460,18 @@ class CandidateToolbarView @JvmOverloads constructor(
             dp2px(skin.toolbarButtonCornerRadiusDp)
         }
         val pressed = index == pressedIndex
-        if (index == logoIndex && logoDrawable != null) {
-            // Logo 按钮：按下态先铺胶囊高亮，再居中绘应用图标（图标自带配色，不随皮肤变色）
+        if (index == logoIndex) {
+            // Logo 按钮：极简字标矢量图标，常态无胶囊底保持清爽，
+            // 按下态保留胶囊高亮反馈；染色与其余图标同源（皮肤 toolbarTextColor）
             if (pressed) canvas.drawRoundRect(pill, radius, radius, pressedPaint)
-            val size = pill.height() * LOGO_SIZE_RATIO
-            val cx = cell.centerX()
-            val cy = height / 2f
-            logoDrawable.setBounds(
-                (cx - size / 2f).toInt(), (cy - size / 2f).toInt(),
-                (cx + size / 2f).toInt(), (cy + size / 2f).toInt()
+            iconDrawer.draw(
+                canvas,
+                ToolbarIconDrawer.Icon.LOGO,
+                cell.centerX(),
+                height / 2f,
+                pill.height() * ICON_SIZE_RATIO,
+                if (pressed) pressedTextColor else iconColor
             )
-            logoDrawable.draw(canvas)
             return
         }
         // 投影（皮肤开启时与键盘按键同源：偏移 + 弥散；按下态跳过，与按键沉降一致）
@@ -498,11 +486,15 @@ class CandidateToolbarView @JvmOverloads constructor(
         if (skin.toolbarButtonBorderWidthDp > 0f) {
             canvas.drawRoundRect(pill, radius, radius, pillBorderPaint)
         }
-        // 文字：按下换主题强调色，形成明确的触达反馈
-        val normalColor = textPaint.color
-        if (pressed) textPaint.color = pressedTextColor
-        canvas.drawText(labelAt(index), cell.centerX(), textBaseline, textPaint)
-        textPaint.color = normalColor
+        // 图标：按下换主题强调色，形成明确的触达反馈
+        iconDrawer.draw(
+            canvas,
+            iconAt(index),
+            cell.centerX(),
+            height / 2f,
+            pill.height() * ICON_SIZE_RATIO,
+            if (pressed) pressedTextColor else iconColor
+        )
     }
 
     // ===== 触摸 / 无障碍事件 =====
@@ -622,11 +614,11 @@ class CandidateToolbarView @JvmOverloads constructor(
 
     // ===== 按钮属性查询（动态按钮取自 [items]，[hideIndex]/[logoIndex] 为固定按钮） =====
 
-    /** 第 [index] 个按钮的展示文本（Logo 按钮为图标绘制，无文本） */
-    private fun labelAt(index: Int): String = when (index) {
-        hideIndex -> HIDE_LABEL
-        logoIndex -> ""
-        else -> items[index].label
+    /** 第 [index] 个按钮的绘制图标 */
+    private fun iconAt(index: Int): ToolbarIconDrawer.Icon = when (index) {
+        hideIndex -> ToolbarIconDrawer.Icon.HIDE
+        logoIndex -> ToolbarIconDrawer.Icon.LOGO
+        else -> items[index].icon
     }
 
     /** 第 [index] 个按钮的无障碍描述 */
@@ -646,6 +638,4 @@ class CandidateToolbarView @JvmOverloads constructor(
     // ===== 单位转换工具（已叠加缩放因子，悬浮模式下尺寸统一缩放） =====
 
     private fun dp2px(dp: Float): Float = dp * resources.displayMetrics.density * scaleFactor
-
-    private fun sp2px(sp: Float): Float = sp * resources.displayMetrics.scaledDensity * scaleFactor
 }

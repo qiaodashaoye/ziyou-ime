@@ -109,6 +109,8 @@ object KeyCode {
     const val KEYCODE_NUMBER_KEYBOARD = -114
     /** 用于内部标识工具面板开关（候选区按钮栏 Logo 键，展示全部工具项） */
     const val KEYCODE_TOOL_PANEL = -115
+    /** 用于内部标识键盘选择面板开关（候选区按钮栏，列表选择主键盘布局） */
+    const val KEYCODE_KEYBOARD_PICKER = -116
 
     /**
      * 将Android KeyEvent的keyCode转换为Rime keysym
