@@ -77,7 +77,7 @@ class SkinRepositorySpecCacheTest {
     @Test
     fun builtinSpec_bypassesCacheAndDisk() {
         // 内置皮肤直接取内存规格，与磁盘/缓存无关
-        val spec = SkinRepository.loadSpec(context, SkinDefaults.ID_LIGHT)
-        assertEquals(SkinDefaults.ID_LIGHT, spec.meta.id)
+        val spec = SkinRepository.loadSpec(context, SkinDefaults.ID_FLOAT3D)
+        assertEquals(SkinDefaults.ID_FLOAT3D, spec.meta.id)
     }
 }

@@ -32,10 +32,10 @@ object SkinResolver {
         val o = override?.takeIf { !it.isEmpty() }
         val s = spec.layer
 
-        // 配色链：覆盖 > 规格 > 内置默认（深色变体缺失时兜底对应内置配色）
+        // 配色链：覆盖 > 规格 > 内置默认（缺省字段兜底到对应变体的内置配色）
         val oc = o?.colorsFor(isDark)
         val sc = s.colorsFor(isDark)
-        val dc = if (isDark) SkinDefaults.YUNWU_DARK_COLORS else SkinDefaults.LIGHT_COLORS
+        val dc = if (isDark) SkinDefaults.YUNWU_DARK_COLORS else SkinDefaults.FLOAT3D_LIGHT_COLORS
 
         val keyBackground = oc?.keyBackground ?: sc?.keyBackground ?: dc.keyBackground!!
         val borderColor = oc?.borderColor ?: sc?.borderColor ?: dc.borderColor!!

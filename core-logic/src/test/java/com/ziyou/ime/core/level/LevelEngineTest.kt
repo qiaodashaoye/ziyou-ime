@@ -9,7 +9,7 @@ import org.junit.Test
  * [LevelEngine] 纯计算引擎回归测试。
  *
  * 覆盖：分段计分（全额/半额/封顶）、连续签到奖励、等级判定与进度、皮肤/音效解锁门槛。
- * 主题名使用字面量（与 ThemeManager 常量一致），避免测试引入 Android 依赖。
+ * 主题名使用字面量（与 SkinDefaults 内置皮肤 meta.name 一致），避免测试引入 Android 依赖。
  */
 class LevelEngineTest {
 
@@ -91,11 +91,12 @@ class LevelEngineTest {
 
     @Test
     fun themeUnlock_byLevel() {
-        assertTrue(LevelEngine.isThemeUnlocked("Light", 1))
+        // 悬浮立体为默认皮肤，Lv.1 起可用
+        assertTrue(LevelEngine.isThemeUnlocked("悬浮立体", 1))
+        assertEquals(1, LevelEngine.themeUnlockLevel("悬浮立体"))
         assertFalse(LevelEngine.isThemeUnlocked("云雾拟态", 1))
         assertTrue(LevelEngine.isThemeUnlocked("云雾拟态", 2))
-        assertFalse(LevelEngine.isThemeUnlocked("悬浮立体", 2))
-        assertTrue(LevelEngine.isThemeUnlocked("悬浮立体", 3))
+        assertFalse(LevelEngine.isThemeUnlocked("Material", 6))
         assertFalse(LevelEngine.isThemeUnlocked("Material", 1))
         assertTrue(LevelEngine.isThemeUnlocked("Material", 7))
     }

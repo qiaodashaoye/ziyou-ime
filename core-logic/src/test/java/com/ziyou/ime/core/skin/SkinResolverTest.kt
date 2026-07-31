@@ -11,7 +11,7 @@ import org.junit.Test
  */
 class SkinResolverTest {
 
-    /** 空规格（只有 meta）：全部字段应落到 SkinDefaults，等价迁移前 Light 视觉。 */
+    /** 空规格（只有 meta）：全部字段应落到 SkinDefaults 兜底（浅色配色 = 默认皮肤浅色变体）。 */
     @Test
     fun resolve_emptySpec_fallsBackToDefaults() {
         val spec = SkinSpec(
@@ -20,8 +20,8 @@ class SkinResolverTest {
         )
         val resolved = SkinResolver.resolve(spec)
 
-        assertEquals(SkinDefaults.LIGHT_COLORS.keyboardBackground!!, resolved.keyboardBackground)
-        assertEquals(SkinDefaults.LIGHT_COLORS.keyTextColor!!, resolved.keyTextColor)
+        assertEquals(SkinDefaults.FLOAT3D_LIGHT_COLORS.keyboardBackground!!, resolved.keyboardBackground)
+        assertEquals(SkinDefaults.FLOAT3D_LIGHT_COLORS.keyTextColor!!, resolved.keyTextColor)
         assertEquals(SkinDefaults.KEY_CORNER_RADIUS_DP, resolved.keyCornerRadiusDp, 0f)
         assertEquals(SkinDefaults.KEY_GAP_DP, resolved.keyGapDp, 0f)
         assertEquals(SkinDefaults.KEY_TEXT_SIZE_SP, resolved.keyTextSizeSp, 0f)
@@ -34,22 +34,17 @@ class SkinResolverTest {
         // funcKey 缺省按现行混色规则派生
         assertEquals(
             SkinColor.blend(
-                SkinDefaults.LIGHT_COLORS.keyBackground!!,
-                SkinDefaults.LIGHT_COLORS.borderColor!!,
+                SkinDefaults.FLOAT3D_LIGHT_COLORS.keyBackground!!,
+                SkinDefaults.FLOAT3D_LIGHT_COLORS.borderColor!!,
                 SkinDefaults.FUNC_KEY_BLEND_RATIO
             ),
             resolved.funcKeyBackground
         )
     }
 
-    /** 内置三皮肤解析结果应与预设色值逐一一致（视觉回归锚点）。 */
+    /** 内置皮肤解析结果应与预设色值逐一一致（视觉回归锚点）。 */
     @Test
     fun resolve_builtinSkins_matchLegacyThemeColors() {
-        val light = SkinResolver.resolve(SkinDefaults.builtinSpec(SkinDefaults.ID_LIGHT)!!)
-        assertEquals(SkinColor.parse("#F5F5F5"), light.keyboardBackground)
-        assertEquals(SkinColor.parse("#1976D2"), light.candidateHighlightColor)
-        assertFalse(light.isDark)
-
         // 云雾拟态皮肤（builtin.yunwu）：darkMode=both，跟随系统深浅色切变体
         val yunwuLight = SkinResolver.resolve(
             SkinDefaults.builtinSpec(SkinDefaults.ID_YUNWU)!!, systemDark = false
@@ -208,10 +203,10 @@ class SkinResolverTest {
     /** darkMode=light 的皮肤不受 systemDark 影响。 */
     @Test
     fun resolve_lightOnlySkin_ignoresSystemDark() {
-        val spec = SkinDefaults.builtinSpec(SkinDefaults.ID_LIGHT)!!
+        val spec = SkinDefaults.builtinSpec(SkinDefaults.ID_MATERIAL)!!
         val resolved = SkinResolver.resolve(spec, systemDark = true)
         assertFalse(resolved.isDark)
-        assertEquals(SkinColor.parse("#F5F5F5"), resolved.keyboardBackground)
+        assertEquals(SkinColor.parse("#E3F2FD"), resolved.keyboardBackground)
     }
 
     /** 阴影 enabled=false 归一为 null（关闭）；显式 funcKey 优先于派生。 */

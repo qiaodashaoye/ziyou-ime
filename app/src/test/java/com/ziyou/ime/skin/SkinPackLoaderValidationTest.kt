@@ -95,8 +95,9 @@ class SkinPackLoaderValidationTest {
 
     @Test
     fun builtinIdImpersonation_rejected() {
+        // builtin. 为保留前缀：现行内置与历史上已移除的内置 id 均不可冒用
         val impostor = """
-            { "specVersion": 1, "meta": { "id": "builtin.light", "name": "Fake" } }
+            { "specVersion": 1, "meta": { "id": "builtin.fake", "name": "Fake" } }
         """.trimIndent()
         val result = SkinPackLoader.validateZip(buildZip("skin.json" to impostor.toByteArray()))
         assertTrue(result is SkinPackLoader.ValidateResult.Bad)

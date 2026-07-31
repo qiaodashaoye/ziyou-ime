@@ -20,7 +20,7 @@ class SkinChangeKindTest {
 
     private fun theme(
         layer: SkinLayer? = null,
-        skinId: String = SkinDefaults.ID_LIGHT
+        skinId: String = SkinDefaults.DEFAULT_SKIN_ID
     ): SkinTheme {
         val spec = SkinDefaults.builtinSpec(skinId)!!
         return SkinTheme(SkinResolver.resolve(spec, layer))

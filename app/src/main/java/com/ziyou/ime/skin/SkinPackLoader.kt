@@ -158,8 +158,8 @@ object SkinPackLoader {
                 return ValidateResult.Bad(listOf(e.message ?: "skin.json 非法"))
             }
 
-            // id 约束：不可冒充内置皮肤
-            if (SkinDefaults.isBuiltin(spec.meta.id)) {
+            // id 约束：不可冒用 builtin. 保留前缀（含历史上已移除的内置 id）
+            if (SkinDefaults.isReservedId(spec.meta.id)) {
                 errors += "皮肤 id 与内置皮肤冲突: ${spec.meta.id}"
             }
             // 引用资源必须真实存在于包内

@@ -4,8 +4,8 @@ package com.ziyou.ime.core.skin
  * 皮肤默认值链的最底层 + 内置三皮肤规格。
  *
  * 尺寸/字体默认值与迁移前视图层硬编码常量一一对应（BaseKeyboardView /
- * SimpleCandidatesView / PreeditOverlayView），保证"空皮肤 ≈ 迁移前 Light 主题"，
- * 老视觉零回归；Light/Material 配色迁移自原 ThemeManager 预设，云雾拟态为全新设计配色。
+ * SimpleCandidatesView / PreeditOverlayView），保证稀疏皮肤解析结果稳定可预期；
+ * Material 配色迁移自原 ThemeManager 预设，云雾拟态与悬浮立体为全新设计配色。
  */
 object SkinDefaults {
 
@@ -13,13 +13,15 @@ object SkinDefaults {
     const val SPEC_VERSION = 1
 
     // ===== 内置皮肤 id =====
-    const val ID_LIGHT = "builtin.light"
     const val ID_YUNWU = "builtin.yunwu"
     const val ID_FLOAT3D = "builtin.float3d"
     const val ID_MATERIAL = "builtin.material"
 
+    /** 内置皮肤 id 保留前缀（导入皮肤不得使用，含历史上已移除的内置 id）。 */
+    const val BUILTIN_ID_PREFIX = "builtin."
+
     /** 默认皮肤（始终可用的兜底）。 */
-    const val DEFAULT_SKIN_ID = ID_LIGHT
+    const val DEFAULT_SKIN_ID = ID_FLOAT3D
 
     // ===== 尺寸默认值（dp，源自 BaseKeyboardView 迁移前常量）=====
     const val KEY_CORNER_RADIUS_DP = 5f
@@ -49,7 +51,7 @@ object SkinDefaults {
     /** 工具栏胶囊底色派生混色比（背景色向边框色靠拢，原 PILL_BLEND_RATIO）。 */
     const val TOOLBAR_PILL_BLEND_RATIO = 0.16f
 
-    /** 工具栏文字相对功能键字号的默认增量（sp，Light 基线 12+2=14）。 */
+    /** 工具栏文字相对功能键字号的默认增量（sp，迁移前基线 12+2=14）。 */
     const val TOOLBAR_TEXT_DELTA_SP = 2f
 
     /** 工具栏按钮在单元格内的默认左右留白（dp，原 PILL_H_INSET_DP）。 */
@@ -61,19 +63,7 @@ object SkinDefaults {
     /** 默认阴影：向下偏移 1dp 的实心投影（迁移前 drawKey 行为）。 */
     val DEFAULT_SHADOW = SkinShadowSpec(enabled = true, radiusDp = 0f, dxDp = 0f, dyDp = 1f)
 
-    // ===== 内置配色（Light/Material 迁移自 ThemeManager 预设；云雾拟态为全新配色）=====
-
-    val LIGHT_COLORS = SkinColorScheme(
-        keyboardBackground = SkinColor.parse("#F5F5F5"),
-        keyBackground = SkinColor.parse("#FFFFFF"),
-        keyTextColor = SkinColor.parse("#212121"),
-        keyPressedBackground = SkinColor.parse("#E0E0E0"),
-        candidateBackground = SkinColor.parse("#FFFFFF"),
-        candidateTextColor = SkinColor.parse("#212121"),
-        candidateHighlightColor = SkinColor.parse("#1976D2"),
-        preeditTextColor = SkinColor.parse("#424242"),
-        borderColor = SkinColor.parse("#BDBDBD")
-    )
+    // ===== 内置配色（Material 迁移自 ThemeManager 预设；云雾拟态/悬浮立体为全新配色）=====
 
     /**
      * 云雾拟态风格 · 浅色变体（builtin.yunwu 皮肤，取自参考图）：
@@ -166,12 +156,6 @@ object SkinDefaults {
     // ===== 内置皮肤规格 =====
     // name 即设置页展示名，与 LevelEngine 皮肤解锁表键名保持一致
 
-    private val lightSpec = SkinSpec(
-        specVersion = SPEC_VERSION,
-        meta = SkinMeta(id = ID_LIGHT, name = "Light", darkMode = SkinDarkMode.LIGHT),
-        layer = SkinLayer(colorsLight = LIGHT_COLORS)
-    )
-
     // 云雾拟态皮肤：双套配色跟随系统深浅色；
     // 大圆角胶囊键面 + 柔和弥散投影 + 粗体键文字，还原参考图视觉
     private val yunwuSpec = SkinSpec(
@@ -202,7 +186,7 @@ object SkinDefaults {
         )
     )
 
-    // 悬浮立体皮肤（Lv.3 解锁）：参考图 3D 悬浮键盘风格——
+    // 悬浮立体皮肤（默认皮肤，Lv.1 起可用）：参考图 3D 悬浮键盘风格——
     // 大键距留出投影落脚空间，dy=3dp 弥散下投影（radiusDp 经 BlurMaskFilter 柔化），
     // 按下态切入底板色域形成「按压下陷」深度反转；
     // 工具栏与键盘底板同色、按钮按悬浮键面样式绘制（同圆角 + 投影 + 无分隔线），
@@ -258,10 +242,13 @@ object SkinDefaults {
         layer = SkinLayer(colorsLight = MATERIAL_COLORS)
     )
 
-    /** 全部内置皮肤规格（设置页展示顺序）。 */
-    val builtinSpecs: List<SkinSpec> = listOf(lightSpec, yunwuSpec, float3dSpec, materialSpec)
+    /** 全部内置皮肤规格（设置页展示顺序，默认皮肤居首）。 */
+    val builtinSpecs: List<SkinSpec> = listOf(float3dSpec, yunwuSpec, materialSpec)
 
     fun isBuiltin(id: String): Boolean = builtinSpecs.any { it.meta.id == id }
+
+    /** 导入皮肤是否冒用保留 id（含现行内置与历史上已移除的内置 id）。 */
+    fun isReservedId(id: String): Boolean = id.startsWith(BUILTIN_ID_PREFIX)
 
     fun builtinSpec(id: String): SkinSpec? = builtinSpecs.firstOrNull { it.meta.id == id }
 
@@ -269,6 +256,6 @@ object SkinDefaults {
     fun legacyThemeToSkinId(themeName: String?): String = when (themeName) {
         "Dark" -> ID_YUNWU
         "Material" -> ID_MATERIAL
-        else -> ID_LIGHT
+        else -> DEFAULT_SKIN_ID
     }
 }

@@ -52,7 +52,7 @@ class PinyinSideBarView @JvmOverloads constructor(
         /** 单元间距（dp） */
         private const val ITEM_MARGIN_DP = 2f
         /** 文字字号相对皮肤功能键字号的增量（sp）：
-         *  Light 基线 12+3=15，与皮肤化前硬编码值一致，零视觉回归 */
+         *  迁移前基线 12+3=15，与皮肤化前硬编码值一致，零视觉回归 */
         private const val TEXT_SIZE_DELTA_SP = 3f
         /** 「＋」页脚相对正文的字号增量（sp） */
         private const val ADD_SIZE_DELTA_SP = 4f
@@ -179,7 +179,7 @@ class PinyinSideBarView @JvmOverloads constructor(
         textPaint.color = skin.keyTextColor
         textPaint.typeface = skin.textTypeface
         addPaint.color = skin.candidateHighlightColor
-        // 字号随皮肤功能键字号联动（增量映射，Light 基线零回归）
+        // 字号随皮肤功能键字号联动（增量映射，迁移前基线零回归）
         textSizeSp = skin.funcTextSizeSp + TEXT_SIZE_DELTA_SP
         textPaint.textSize = sp2px(textSizeSp)
         addPaint.textSize = sp2px(textSizeSp + ADD_SIZE_DELTA_SP)

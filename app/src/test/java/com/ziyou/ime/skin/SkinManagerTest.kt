@@ -53,10 +53,10 @@ class SkinManagerTest {
 
     @Test
     fun currentSkinIdChange_invalidatesSnapshot() {
-        val light = SkinManager.getCurrentSkin(context)
+        val initial = SkinManager.getCurrentSkin(context)
         SkinRepository.setCurrentSkinId(context, SkinDefaults.ID_MATERIAL)
         val material = SkinManager.getCurrentSkin(context)
-        assertNotSame(light, material)
+        assertNotSame(initial, material)
         assertEquals(SkinDefaults.ID_MATERIAL, material.id)
     }
 

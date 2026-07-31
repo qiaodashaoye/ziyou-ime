@@ -36,7 +36,11 @@ object SkinRepository {
     private const val LEGACY_KEY_THEME = "current_theme"
 
     // 已废弃的历史内置皮肤 id → 现行 id（读取时透明改写）
-    private val RENAMED_SKIN_IDS = mapOf("builtin.dark" to SkinDefaults.ID_YUNWU)
+    private val RENAMED_SKIN_IDS = mapOf(
+        "builtin.dark" to SkinDefaults.ID_YUNWU,
+        // Light 皮肤已移除，历史持久化 id 回退默认皮肤
+        "builtin.light" to SkinDefaults.DEFAULT_SKIN_ID
+    )
 
     /** 深浅色策略。 */
     enum class DarkModePolicy(val id: String) {
