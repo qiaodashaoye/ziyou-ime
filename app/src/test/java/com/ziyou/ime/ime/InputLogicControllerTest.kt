@@ -1,5 +1,6 @@
 package com.ziyou.ime.ime
 
+import android.text.InputType
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import com.ziyou.ime.core.CommitProto
@@ -175,15 +176,48 @@ class InputLogicControllerTest {
     }
 
     @Test
-    fun processKey_notConsumedReturnWithoutCommitTarget_noOp() = runTest {
+    fun processKey_notConsumedReturnWithoutCommitTarget_sendsEnterKeyEvents() = runTest {
         fakeEngine.api.bulkResults = mutableListOf(
             KeyEventResult(consumed = false, commit = null, context = null)
         )
 
         controller.processKey(KeyCode.XK_Return, 0)
 
+        // 无编辑器动作（editorInfo 为空）→ 补发一对 ENTER 按下/抬起事件插入换行
+        verify(exactly = 2) { inputConnection.sendKeyEvent(any()) }
+        verify(exactly = 0) { inputConnection.performEditorAction(any()) }
         verify(exactly = 0) { inputConnection.commitText(any(), any()) }
-        verify(exactly = 0) { inputConnection.deleteSurroundingText(any(), any()) }
+    }
+
+    @Test
+    fun processKey_notConsumedReturnWithEditorAction_performsEditorAction() = runTest {
+        fakeEngine.api.bulkResults = mutableListOf(
+            KeyEventResult(consumed = false, commit = null, context = null)
+        )
+        callbacks.editorInfo = EditorInfo().apply { imeOptions = EditorInfo.IME_ACTION_SEARCH }
+
+        controller.processKey(KeyCode.XK_Return, 0)
+
+        // 单行搜索框：回车执行编辑器动作而非插入换行符
+        verify { inputConnection.performEditorAction(EditorInfo.IME_ACTION_SEARCH) }
+        verify(exactly = 0) { inputConnection.sendKeyEvent(any()) }
+    }
+
+    @Test
+    fun processKey_notConsumedReturnMultiLineEditor_sendsEnterKeyEvents() = runTest {
+        fakeEngine.api.bulkResults = mutableListOf(
+            KeyEventResult(consumed = false, commit = null, context = null)
+        )
+        // 多行输入框即使声明了 action，回车仍为换行
+        callbacks.editorInfo = EditorInfo().apply {
+            imeOptions = EditorInfo.IME_ACTION_SEND
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        }
+
+        controller.processKey(KeyCode.XK_Return, 0)
+
+        verify(exactly = 2) { inputConnection.sendKeyEvent(any()) }
+        verify(exactly = 0) { inputConnection.performEditorAction(any()) }
     }
 
     // ===== 按键未消费：可打印字符 =====
@@ -464,8 +498,11 @@ class InputLogicControllerTest {
         var lastRenderedContext: ContextProto? = null
             private set
 
+        /** 当前编辑器信息（换行键语义取决于 imeOptions/inputType） */
+        var editorInfo: EditorInfo? = null
+
         override fun currentInputConnection(): InputConnection? = ic
-        override fun currentEditorInfo(): EditorInfo? = null
+        override fun currentEditorInfo(): EditorInfo? = editorInfo
         override fun renderContext(context: ContextProto?) {
             lastRenderedContext = context
         }

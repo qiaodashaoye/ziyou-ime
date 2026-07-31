@@ -23,7 +23,8 @@ import com.ziyou.ime.skin.SkinTheme
  * 只需继承本类并提供布局与按键处理，而无需重复实现绘制 / 触摸 / 皮肤逻辑。
  *
  * 共用能力：
- * - 基于「行 × 相对宽度」的布局模型（[rows]）与自动尺寸计算
+ * - 基于「行 × 相对宽度」的布局模型（[rows]）与自动尺寸计算，
+ *   或按 [gridColumns] 启用的「列网格」模型（各行共用同一套列，跨行严格对齐）
  * - Canvas 绘制（背景、圆角、阴影、文字，圆角/间距/阴影/字体均由皮肤参数化）
  * - 触摸按下高亮 + 触觉反馈
  * - 与 [SkinManager] 集成的皮肤着色（[applySkin]）
@@ -37,6 +38,7 @@ import com.ziyou.ime.skin.SkinTheme
  * - [getKeyDisplayText] / [drawKeyContent]：按键文字渲染
  * - [backgroundPaintFor] / [textPaintFor]：按键配色
  * - [rowIndent]：整行缩进
+ * - [gridColumns]：启用列网格布局
  */
 abstract class BaseKeyboardView @JvmOverloads constructor(
     context: Context,
@@ -71,7 +73,15 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
         /** 九宫格多字母键所承载的字母序列，如 "abc"；普通键为 null */
         val letters: String? = null,
         /** 纵向跨行数（默认 1）。如九宫格「换行」键跨第 3~4 行 */
-        val heightSpan: Int = 1
+        val heightSpan: Int = 1,
+        /**
+         * 左侧额外让出的间距（单位：[keyGap] 倍数，仅列网格模式生效）。
+         * 用于边缘功能键与相邻区块之间加宽分隔（如全键盘退格与字母区之间），
+         * 让出的部分从本键键面中扣除，不影响其所占列位。
+         */
+        val insetGapStart: Float = 0f,
+        /** 右侧额外让出的间距（单位：[keyGap] 倍数，仅列网格模式生效） */
+        val insetGapEnd: Float = 0f
     )
 
     // ===== 回调 =====
@@ -104,6 +114,19 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
         }
 
     /**
+     * 换行键键面文字（随宿主编辑器动作变化：搜索 / 发送 / 完成…），
+     * 由 Service 层在装载键盘与开始输入时经 [EnterKeyBehavior] 同步；
+     * 仅作用于以「换行」标注的键面，以图标标注回车的布局（如符号键盘的 ⏎）保持不变。
+     */
+    var enterKeyLabel: String = EnterKeyBehavior.LABEL_NEWLINE
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
+    /**
      * 全局缩放因子（悬浮模式用）。影响按键高度/间距/圆角/内边距与文字大小，
      * 按键宽度随容器自适应无需缩放。默认 1.0，停靠模式零影响。
      */
@@ -122,6 +145,16 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
 
     // ===== 布局定义（由子类提供） =====
     protected abstract val rows: List<List<Key>>
+
+    /**
+     * 列网格总列数：非 null 时启用「列网格」布局 —— 各行共用由列数推导的同一列宽，
+     * [Key.width] 语义变为「跨列数（含被跨越的列间距）」，因此键数不同的行也能严格
+     * 对齐同一套列（如全键盘第 3 行 Z 对齐第 2 行 S）。
+     *
+     * null（默认）时沿用「整行按相对宽度均摊」模型；启用后 [forcedUnitWidth] /
+     * [rowUnitWidth] 不再参与列宽计算。
+     */
+    protected open val gridColumns: Int? = null
 
     // ===== 按键矩形位置缓存 =====
     protected data class KeyRect(
@@ -304,34 +337,54 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
     protected open fun recalculateKeyPositions() {
         keyRects.clear()
         val availableWidth = width - keyboardPadding * 2
+        // 列网格模式的单列宽度（整行 = columns 列 + (columns-1) 个列间距），各行共用
+        val gridUnit = gridColumns
+            ?.takeIf { it > 0 }
+            ?.let { (availableWidth - (it - 1) * keyGap) / it }
 
         for (rowIndex in rows.indices) {
             val row = rows[rowIndex]
             if (row.isEmpty()) continue
-            val totalWeight = row.sumOf { it.width.toDouble() }.toFloat()
-            val totalGapWidth = (row.size - 1) * keyGap
-            val unitWidth = forcedUnitWidth
+            val unitWidth = gridUnit
+                ?: forcedUnitWidth
                 ?: rowUnitWidth(rowIndex, availableWidth)
-                ?: (availableWidth - totalGapWidth) / totalWeight
+                ?: run {
+                    val totalWeight = row.sumOf { it.width.toDouble() }.toFloat()
+                    (availableWidth - (row.size - 1) * keyGap) / totalWeight
+                }
 
             var x = keyboardPadding + rowIndent(rowIndex, unitWidth)
             val y = keyboardPadding + rowIndex * (keyHeight * keyHeightMultiplier + keyGap)
 
             for (colIndex in row.indices) {
                 val key = row[colIndex]
-                val keyWidth = unitWidth * key.width
                 // 跨行键高度 = span 行高 + 中间 (span-1) 个行间距
                 val spannedHeight = keyHeight * keyHeightMultiplier * key.heightSpan +
                         keyGap * (key.heightSpan - 1)
-                val rect = RectF(x, y, x + keyWidth, y + spannedHeight)
+                val rect: RectF
+                if (gridUnit != null) {
+                    // 列网格：x 按「跨列数 × 列距」整列步进（跨行对齐的关键），键面在
+                    // 所占列位内减去右侧列间距，再按 insetGap* 让出更宽的区块分隔
+                    val slotWidth = key.width * (unitWidth + keyGap)
+                    rect = RectF(
+                        x + key.insetGapStart * keyGap,
+                        y,
+                        x + slotWidth - keyGap - key.insetGapEnd * keyGap,
+                        y + spannedHeight
+                    )
+                    x += slotWidth
+                } else {
+                    val keyWidth = unitWidth * key.width
+                    rect = RectF(x, y, x + keyWidth, y + spannedHeight)
+                    x += keyWidth + keyGap
+                }
                 keyRects.add(KeyRect(key, rect, rowIndex, colIndex))
-                x += keyWidth + keyGap
             }
         }
     }
 
     /**
-     * 整行左侧缩进（单位：px）。默认无缩进，子类可覆写实现如 QWERTY 第二行半键缩进。
+     * 整行左侧缩进（单位：px）。默认无缩进，子类可覆写实现如 QWERTY 第二行半列缩进。
      */
     protected open fun rowIndent(rowIndex: Int, unitWidth: Float): Float = 0f
 
@@ -418,8 +471,16 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
         else -> keyTextPaint
     }
 
-    /** 按键显示文本。默认返回 label，子类可根据状态覆写 */
-    protected open fun getKeyDisplayText(key: Key): String = key.label
+    /**
+     * 按键显示文本。默认返回 label，仅「换行」键面换为当前编辑器动作文案
+     * （[enterKeyLabel]）；子类可根据自身状态覆写（未命中的分支应回调 super）。
+     */
+    protected open fun getKeyDisplayText(key: Key): String =
+        if (key.code == KeyCode.XK_Return && key.label == EnterKeyBehavior.LABEL_NEWLINE) {
+            enterKeyLabel
+        } else {
+            key.label
+        }
 
     // ===== 触摸处理 =====
 

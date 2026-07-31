@@ -4,6 +4,8 @@ import android.content.ClipDescription
 import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
+import android.view.KeyCharacterMap
+import android.view.KeyEvent
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import androidx.core.view.inputmethod.InputConnectionCompat
@@ -116,7 +118,8 @@ class InputLogicController(
 
     /**
      * 核心按键处理：将按键发送给 Rime 引擎并处理返回结果。
-     * 被 Rime 消费则取 commit 文本上屏 + 刷新 UI；未消费则退格删字符或可打印字符直接上屏。
+     * 被 Rime 消费则取 commit 文本上屏 + 刷新 UI；未消费则退格删字符、回车按编辑器语义
+     * 落地（见 [handleEnterKey]）或可打印字符直接上屏。
      * 热路径走 [RimeApi.processKeyBulk]：processKey/getCommit/getContext 单次引擎调度完成，
      * 相比逐个调用减少 2 次主线程↔Rime 线程往返与 2 次 JNI 跨界。
      */
@@ -167,11 +170,8 @@ class InputLogicController(
                             callbacks.currentInputConnection()?.deleteSurroundingText(1, 0)
                         }
                     }
-                    // 回车键：上屏目标为面板时路由给面板（如 AI 面板触发发送）
-                    keyCode == KeyCode.XK_Return && commitTarget != null -> {
-                        val target = commitTarget
-                        withContext(Dispatchers.Main) { target?.onEnter() }
-                    }
+                    // 回车键：Rime 只在有编码时消费 Return，无编码时由本层按目标语义落地
+                    keyCode == KeyCode.XK_Return -> handleEnterKey()
                     // 可打印字符且Rime未处理，直接提交
                     keyCode in 0x20..0x7E && mask == 0 -> {
                         val char = keyCode.toChar().toString()
@@ -370,6 +370,55 @@ class InputLogicController(
             }
         }
     }
+
+    /**
+     * 回车键落地（Rime 未消费，即当前无编码）。
+     *
+     * - 上屏目标为面板时路由给面板（如 AI 面板触发发送）。
+     * - 否则按 [EnterKeyBehavior] 解析宿主编辑器语义：声明了搜索 / 发送 / 前往等动作的
+     *   单行输入框走 `performEditorAction`；多行或无动作的输入框补发一对
+     *   ENTER 按键事件（而非 `commitText("\n")`），使换行符插入与「监听回车键」的
+     *   编辑器（搜索框、聊天框、终端类应用）都能正确响应。
+     */
+    private suspend fun handleEnterKey() {
+        val target = commitTarget
+        if (target != null) {
+            withContext(Dispatchers.Main) { target.onEnter() }
+            return
+        }
+        val ic = callbacks.currentInputConnection() ?: return
+        val action = EnterKeyBehavior.actionOf(callbacks.currentEditorInfo())
+        if (action != EnterKeyBehavior.ACTION_NEWLINE) {
+            ic.performEditorAction(action)
+            return
+        }
+        sendEnterKeyEvents(ic)
+    }
+
+    /**
+     * 向编辑器补发一对（按下 + 抬起）ENTER 物理按键事件。
+     *
+     * 标记 [KeyEvent.FLAG_SOFT_KEYBOARD] + [KeyEvent.FLAG_KEEP_TOUCH_MODE] 并使用
+     * [KeyCharacterMap.VIRTUAL_KEYBOARD] 设备号，与系统输入法 `sendDownUpKeyEvents`
+     * 行为一致：编辑器既可按普通换行处理，也可在 `onKeyDown` 中识别为回车。
+     */
+    private fun sendEnterKeyEvents(ic: InputConnection) {
+        val downTime = SystemClock.uptimeMillis()
+        ic.sendKeyEvent(enterKeyEvent(downTime, downTime, KeyEvent.ACTION_DOWN))
+        ic.sendKeyEvent(enterKeyEvent(downTime, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP))
+    }
+
+    private fun enterKeyEvent(downTime: Long, eventTime: Long, action: Int) = KeyEvent(
+        downTime,
+        eventTime,
+        action,
+        KeyEvent.KEYCODE_ENTER,
+        0,
+        0,
+        KeyCharacterMap.VIRTUAL_KEYBOARD,
+        0,
+        KeyEvent.FLAG_SOFT_KEYBOARD or KeyEvent.FLAG_KEEP_TOUCH_MODE
+    )
 
     /** 侧栏自定义符号直接上屏（无活跃编码时可见，直接提交内容）。 */
     fun commitSideSymbol(value: String) {

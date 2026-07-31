@@ -213,7 +213,8 @@ class NineGridKeyboardView @JvmOverloads constructor(
 
     override fun getKeyDisplayText(key: Key): String = when (key.code) {
         KeyCode.KEYCODE_SWITCH_LANGUAGE -> if (isChineseMode) "中" else "英"
-        else -> key.label
+        // 换行键文案（搜索 / 发送…）等由基类统一处理
+        else -> super.getKeyDisplayText(key)
     }
 
     // ===== 按键渲染（三种样式）=====
