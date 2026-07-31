@@ -1,0 +1,12 @@
+# 单元测试用例数基线（全仓唯一来源，只增不减）
+#
+# 用途：scripts/build-release.sh 的测试门禁会从 Gradle JUnit XML 报告
+#       （*/build/test-results/testDebugUnitTest/*.xml）累加实测用例数，
+#       低于本文件记录的基线即判定失败。
+#
+# 更新方式：
+#   ./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest
+#   把实测总数写到下面（首个纯数字行即基线，其余行为注释）。
+#
+# 当前实测：:core-logic 179 + :app 158（2026-07-31，全绿、0 跳过）
+337

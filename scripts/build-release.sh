@@ -97,13 +97,71 @@ done
 echo ">> 预编译库检查通过: ${ABI_ARR[*]}"
 
 # ---------------------------------------------------------------------------
-# 2. 单元测试门禁（38 用例基线）
+# 2. 单元测试门禁（全绿 + 用例数不低于基线）
+#    基线唯一来源：scripts/unit-test-baseline.txt（只增不减）
 # ---------------------------------------------------------------------------
+BASELINE_FILE="${ROOT_DIR}/scripts/unit-test-baseline.txt"
+
+# 从 Gradle JUnit XML 报告的 <testsuite> 头部属性累加用例统计，
+# 输出“tests failures errors skipped”四个数（参数为待累加的 xml 文件）
+sum_test_results() {
+  awk '
+    /<testsuite / {
+      if (match($0, /tests="[0-9]+"/))    { T += substr($0, RSTART + 7,  RLENGTH - 8)  }
+      if (match($0, /failures="[0-9]+"/)) { F += substr($0, RSTART + 10, RLENGTH - 11) }
+      if (match($0, /errors="[0-9]+"/))   { E += substr($0, RSTART + 8,  RLENGTH - 9)  }
+      if (match($0, /skipped="[0-9]+"/))  { S += substr($0, RSTART + 9,  RLENGTH - 10) }
+    }
+    END { printf "%d %d %d %d\n", T, F, E, S }
+  ' "$@"
+}
+
 if [ "${SKIP_TESTS}" -eq 0 ]; then
   echo ">> 运行全量单元测试 ..."
   ./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest
+
+  if [ ! -f "${BASELINE_FILE}" ]; then
+    echo "错误: 缺少用例数基线文件 ${BASELINE_FILE}。" >&2
+    exit 1
+  fi
+  BASELINE="$(awk '/^[0-9]+$/ { print; exit }' "${BASELINE_FILE}")"
+  if [ -z "${BASELINE}" ]; then
+    echo "错误: ${BASELINE_FILE} 内没有合法的基线数字。" >&2
+    exit 1
+  fi
+
+  RESULT_XML=()
+  for M in core-logic app; do
+    for XML in "${ROOT_DIR}/${M}/build/test-results/testDebugUnitTest"/*.xml; do
+      [ -f "${XML}" ] && RESULT_XML+=("${XML}")
+    done
+  done
+  if [ "${#RESULT_XML[@]}" -eq 0 ]; then
+    echo "错误: 未找到 Gradle 测试报告（*/build/test-results/testDebugUnitTest/*.xml），无法核对用例数。" >&2
+    exit 1
+  fi
+
+  read -r TESTS FAILURES ERRORS SKIPPED <<< "$(sum_test_results "${RESULT_XML[@]}")"
+  echo ">> 实测用例数: ${TESTS}（失败 ${FAILURES} / 错误 ${ERRORS} / 跳过 ${SKIPPED}），基线 ${BASELINE}"
+
+  if [ "$((FAILURES + ERRORS))" -gt 0 ]; then
+    echo "错误: 单元测试未全绿（失败 ${FAILURES} / 错误 ${ERRORS}）。" >&2
+    exit 1
+  fi
+  if [ "${SKIPPED}" -gt 0 ]; then
+    echo "错误: 有 ${SKIPPED} 个用例被跳过（@Ignore）；基线只增不减，禁止跳过既有用例使套件变绿。" >&2
+    exit 1
+  fi
+  if [ "${TESTS}" -lt "${BASELINE}" ]; then
+    echo "错误: 实测用例数 ${TESTS} 低于基线 ${BASELINE}，基线只增不减。" >&2
+    echo "请补回被删除的用例；确需下调基线时，在提交说明里写明理由并同步更新 ${BASELINE_FILE}。" >&2
+    exit 1
+  fi
+  if [ "${TESTS}" -gt "${BASELINE}" ]; then
+    echo ">> [提示] 用例数已增至 ${TESTS}，请把 ${BASELINE_FILE} 的基线更新为该值。"
+  fi
 else
-  echo ">> [警告] 已跳过单元测试（--skip-tests），正式发布请勿使用。"
+  echo ">> [警告] 已跳过单元测试（--skip-tests），正式发布请勿使用；用例数门禁同时被跳过。"
 fi
 
 # ---------------------------------------------------------------------------

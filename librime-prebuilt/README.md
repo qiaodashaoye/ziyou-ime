@@ -161,12 +161,15 @@ cd ..
 
 ziyou-ime 的 JNI 层通过 CMake 开关 `WITH_LUA` / `WITH_OCTAGRAM` / `WITH_PREDICT` 决定是否声明模块依赖。若要启用，需要**同时**：
 
-1. **在本模块中把对应插件编译进 `librime.a`**。将插件源码放到 `plugins/` 下，例如：
+1. **在本模块中把对应插件编译进 `librime.a`**。`librime-predict` 已在仓库根 `.gitmodules` 登记为子模块（版本随索引里的 commit 固定），干净克隆只需初始化；`lua` / `octagram` 仍按需手工克隆到 `plugins/` 下：
 
    ```bash
+   # predict：在仓库根执行一次即可（版本由子模块 commit 固定）
+   git submodule update --init --recursive librime-prebuilt/plugins/librime-predict
+
+   # lua / octagram：按需手工克隆
    git clone https://github.com/hchunhui/librime-lua        librime-prebuilt/plugins/librime-lua
    git clone https://github.com/lotem/librime-octagram      librime-prebuilt/plugins/librime-octagram
-   git clone https://github.com/rime/librime-predict         librime-prebuilt/plugins/librime-predict
    # librime-lua 还需其第三方依赖（lua 源码），参考该仓库 thirdparty 分支
    ```
 
