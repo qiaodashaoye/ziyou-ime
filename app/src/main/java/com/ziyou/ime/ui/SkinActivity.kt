@@ -73,7 +73,6 @@ class SkinActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        title = "键盘皮肤"
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -102,7 +101,7 @@ class SkinActivity : AppCompatActivity() {
         gridLayout = GridLayout(this).apply { columnCount = 2 }
         root.addView(gridLayout)
 
-        setContentView(ScrollView(this).apply { addView(root) })
+        setContentViewWithTitleBar("键盘皮肤", ScrollView(this).apply { addView(root) })
         refreshGrid()
     }
 

@@ -51,8 +51,7 @@ class SkillManagerActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        title = "技能插件"
-        setContentView(buildView())
+        setContentViewWithTitleBar("技能插件", buildView())
         refreshList()
     }
 

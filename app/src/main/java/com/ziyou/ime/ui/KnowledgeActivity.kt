@@ -54,8 +54,7 @@ class KnowledgeActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        title = "AI 知识库"
-        setContentView(buildView())
+        setContentViewWithTitleBar("AI 知识库", buildView())
         refreshList()
     }
 

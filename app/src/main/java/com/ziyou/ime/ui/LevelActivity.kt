@@ -2,7 +2,6 @@ package com.ziyou.ime.ui
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -14,6 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -38,11 +38,15 @@ class LevelActivity : ComponentActivity() {
 
         val state = LevelRepository.load(this)
 
-        setContent {
-            MaterialTheme {
-                LevelScreen(state = state, onBack = { finish() })
+        // 标题栏复用 View 版 [TitleBarView]（与设置页等共用同一实现，样式天然一致），
+        // 内容区仍为 Compose，经 ComposeView 挂在标题栏下方
+        setContentViewWithTitleBar("我的等级", ComposeView(this).apply {
+            setContent {
+                MaterialTheme {
+                    LevelScreen(state = state)
+                }
             }
-        }
+        })
     }
 }
 
@@ -71,35 +75,19 @@ private val ROADMAP = listOf(
 
 // ===== 页面骨架 =====
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LevelScreen(state: LevelState, onBack: () -> Unit) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("我的等级") },
-                navigationIcon = {
-                    TextButton(onClick = onBack) { Text("返回", fontSize = 14.sp) }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
-            )
-        }
-    ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            LevelCard(state)
-            StatsRow(state)
-            RoadmapSection(state)
-            PrivacyNote()
-        }
+private fun LevelScreen(state: LevelState) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        LevelCard(state)
+        StatsRow(state)
+        RoadmapSection(state)
+        PrivacyNote()
     }
 }
 

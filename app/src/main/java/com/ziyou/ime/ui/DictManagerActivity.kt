@@ -3,7 +3,6 @@ package com.ziyou.ime.ui
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -15,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -40,11 +40,15 @@ class DictManagerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        setContent {
-            MaterialTheme {
-                DictManagerScreen(viewModel = viewModel)
+        // 标题栏复用 View 版 [TitleBarView]（与设置页等共用同一实现，样式天然一致），
+        // 内容区仍为 Compose，经 ComposeView 挂在标题栏下方
+        setContentViewWithTitleBar("扩展词库", ComposeView(this).apply {
+            setContent {
+                MaterialTheme {
+                    DictManagerScreen(viewModel = viewModel)
+                }
             }
-        }
+        })
 
         // 监听部署状态，给出 Toast 提示
         lifecycleScope.launch {
@@ -67,7 +71,6 @@ class DictManagerActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DictManagerScreen(viewModel: DictManagerViewModel) {
     val catalogState by viewModel.catalogState.collectAsState()
@@ -85,84 +88,69 @@ private fun DictManagerScreen(viewModel: DictManagerViewModel) {
         onDismiss = { viewModel.dismissPreview() }
     )
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("扩展词库") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
-            )
+    Column(modifier = Modifier.fillMaxSize()) {
+        // 分类筛选 TabRow
+        CategoryTabRow(
+            selectedCategory = selectedCategory,
+            showInstalledOnly = showInstalledOnly,
+            onCategorySelected = { viewModel.selectCategory(it) },
+            onShowInstalled = { viewModel.setShowInstalledOnly(true) }
+        )
+
+        // 部署状态提示
+        if (deployState is DeployState.Deploying) {
+            DeployingBanner()
         }
-    ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-        ) {
-            // 分类筛选 TabRow
-            CategoryTabRow(
-                selectedCategory = selectedCategory,
-                showInstalledOnly = showInstalledOnly,
-                onCategorySelected = { viewModel.selectCategory(it) },
-                onShowInstalled = { viewModel.setShowInstalledOnly(true) }
-            )
 
-            // 部署状态提示
-            if (deployState is DeployState.Deploying) {
-                DeployingBanner()
+        // 内容区域
+        when {
+            showInstalledOnly -> {
+                InstalledDictsList(
+                    installedDicts = installedDicts,
+                    catalogState = catalogState,
+                    updatableIds = updatableIds,
+                    downloadState = downloadState,
+                    onToggleEnabled = { id, enabled -> viewModel.toggleEnabled(id, enabled) },
+                    onUninstall = { id -> viewModel.uninstallDict(id) },
+                    onUpdate = { info -> viewModel.updateDict(info) },
+                    onPreview = { info -> viewModel.loadPreview(info) }
+                )
             }
-
-            // 内容区域
-            when {
-                showInstalledOnly -> {
-                    InstalledDictsList(
-                        installedDicts = installedDicts,
-                        catalogState = catalogState,
-                        updatableIds = updatableIds,
-                        downloadState = downloadState,
-                        onToggleEnabled = { id, enabled -> viewModel.toggleEnabled(id, enabled) },
-                        onUninstall = { id -> viewModel.uninstallDict(id) },
-                        onUpdate = { info -> viewModel.updateDict(info) },
-                        onPreview = { info -> viewModel.loadPreview(info) }
-                    )
-                }
-                else -> {
-                    when (val state = catalogState) {
-                        is DictManagerViewModel.CatalogState.Loading -> {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator()
-                            }
+            else -> {
+                when (val state = catalogState) {
+                    is DictManagerViewModel.CatalogState.Loading -> {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
                         }
-                        is DictManagerViewModel.CatalogState.Error -> {
-                            ErrorContent(
-                                message = state.message,
-                                onRetry = { viewModel.refreshCatalog() }
-                            )
-                        }
-                        is DictManagerViewModel.CatalogState.Success -> {
-                            val filteredDicts = viewModel.getFilteredDicts()
-                            CatalogDictsList(
-                                dicts = filteredDicts,
-                                installedDicts = installedDicts,
-                                updatableIds = updatableIds,
-                                downloadState = downloadState,
-                                onInstall = { viewModel.installDict(it) },
-                                onUpdate = { viewModel.updateDict(it) },
-                                onToggleEnabled = { id, enabled -> viewModel.toggleEnabled(id, enabled) },
-                                onUninstall = { viewModel.uninstallDict(it) },
-                                onPreview = { viewModel.loadPreview(it) }
-                            )
-                        }
+                    }
+                    is DictManagerViewModel.CatalogState.Error -> {
+                        ErrorContent(
+                            message = state.message,
+                            onRetry = { viewModel.refreshCatalog() }
+                        )
+                    }
+                    is DictManagerViewModel.CatalogState.Success -> {
+                        val filteredDicts = viewModel.getFilteredDicts()
+                        CatalogDictsList(
+                            dicts = filteredDicts,
+                            installedDicts = installedDicts,
+                            updatableIds = updatableIds,
+                            downloadState = downloadState,
+                            onInstall = { viewModel.installDict(it) },
+                            onUpdate = { viewModel.updateDict(it) },
+                            onToggleEnabled = { id, enabled -> viewModel.toggleEnabled(id, enabled) },
+                            onUninstall = { viewModel.uninstallDict(it) },
+                            onPreview = { viewModel.loadPreview(it) }
+                        )
                     }
                 }
             }
+        }
 
-            // 底部下载进度条
-            if (downloadState is DownloadState.Downloading) {
-                val state = downloadState as DownloadState.Downloading
-                DownloadProgressBar(state)
-            }
+        // 底部下载进度条
+        if (downloadState is DownloadState.Downloading) {
+            val state = downloadState as DownloadState.Downloading
+            DownloadProgressBar(state)
         }
     }
 }

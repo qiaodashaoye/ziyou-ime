@@ -50,7 +50,6 @@ class SkillDevGuideActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        title = "技能开发文档"
 
         val webView = WebView(this).apply {
             // 纯本地静态文档：一切能力关死
@@ -58,7 +57,7 @@ class SkillDevGuideActivity : AppCompatActivity() {
             settings.allowFileAccess = false
             settings.allowContentAccess = false
         }
-        setContentView(webView)
+        setContentViewWithTitleBar("技能开发文档", webView)
 
         // 读取 + 转换在 IO 线程，避免阻塞首帧（文档约 30KB）
         lifecycleScope.launch {
