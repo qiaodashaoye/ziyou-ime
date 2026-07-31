@@ -1,16 +1,24 @@
 package com.ziyou.ime.ui
 
 import android.content.Intent
+import android.graphics.Typeface
+import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.provider.Settings
+import android.text.TextUtils
 import android.util.Log
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.ziyou.ime.R
 import com.ziyou.ime.ai.AiConfig
 import com.ziyou.ime.ai.AiPersona
 import com.ziyou.ime.ai.PersonaRepository
@@ -43,7 +51,10 @@ import kotlinx.coroutines.withContext
  * - 关于信息（版本号等）
  * - 跳转系统输入法设置
  *
- * 使用传统View + LinearLayout实现，保持简单轻量
+ * 使用传统View + LinearLayout纯代码实现（遵循项目禁用 XML 布局约定）；
+ * 视觉上按功能模块分组为圆角卡片（通用 / 外观与主题 / 输入行为 /
+ * 符号键盘偏好 / 悬浮键盘 / AI 服务 / 成长与技能 / 数据管理 / 关于），
+ * 设计令牌集中在 companion object，宽屏下内容列限宽居中（见 [MaxWidthColumn]）。
  */
 class SettingsActivity : AppCompatActivity() {
 
@@ -52,6 +63,17 @@ class SettingsActivity : AppCompatActivity() {
 
         /** Intent 额外项：打开时直接弹出九宫格拼音侧栏符号管理（由输入法侧栏「＋」触发） */
         const val EXTRA_OPEN_SIDE_SYMBOLS = "open_side_symbols"
+
+        // ===== 设计令牌：页面统一配色与尺寸（集中定义，避免各处魔法数漂移） =====
+        /** 宽屏（平板/横屏）下内容列的最大宽度，超出后限宽居中 */
+        private const val CONTENT_MAX_WIDTH_DP = 640
+        private val COLOR_PAGE_BG = 0xFFF2F4F8.toInt()
+        private val COLOR_CARD_BG = 0xFFFFFFFF.toInt()
+        private val COLOR_TITLE = 0xFF1B1C1F.toInt()
+        private val COLOR_SUMMARY = 0xFF6F757D.toInt()
+        private val COLOR_DIVIDER = 0xFFEFF1F4.toInt()
+        private val COLOR_CHEVRON = 0xFFB6BBC2.toInt()
+        private val COLOR_BADGE_BG = 0xFFF0F4FA.toInt()
     }
 
     // UI组件引用
@@ -120,185 +142,155 @@ class SettingsActivity : AppCompatActivity() {
     /**
      * 构建设置页面的View层级
      * 使用代码创建布局，避免依赖XML布局文件
+     *
+     * 视觉结构：浅灰页面背景 + 按功能模块分组的白色圆角卡片，
+     * 组内条目以缩进分隔线相连；宽屏（平板/横屏）下内容列限宽居中，
+     * 避免设置行被拉伸过宽、阅读动线过长。
      */
     private fun buildSettingsView(): View {
-        val scrollView = ScrollView(this).apply {
+        val column = MaxWidthColumn(this).apply {
+            setPadding(dp(16), dp(12), dp(16), dp(28))
+        }
+
+        // ===== 通用 =====
+        column.addView(createSectionHeader("通用"))
+        column.addView(createCard(
+            createSettingItem("🚀", "启用与切换引导",
+                "检查输入法启用状态，引导完成启用与切换") {
+                // 携带强制展示标记：已就绪时引导页的启动路由会直达设置页，
+                // 本入口是用户主动查看引导，需绕过该路由
+                startActivity(Intent(this, ImeSetupActivity::class.java).apply {
+                    putExtra(ImeSetupActivity.EXTRA_SHOW_GUIDE, true)
+                })
+            },
+            createSettingItem("⚙️", "系统输入法设置",
+                "打开 Android 系统的「语言和输入法」设置页") {
+                openInputMethodSettings()
+            }
+        ))
+
+        // ===== 外观与主题 =====
+        column.addView(createSectionHeader("外观与主题"))
+        val themeItem = createSettingItemWithValue("🎨", "键盘皮肤") { themeValueText = it }
+        themeItem.setOnClickListener { openSkinManager() }
+        column.addView(createCard(
+            themeItem,
+            createSettingItem("🧰", "自定义功能栏",
+                "选择键盘上方功能栏显示的按钮与排列顺序，支持预设模板") {
+                showToolbarCustomizer()
+            }
+        ))
+
+        // ===== 输入行为 =====
+        column.addView(createSectionHeader("输入行为"))
+        val schemaItem = createSettingItemWithValue("⌨️", "全键盘方案") { schemaValueText = it }
+        schemaItem.setOnClickListener { showSchemaSelector() }
+        column.addView(createCard(
+            schemaItem,
+            createSwitchItem("💡", "中文联想",
+                "上屏后展示引擎预测的联想词（需启用 librime-predict 模块）",
+                checked = AssociationManager.isEnabled(this),
+                onChange = { enabled -> AssociationManager.setEnabled(this, enabled) }),
+            createSettingItem("📌", "拼音侧栏符号",
+                "自定义九宫格左侧拼音栏无候选时的常用符号 / 短语") {
+                showSideSymbolManager()
+            }
+        ))
+
+        // ===== 符号键盘偏好 =====
+        column.addView(createSectionHeader("符号键盘偏好"))
+        column.addView(createCard(
+            createSettingItem("⭐", "常用符号",
+                "自定义符号键盘「常用」分类的符号（键盘内长按符号也可加入/移除）") {
+                showFavoriteSymbolManager()
+            }
+        ))
+
+        // ===== 悬浮键盘（游戏场景） =====
+        column.addView(createSectionHeader("悬浮键盘"))
+        column.addView(createCard(
+            createSwitchItem("🎮", "悬浮键盘模式",
+                "键盘缩小为可拖拽的悬浮面板，面板外触摸穿透给应用（也可经键盘上的「浮」键切换）",
+                checked = DisplayModeManager.isFloatingEnabled(this),
+                onChange = { enabled -> DisplayModeManager.setFloatingEnabled(this, enabled) }),
+            createSwitchItem("🔄", "横屏自动悬浮",
+                "横屏输入（如游戏内聊天）时自动切换为悬浮键盘",
+                checked = DisplayModeManager.isAutoFloatInLandscape(this),
+                onChange = { enabled -> DisplayModeManager.setAutoFloatInLandscape(this, enabled) })
+        ))
+
+        // ===== AI 服务 =====
+        column.addView(createSectionHeader("AI 服务"))
+        val personaItem = createSettingItemWithValue("🎭", "AI 人设") { personaValueText = it }
+        personaItem.setOnClickListener { showPersonaManager() }
+        val knowledgeItem = createSettingItemWithValue("📚", "AI 知识库") { knowledgeValueText = it }
+        knowledgeItem.setOnClickListener {
+            startActivity(Intent(this, KnowledgeActivity::class.java))
+        }
+        column.addView(createCard(
+            createSettingItem("🔧", "AI 服务配置",
+                "配置键盘「AI」键问答的服务地址与 API Key（OpenAI 兼容接口）") {
+                showAiConfigDialog()
+            },
+            personaItem,
+            knowledgeItem
+        ))
+
+        // ===== 成长与技能 =====
+        column.addView(createSectionHeader("成长与技能"))
+        val levelItem = createSettingItemWithValue("🏆", "我的等级") { levelValueText = it }
+        levelItem.setOnClickListener {
+            startActivity(Intent(this, LevelActivity::class.java))
+        }
+        column.addView(createCard(
+            levelItem,
+            createSettingItem("🧩", "技能插件",
+                "管理键盘「技」键唤出的技能，导入 .skill 技能包") {
+                startActivity(Intent(this, SkillManagerActivity::class.java))
+            }
+        ))
+
+        // ===== 数据管理 =====
+        column.addView(createSectionHeader("数据管理"))
+        column.addView(createCard(
+            createSettingItem("📖", "扩展词库", "下载并管理专业词库扩展包") {
+                startActivity(Intent(this, DictManagerActivity::class.java))
+            },
+            createSettingItem("☁️", "同步用户词典", "同步用户自定义词组和输入历史") {
+                syncUserData()
+            },
+            createSettingItem("🔁", "重新部署", "重新部署Rime配置文件（解决配置异常）") {
+                redeployRime()
+            }
+        ))
+
+        // ===== 关于 =====
+        column.addView(createSectionHeader("关于"))
+        column.addView(createCard(
+            createSettingItem("ℹ️", "版本", getVersionInfo()),
+            createSettingItem("✨", "字由输入法", "基于Rime引擎的简洁中文输入法")
+        ))
+
+        // 宽屏下内容列被限宽后由 FrameLayout 水平居中
+        val frame = FrameLayout(this).apply {
+            addView(column, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER_HORIZONTAL
+            ))
+        }
+
+        return ScrollView(this).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
+            // 内容不足一屏时页面背景也要铺满
+            isFillViewport = true
+            setBackgroundColor(COLOR_PAGE_BG)
+            isVerticalScrollBarEnabled = false
+            addView(frame)
         }
-
-        val rootLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-            setPadding(dp(16), dp(16), dp(16), dp(16))
-        }
-
-        // ===== 输入法设置 =====
-        rootLayout.addView(createSectionHeader("输入法设置"))
-        rootLayout.addView(createSettingItem(
-            title = "启用与切换引导",
-            summary = "检查输入法启用状态，引导完成启用与切换",
-            onClick = { startActivity(Intent(this, ImeSetupActivity::class.java)) }
-        ))
-        rootLayout.addView(createSettingItem(
-            title = "系统输入法设置",
-            summary = "打开 Android 系统的「语言和输入法」设置页",
-            onClick = { openInputMethodSettings() }
-        ))
-        rootLayout.addView(createDivider())
-
-        // ===== 输入方案 =====
-        rootLayout.addView(createSectionHeader("输入方案"))
-        val schemaItem = createSettingItemWithValue(
-            title = "全键盘方案",
-            valueHolder = { schemaValueText = it }
-        )
-        schemaItem.setOnClickListener { showSchemaSelector() }
-        rootLayout.addView(schemaItem)
-        rootLayout.addView(createDivider())
-
-        // ===== 皮肤设置 =====
-        rootLayout.addView(createSectionHeader("外观"))
-        val themeItem = createSettingItemWithValue(
-            title = "键盘皮肤",
-            valueHolder = { themeValueText = it }
-        )
-        themeItem.setOnClickListener { openSkinManager() }
-        rootLayout.addView(themeItem)
-        rootLayout.addView(createSettingItem(
-            title = "自定义功能栏",
-            summary = "选择键盘上方功能栏显示的按钮与排列顺序，支持预设模板",
-            onClick = { showToolbarCustomizer() }
-        ))
-        rootLayout.addView(createDivider())
-
-        // ===== 成长（等级体系）=====
-        rootLayout.addView(createSectionHeader("成长"))
-        val levelItem = createSettingItemWithValue(
-            title = "我的等级",
-            valueHolder = { levelValueText = it }
-        )
-        levelItem.setOnClickListener {
-            startActivity(Intent(this, LevelActivity::class.java))
-        }
-        rootLayout.addView(levelItem)
-        rootLayout.addView(createDivider())
-
-        // ===== 输入 =====
-        rootLayout.addView(createSectionHeader("输入"))
-        rootLayout.addView(createSwitchItem(
-            title = "中文联想",
-            summary = "上屏后展示引擎预测的联想词（需启用 librime-predict 模块）",
-            checked = AssociationManager.isEnabled(this),
-            onChange = { enabled -> AssociationManager.setEnabled(this, enabled) }
-        ))
-        rootLayout.addView(createDivider())
-
-        // ===== 悬浮键盘（游戏场景） =====
-        rootLayout.addView(createSectionHeader("悬浮键盘"))
-        rootLayout.addView(createSwitchItem(
-            title = "悬浮键盘模式",
-            summary = "键盘缩小为可拖拽的悬浮面板，面板外触摸穿透给应用（也可经键盘上的「浮」键切换）",
-            checked = DisplayModeManager.isFloatingEnabled(this),
-            onChange = { enabled -> DisplayModeManager.setFloatingEnabled(this, enabled) }
-        ))
-        rootLayout.addView(createSwitchItem(
-            title = "横屏自动悬浮",
-            summary = "横屏输入（如游戏内聊天）时自动切换为悬浮键盘",
-            checked = DisplayModeManager.isAutoFloatInLandscape(this),
-            onChange = { enabled -> DisplayModeManager.setAutoFloatInLandscape(this, enabled) }
-        ))
-        rootLayout.addView(createDivider())
-
-        // ===== 九宫格 =====
-        rootLayout.addView(createSectionHeader("九宫格"))
-        rootLayout.addView(createSettingItem(
-            title = "拼音侧栏符号",
-            summary = "自定义九宫格左侧拼音栏无候选时的常用符号 / 短语",
-            onClick = { showSideSymbolManager() }
-        ))
-        rootLayout.addView(createDivider())
-
-        // ===== 符号键盘 =====
-        rootLayout.addView(createSectionHeader("符号键盘"))
-        rootLayout.addView(createSettingItem(
-            title = "常用符号",
-            summary = "自定义符号键盘「常用」分类的符号（键盘内长按符号也可加入/移除）",
-            onClick = { showFavoriteSymbolManager() }
-        ))
-        rootLayout.addView(createDivider())
-
-        // ===== 技能插件 =====
-        rootLayout.addView(createSectionHeader("技能"))
-        rootLayout.addView(createSettingItem(
-            title = "技能插件",
-            summary = "管理键盘「技」键唤出的技能，导入 .skill 技能包",
-            onClick = { startActivity(Intent(this, SkillManagerActivity::class.java)) }
-        ))
-        rootLayout.addView(createDivider())
-
-        // ===== AI 问答 =====
-        rootLayout.addView(createSectionHeader("AI 问答"))
-        rootLayout.addView(createSettingItem(
-            title = "AI 服务配置",
-            summary = "配置键盘「AI」键问答的服务地址与 API Key（OpenAI 兼容接口）",
-            onClick = { showAiConfigDialog() }
-        ))
-        val personaItem = createSettingItemWithValue(
-            title = "AI 人设",
-            valueHolder = { personaValueText = it }
-        )
-        personaItem.setOnClickListener { showPersonaManager() }
-        rootLayout.addView(personaItem)
-        val knowledgeItem = createSettingItemWithValue(
-            title = "AI 知识库",
-            valueHolder = { knowledgeValueText = it }
-        )
-        knowledgeItem.setOnClickListener {
-            startActivity(Intent(this, KnowledgeActivity::class.java))
-        }
-        rootLayout.addView(knowledgeItem)
-        rootLayout.addView(createDivider())
-
-        // ===== 数据同步 =====
-        rootLayout.addView(createSectionHeader("数据"))
-        rootLayout.addView(createSettingItem(
-            title = "扩展词库",
-            summary = "下载并管理专业词库扩展包",
-            onClick = { startActivity(Intent(this, DictManagerActivity::class.java)) }
-        ))
-        rootLayout.addView(createSettingItem(
-            title = "同步用户词典",
-            summary = "同步用户自定义词组和输入历史",
-            onClick = { syncUserData() }
-        ))
-        rootLayout.addView(createSettingItem(
-            title = "重新部署",
-            summary = "重新部署Rime配置文件（解决配置异常）",
-            onClick = { redeployRime() }
-        ))
-        rootLayout.addView(createDivider())
-
-        // ===== 关于 =====
-        rootLayout.addView(createSectionHeader("关于"))
-        rootLayout.addView(createSettingItem(
-            title = "版本",
-            summary = getVersionInfo(),
-            onClick = null
-        ))
-        rootLayout.addView(createSettingItem(
-            title = "字由输入法",
-            summary = "基于Rime引擎的简洁中文输入法",
-            onClick = null
-        ))
-
-        scrollView.addView(rootLayout)
-        return scrollView
     }
 
     // ===== 功能方法 =====
@@ -953,129 +945,221 @@ class SettingsActivity : AppCompatActivity() {
 
     // ===== UI辅助方法 =====
 
-    private fun createSectionHeader(title: String): TextView {
-        return TextView(this).apply {
-            text = title
-            textSize = 14f
-            setTextColor(0xFF1976D2.toInt())
-            setPadding(dp(4), dp(16), dp(4), dp(8))
-            setTypeface(null, android.graphics.Typeface.BOLD)
+    /**
+     * 宽屏自适应容器：竖向列表列，测量宽度超过 [CONTENT_MAX_WIDTH_DP] 时限宽，
+     * 配合外层 FrameLayout 的居中 gravity 实现平板/横屏下的限宽居中布局。
+     */
+    private class MaxWidthColumn(context: android.content.Context) : LinearLayout(context) {
+        init {
+            orientation = VERTICAL
+        }
+
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            val maxWidth = (CONTENT_MAX_WIDTH_DP * resources.displayMetrics.density).toInt()
+            val width = MeasureSpec.getSize(widthMeasureSpec)
+            val spec = if (width > maxWidth) {
+                MeasureSpec.makeMeasureSpec(maxWidth, MeasureSpec.EXACTLY)
+            } else {
+                widthMeasureSpec
+            }
+            super.onMeasure(spec, heightMeasureSpec)
         }
     }
 
-    private fun createSettingItem(title: String, summary: String, onClick: (() -> Unit)?): LinearLayout {
+    /** 分区标题：主色小字加粗，与卡片左缘对齐，强化分组层次 */
+    private fun createSectionHeader(title: String): TextView {
+        return TextView(this).apply {
+            text = title
+            textSize = 13f
+            setTextColor(ContextCompat.getColor(this@SettingsActivity, R.color.primary))
+            setTypeface(null, Typeface.BOLD)
+            letterSpacing = 0.05f
+            setPadding(dp(16), dp(20), dp(16), dp(8))
+        }
+    }
+
+    /**
+     * 分组卡片：白色圆角容器包裹同组设置项，项间自动插入缩进分隔线
+     *（缩进量对齐文字区，避免分隔线穿过图标形成视觉噴声）。
+     */
+    private fun createCard(vararg items: View): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
-            setPadding(dp(4), dp(12), dp(4), dp(12))
-            if (onClick != null) {
-                isClickable = true
-                isFocusable = true
-                setBackgroundResource(android.R.drawable.list_selector_background)
-                setOnClickListener { onClick() }
+            background = GradientDrawable().apply {
+                setColor(COLOR_CARD_BG)
+                cornerRadius = dp(16).toFloat()
             }
-
-            addView(TextView(context).apply {
-                text = title
-                textSize = 16f
-                setTextColor(0xFF212121.toInt())
-            })
-            addView(TextView(context).apply {
-                text = summary
-                textSize = 13f
-                setTextColor(0xFF757575.toInt())
-                setPadding(0, dp(2), 0, 0)
-            })
+            // 裁切到圆角轮廓，保证首尾设置项的 ripple 不溢出卡片圆角
+            clipToOutline = true
+            elevation = dp(1).toFloat()
+            items.forEachIndexed { index, item ->
+                if (index > 0) addView(createInsetDivider())
+                addView(item)
+            }
         }
     }
 
-    private fun createSettingItemWithValue(title: String, valueHolder: (TextView) -> Unit): LinearLayout {
+    /** 图标徽章：圆角浅色底 + emoji，统一各设置项的视觉锚点（遵循项目入口徽章风格） */
+    private fun createIconBadge(icon: String): TextView {
+        return TextView(this).apply {
+            text = icon
+            textSize = 17f
+            gravity = Gravity.CENTER
+            // 装饰性图标，不参与无障碍朗读（行标题已提供语义）
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            background = GradientDrawable().apply {
+                setColor(COLOR_BADGE_BG)
+                cornerRadius = dp(10).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply {
+                marginEnd = dp(12)
+            }
+        }
+    }
+
+    /** 解析主题的 selectableItemBackground，为可点击行提供统一的 ripple 反馈 */
+    private fun rippleBackground(): Drawable? {
+        val outValue = TypedValue()
+        theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)
+        return ContextCompat.getDrawable(this, outValue.resourceId)
+    }
+
+    /** 行内标题 + 可选说明的文字列（占满剩余宽度，供各类设置行复用） */
+    private fun createTextColumn(title: String, summary: String?): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            addView(TextView(context).apply {
+                text = title
+                textSize = 16f
+                setTextColor(COLOR_TITLE)
+            })
+            if (!summary.isNullOrEmpty()) {
+                addView(TextView(context).apply {
+                    text = summary
+                    textSize = 13f
+                    setTextColor(COLOR_SUMMARY)
+                    // 行间距略放宽，长说明文本换行后不拥挤
+                    setLineSpacing(dp(2).toFloat(), 1f)
+                    setPadding(0, dp(3), 0, 0)
+                })
+            }
+        }
+    }
+
+    /** 基础设置行容器：统一内边距、最小触控高度与点击反馈 */
+    private fun createItemRow(onClick: (() -> Unit)?): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
-            setPadding(dp(4), dp(12), dp(4), dp(12))
-            isClickable = true
-            isFocusable = true
-            setBackgroundResource(android.R.drawable.list_selector_background)
             gravity = Gravity.CENTER_VERTICAL
-
-            addView(TextView(context).apply {
-                text = title
-                textSize = 16f
-                setTextColor(0xFF212121.toInt())
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            })
-
-            val valueText = TextView(context).apply {
-                textSize = 14f
-                setTextColor(0xFF757575.toInt())
-                text = "..."
+            minimumHeight = dp(60)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            if (onClick != null) {
+                isClickable = true
+                isFocusable = true
+                background = rippleBackground()
+                setOnClickListener { onClick() }
             }
-            valueHolder(valueText)
-            addView(valueText)
-
-            addView(TextView(context).apply {
-                text = " ›"
-                textSize = 18f
-                setTextColor(0xFFBDBDBD.toInt())
-            })
         }
     }
 
-    /** 带开关的设置项（标题 + 说明 + 右侧 Switch），用于布尔型开关如中文联想 */
+    /** 普通设置项：徽章 + 标题/说明，可点击时附右侧箭头与 ripple */
+    private fun createSettingItem(
+        icon: String,
+        title: String,
+        summary: String,
+        onClick: (() -> Unit)? = null
+    ): LinearLayout {
+        return createItemRow(onClick).apply {
+            addView(createIconBadge(icon))
+            addView(createTextColumn(title, summary))
+            if (onClick != null) addView(createChevron())
+        }
+    }
+
+    /** 带当前值的设置项：徽章 + 标题，右侧展示当前值（超长省略）与箭头 */
+    private fun createSettingItemWithValue(
+        icon: String,
+        title: String,
+        valueHolder: (TextView) -> Unit
+    ): LinearLayout {
+        return createItemRow(onClick = {}).apply {
+            // 点击监听由调用方通过 setOnClickListener 覆盖
+            addView(createIconBadge(icon))
+            addView(TextView(context).apply {
+                text = title
+                textSize = 16f
+                setTextColor(COLOR_TITLE)
+            })
+            val valueText = TextView(context).apply {
+                textSize = 14f
+                setTextColor(COLOR_SUMMARY)
+                text = "..."
+                gravity = Gravity.END
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+                ).apply { marginStart = dp(12) }
+            }
+            valueHolder(valueText)
+            addView(valueText)
+            addView(createChevron())
+        }
+    }
+
+    /** 带开关的设置项：整行可点击切换（扩大触控面积），右侧 SwitchCompat */
     private fun createSwitchItem(
+        icon: String,
         title: String,
         summary: String,
         checked: Boolean,
         onChange: (Boolean) -> Unit
     ): LinearLayout {
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+        val switch = SwitchCompat(this).apply {
+            isChecked = checked
+            setOnCheckedChangeListener { _, isChecked -> onChange(isChecked) }
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-            setPadding(dp(4), dp(12), dp(4), dp(12))
-            gravity = Gravity.CENTER_VERTICAL
-
-            addView(LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                addView(TextView(context).apply {
-                    text = title
-                    textSize = 16f
-                    setTextColor(0xFF212121.toInt())
-                })
-                addView(TextView(context).apply {
-                    text = summary
-                    textSize = 13f
-                    setTextColor(0xFF757575.toInt())
-                    setPadding(0, dp(2), 0, 0)
-                })
-            })
-
-            addView(Switch(context).apply {
-                isChecked = checked
-                setOnCheckedChangeListener { _, isChecked -> onChange(isChecked) }
-            })
+            ).apply { marginStart = dp(12) }
+        }
+        return createItemRow(onClick = { switch.toggle() }).apply {
+            addView(createIconBadge(icon))
+            addView(createTextColumn(title, summary))
+            addView(switch)
         }
     }
 
-    private fun createDivider(): View {
+    /** 右侧导航箭头（仅装饰，不参与无障碍朗读） */
+    private fun createChevron(): TextView {
+        return TextView(this).apply {
+            text = "›"
+            textSize = 20f
+            setTextColor(COLOR_CHEVRON)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            setPadding(dp(8), 0, 0, 0)
+        }
+    }
+
+    /** 卡片内分隔线：缩进对齐文字区（起点 = 左边距 16 + 徽章 40 + 间距 12） */
+    private fun createInsetDivider(): View {
         return View(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 1
             ).apply {
-                setMargins(dp(4), 0, dp(4), 0)
+                marginStart = dp(68)
             }
-            setBackgroundColor(0xFFE0E0E0.toInt())
+            setBackgroundColor(COLOR_DIVIDER)
         }
     }
 

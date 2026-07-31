@@ -19,6 +19,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.ziyou.ime.core.routing.StartupRouteLogic
 import com.ziyou.ime.data.UserPreferenceRepository
 
 /**
@@ -33,6 +34,10 @@ import com.ziyou.ime.data.UserPreferenceRepository
  * 反向校验 [isImeReady]，未就绪时自动跳回本页，确保用户不会在未正确配置
  * 输入法的情况下使用设置功能。
  *
+ * 启动路由：输入法已就绪（ACTIVE）时，从桌面再次打开应用不再停留在本页，
+ * 而是按 [StartupRouteLogic] 直达设置页（或首启偏好向导）；仅在未就绪、
+ * 或经设置页「启用与切换引导」入口（携带 [EXTRA_SHOW_GUIDE]）打开时才展示引导。
+ *
  * 状态在 onResume / onWindowFocusChanged 时自动刷新：
  * 用户从系统设置页返回、或关闭输入法选择器对话框后，步骤卡片即时更新。
  *
@@ -42,6 +47,9 @@ class ImeSetupActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "ImeSetupActivity"
+
+        /** Intent 额外项：即使输入法已就绪也强制展示引导页（设置页「启用与切换引导」入口） */
+        const val EXTRA_SHOW_GUIDE = "show_guide"
 
         // Material 配色
         private const val COLOR_PRIMARY = 0xFF1976D2.toInt()
@@ -108,6 +116,31 @@ class ImeSetupActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // 启动路由：输入法已就绪时不再展示引导，直达设置页（或首启偏好向导）；
+        // 判定逻辑下沉在 :core-logic 的 StartupRouteLogic，配套 JVM 单测
+        val destination = StartupRouteLogic.route(
+            imeReady = isImeReady(this),
+            preferenceSetupDone = UserPreferenceRepository.isSetupDone(this),
+            forceShowGuide = intent?.getBooleanExtra(EXTRA_SHOW_GUIDE, false) == true
+        )
+        when (destination) {
+            StartupRouteLogic.Destination.SETTINGS -> {
+                startActivity(Intent(this, SettingsActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                })
+                finish()
+                return
+            }
+            StartupRouteLogic.Destination.PREFERENCE_WIZARD -> {
+                // 向导完成后自动进入设置页（见 UserPreferenceSetupActivity.finishSetup）
+                startActivity(Intent(this, UserPreferenceSetupActivity::class.java))
+                finish()
+                return
+            }
+            StartupRouteLogic.Destination.SETUP_GUIDE -> Unit // 继续展示引导
+        }
+
         // 启动器根页面：上层无可返回的页面，故不展示返回键
         setContentViewWithTitleBar("设置字由输入法", buildView(), showBack = false)
     }
