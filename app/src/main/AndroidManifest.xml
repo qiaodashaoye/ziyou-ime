@@ -31,9 +31,9 @@
                 android:resource="@xml/input_method" />
         </service>
 
-        <!-- 设置页面 -->
+        <!-- 启动页：输入法启用引导（检测启用/激活状态，就绪后才可进入设置页） -->
         <activity
-            android:name=".ui.SettingsActivity"
+            android:name=".ui.ImeSetupActivity"
             android:exported="true"
             android:label="@string/app_name">
             <intent-filter>
@@ -41,6 +41,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 设置页面（仅在输入法已启用并激活后可进入，见 ImeSetupActivity 门禁） -->
+        <activity
+            android:name=".ui.SettingsActivity"
+            android:exported="false"
+            android:label="@string/app_name" />
+
+        <!-- 首启偏好向导（首次完成输入法启用与激活后展示，收集初始输入偏好） -->
+        <activity
+            android:name=".ui.UserPreferenceSetupActivity"
+            android:exported="false"
+            android:label="初始偏好设置" />
 
         <!-- 扩展词库管理 -->
         <activity

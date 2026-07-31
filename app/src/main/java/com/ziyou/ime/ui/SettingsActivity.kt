@@ -66,8 +66,18 @@ class SettingsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(buildSettingsView())
-        title = "字由输入法 设置"
+
+        // 访问门禁：仅在输入法已启用并激活（ACTIVE）时才允许进入设置页；
+        // 未就绪时自动跳回引导页（检测逻辑与 ImeSetupActivity 共用同一实现，
+        // 保证两侧判定一致）
+        if (!ImeSetupActivity.isImeReady(this)) {
+            showToast("请先完成字由输入法的启用与切换，再进入设置")
+            startActivity(Intent(this, ImeSetupActivity::class.java))
+            finish()
+            return
+        }
+
+        setContentViewWithTitleBar("字由输入法 设置", buildSettingsView())
 
         // 经 DI 容器统一初始化引擎（异步，避免主线程阻塞和双重初始化）
         ensureRimeStarted()
@@ -128,11 +138,16 @@ class SettingsActivity : AppCompatActivity() {
             setPadding(dp(16), dp(16), dp(16), dp(16))
         }
 
-        // ===== 输入法启用提示 =====
+        // ===== 输入法设置 =====
         rootLayout.addView(createSectionHeader("输入法设置"))
         rootLayout.addView(createSettingItem(
-            title = "启用输入法",
-            summary = "在系统设置中启用字由输入法",
+            title = "启用与切换引导",
+            summary = "检查输入法启用状态，引导完成启用与切换",
+            onClick = { startActivity(Intent(this, ImeSetupActivity::class.java)) }
+        ))
+        rootLayout.addView(createSettingItem(
+            title = "系统输入法设置",
+            summary = "打开 Android 系统的「语言和输入法」设置页",
             onClick = { openInputMethodSettings() }
         ))
         rootLayout.addView(createDivider())
