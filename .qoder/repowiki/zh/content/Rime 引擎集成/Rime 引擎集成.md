@@ -2,28 +2,16 @@
 
 <cite>
 **本文引用的文件**   
-- [app/src/main/java/com/ziyou/ime/core/RimeApi.kt](file://app/src/main/java/com/ziyou/ime/core/RimeApi.kt)
-- [app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeNative.kt](file://app/src/main/java/com/ziyou/ime/core/RimeNative.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt](file://app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeMessage.kt](file://app/src/main/java/com/ziyou/ime/core/RimeMessage.kt)
-- [app/src/main/java/com/ziyou/ime/core/ProtoTypes.kt](file://app/src/main/java/com/ziyou/ime/core/ProtoTypes.kt)
-- [app/src/main/java/com/ziyou/ime/daemon/RimeSession.kt](file://app/src/main/java/com/ziyou/ime/daemon/RimeSession.kt)
-- [app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt](file://app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt)
-- [app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt](file://app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt)
-- [app/src/main/jni/librime_jni/rime_jni.cc](file://app/src/main/jni/librime_jni/rime_jni.cc)
-- [app/src/main/jni/librime_jni/config.cc](file://app/src/main/jni/librime_jni/config.cc)
-- [app/src/main/jni/librime_jni/session.h](file://app/src/main/jni/librime_jni/session.h)
-- [app/src/main/jni/librime_jni/helper-types.h](file://app/src/main/jni/librime_jni/helper-types.h)
-- [app/src/main/jni/librime_jni/jni-utils.h](file://app/src/main/jni/librime_jni/jni-utils.h)
-- [app/src/main/jni/librime_jni/objconv.h](file://app/src/main/jni/librime_jni/objconv.h)
-- [app/src/main/jni/librime_jni/CMakeLists.txt](file://app/src/main/jni/librime_jni/CMakeLists.txt)
-- [app/src/main/assets/rime/default.yaml](file://app/src/main/assets/rime/default.yaml)
-- [app/src/main/assets/rime/luna_pinyin.schema.yaml](file://app/src/main/assets/rime/luna_pinyin.schema.yaml)
-- [app/src/main/assets/rime/luna_pinyin.dict.yaml](file://app/src/main/assets/rime/luna_pinyin.dict.yaml)
-- [app/src/main/assets/rime/cangjie5.schema.yaml](file://app/src/main/assets/rime/cangjie5.schema.yaml)
-- [app/src/main/assets/rime/cangjie5.dict.yaml](file://app/src/main/assets/rime/cangjie5.dict.yaml)
-- [app/src/main/assets/rime/symbols.yaml](file://app/src/main/assets/rime/symbols.yaml)
+- [rime_jni.cc](file://app/src/main/jni/librime_jni/rime_jni.cc)
+- [session.h](file://app/src/main/jni/librime_jni/session.h)
+- [helper-types.h](file://app/src/main/jni/librime_jni/helper-types.h)
+- [RimeApi.kt](file://app/src/main/java/com/ziyou/ime/core/RimeApi.kt)
+- [SimpleRimeImpl.kt](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt)
+- [RimeDispatcher.kt](file://app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt)
+- [RimeNative.kt](file://app/src/main/java/com/ziyou/ime/core/RimeNative.kt)
+- [ProtoTypes.kt](file://app/src/main/java/com/ziyou/ime/core/ProtoTypes.kt)
+- [RimeMessage.kt](file://app/src/main/java/com/ziyou/ime/core/RimeMessage.kt)
+- [InputLogicController.kt](file://app/src/main/java/com/ziyou/ime/ime/InputLogicController.kt)
 </cite>
 
 ## 目录
@@ -33,405 +21,461 @@
 4. [架构总览](#架构总览)
 5. [详细组件分析](#详细组件分析)
 6. [依赖关系分析](#依赖关系分析)
-7. [性能考虑](#性能考虑)
+7. [性能考量](#性能考量)
 8. [故障排查指南](#故障排查指南)
 9. [结论](#结论)
-10. [附录](#附录)
+10. [附录：使用示例与最佳实践](#附录使用示例与最佳实践)
 
 ## 简介
-本技术文档围绕 Android 端集成的 Rime 输入法引擎，系统性阐述 JNI 接口实现、C++ 与 Java/Kotlin 的数据转换、内存管理与错误处理机制；深入解析 RimeApi 接口设计与 SimpleRimeImpl 的具体实现；说明 RimeSession 生命周期管理（初始化、配置加载、引擎启动、资源清理）；详解消息传递机制（按键事件、候选词生成、状态同步等）；并给出配置文件加载与管理策略（schema、词典、插件）、性能优化建议与常见问题排查方法。
+本技术文档围绕 Android 输入法项目中对 Rime 引擎的集成实现，系统性阐述 JNI 桥接层、C++ 单例与 RAII 资源管理、RimeApi 接口设计、SimpleRimeImpl 实现、RimeDispatcher 单线程调度器保证 librime 线程安全、批量 API 优化策略（processKeyBulk 单次跨界返回 consumed/commit/context），以及基于 SharedFlow 的消息流处理 librime 通知回调。文档同时提供具体代码路径与调用序列图，帮助读者快速理解并正确使用引擎接口进行输入处理与状态查询。
 
 ## 项目结构
-本项目采用分层组织：
-- app 层：Android 应用与 IME 服务、UI、配置管理、JNI 桥接与核心逻辑封装
-- core-logic：纯 Java/Kotlin 的关联算法模块（与本主题关联度较低）
-- librime-prebuilt：Rime 引擎源码与构建脚本（用于理解底层能力）
-- libs：预编译库头文件与平台二进制
-
-关键目录与职责：
-- app/src/main/java/com/ziyou/ime/core：Rime 引擎 API 抽象、JNI 绑定、消息模型与分发器
-- app/src/main/java/com/ziyou/ime/daemon：会话生命周期管理
-- app/src/main/java/com/ziyou/ime/config：配置部署与主题管理
-- app/src/main/jni/librime_jni：C++ JNI 实现，负责 C++ Rime 对象与 Java 对象的互操作
-- app/src/main/assets/rime：Rime 配置文件与词典
+本项目将 Rime 引擎集成分为三层：
+- C++ JNI 层：封装 librime 调用，提供进程内单例与 RAII 会话管理，暴露 JNI 方法供 Kotlin 调用。
+- Kotlin 桥接层：定义 RimeApi 接口与 SimpleRimeImpl 实现，通过 RimeDispatcher 确保所有 native 调用在专属单线程执行；RimeNative 声明外部方法；消息通过 RimeMessageHandler + SharedFlow 分发。
+- 业务层：InputLogicController 等消费 RimeApi，采用 processKeyBulk 热路径优化，结合 Mutex 串行化按键事务。
 
 ```mermaid
 graph TB
-subgraph "Android 应用层"
-UI["IME/UI"] --> CoreAPI["RimeApi / SimpleRimeImpl"]
-CoreAPI --> Dispatcher["RimeDispatcher"]
-CoreAPI --> Session["RimeSession"]
-CoreAPI --> ConfigMgr["RimeConfigManager"]
-ConfigMgr --> AssetDeployer["AssetDeployer"]
+subgraph "JNI/C++"
+JNIFunc["JNI导出函数<br/>rime_jni.cc"]
+Session["RAII会话<br/>session.h"]
+Types["类型转换<br/>helper-types.h"]
 end
-subgraph "JNI 桥接层"
-Native["RimeNative (Kotlin)"] --> JNI["rime_jni.cc"]
-JNI --> Cfg["config.cc"]
-JNI --> SessH["session.h"]
-JNI --> Helper["helper-types.h / jni-utils.h / objconv.h"]
+subgraph "Kotlin桥接"
+Native["RimeNative<br/>外部方法声明"]
+Impl["SimpleRimeImpl<br/>RimeApi实现"]
+Dispatcher["RimeDispatcher<br/>单线程调度"]
+Msg["RimeMessageHandler<br/>SharedFlow消息"]
 end
-subgraph "Rime 引擎"
-LibRime["librime (C++)"]
+subgraph "业务层"
+Controller["InputLogicController<br/>输入逻辑控制器"]
 end
-CoreAPI --> Native
-Session --> Native
-Dispatcher --> Native
-ConfigMgr --> Native
-AssetDeployer --> Assets["assets/rime/*"]
-Native --> LibRime
+Controller --> Impl
+Impl --> Dispatcher
+Impl --> Native
+Native --> JNIFunc
+JNIFunc --> Session
+JNIFunc --> Types
+JNIFunc --> Msg
 ```
 
-图表来源
-- [app/src/main/java/com/ziyou/ime/core/RimeApi.kt](file://app/src/main/java/com/ziyou/ime/core/RimeApi.kt)
-- [app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeNative.kt](file://app/src/main/java/com/ziyou/ime/core/RimeNative.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt](file://app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt)
-- [app/src/main/java/com/ziyou/ime/daemon/RimeSession.kt](file://app/src/main/java/com/ziyou/ime/daemon/RimeSession.kt)
-- [app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt](file://app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt)
-- [app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt](file://app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt)
-- [app/src/main/jni/librime_jni/rime_jni.cc](file://app/src/main/jni/librime_jni/rime_jni.cc)
-- [app/src/main/jni/librime_jni/config.cc](file://app/src/main/jni/librime_jni/config.cc)
-- [app/src/main/jni/librime_jni/session.h](file://app/src/main/jni/librime_jni/session.h)
-- [app/src/main/jni/librime_jni/helper-types.h](file://app/src/main/jni/librime_jni/helper-types.h)
-- [app/src/main/jni/librime_jni/jni-utils.h](file://app/src/main/jni/librime_jni/jni-utils.h)
-- [app/src/main/jni/librime_jni/objconv.h](file://app/src/main/jni/librime_jni/objconv.h)
+**图表来源** 
+- [rime_jni.cc:270-315](file://app/src/main/jni/librime_jni/rime_jni.cc#L270-L315)
+- [session.h:12-35](file://app/src/main/jni/librime_jni/session.h#L12-L35)
+- [helper-types.h:16-165](file://app/src/main/jni/librime_jni/helper-types.h#L16-L165)
+- [RimeNative.kt:10-170](file://app/src/main/java/com/ziyou/ime/core/RimeNative.kt#L10-L170)
+- [SimpleRimeImpl.kt:10-177](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt#L10-L177)
+- [RimeDispatcher.kt:22-91](file://app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt#L22-L91)
+- [RimeMessage.kt:29-42](file://app/src/main/java/com/ziyou/ime/core/RimeMessage.kt#L29-L42)
+- [InputLogicController.kt:126-185](file://app/src/main/java/com/ziyou/ime/ime/InputLogicController.kt#L126-L185)
 
-章节来源
-- [app/src/main/java/com/ziyou/ime/core/RimeApi.kt](file://app/src/main/java/com/ziyou/ime/core/RimeApi.kt)
-- [app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeNative.kt](file://app/src/main/java/com/ziyou/ime/core/RimeNative.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt](file://app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt)
-- [app/src/main/java/com/ziyou/ime/daemon/RimeSession.kt](file://app/src/main/java/com/ziyou/ime/daemon/RimeSession.kt)
-- [app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt](file://app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt)
-- [app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt](file://app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt)
-- [app/src/main/jni/librime_jni/rime_jni.cc](file://app/src/main/jni/librime_jni/rime_jni.cc)
-- [app/src/main/jni/librime_jni/config.cc](file://app/src/main/jni/librime_jni/config.cc)
-- [app/src/main/jni/librime_jni/session.h](file://app/src/main/jni/librime_jni/session.h)
-- [app/src/main/jni/librime_jni/helper-types.h](file://app/src/main/jni/librime_jni/helper-types.h)
-- [app/src/main/jni/librime_jni/jni-utils.h](file://app/src/main/jni/librime_jni/jni-utils.h)
-- [app/src/main/jni/librime_jni/objconv.h](file://app/src/main/jni/librime_jni/objconv.h)
+**章节来源**
+- [rime_jni.cc:46-265](file://app/src/main/jni/librime_jni/rime_jni.cc#L46-L265)
+- [RimeApi.kt:10-105](file://app/src/main/java/com/ziyou/ime/core/RimeApi.kt#L10-L105)
+- [SimpleRimeImpl.kt:10-177](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt#L10-L177)
+- [RimeDispatcher.kt:22-91](file://app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt#L22-L91)
+- [RimeNative.kt:10-170](file://app/src/main/java/com/ziyou/ime/core/RimeNative.kt#L10-L170)
+- [RimeMessage.kt:29-42](file://app/src/main/java/com/ziyou/ime/core/RimeMessage.kt#L29-L42)
+- [InputLogicController.kt:126-185](file://app/src/main/java/com/ziyou/ime/ime/InputLogicController.kt#L126-L185)
 
 ## 核心组件
-- RimeApi：定义上层对 Rime 引擎的统一接口，屏蔽 JNI 细节，提供输入、查询、状态同步等方法。
-- SimpleRimeImpl：RimeApi 的默认实现，封装线程安全、参数校验、异常捕获与回调派发。
-- RimeNative：声明 native 方法，作为 Kotlin 到 C++ JNI 的入口。
-- RimeDispatcher：将原生侧的事件或结果分发给 UI/业务层，统一消息格式。
-- RimeMessage：跨进程/线程的消息载体，包含按键、候选、状态等结构化数据。
-- ProtoTypes：定义与原生交互的协议类型（如键码、候选项、上下文等）。
-- RimeSession：管理 Rime 实例的生命周期，包括初始化、配置部署、引擎启动、销毁。
-- RimeConfigManager：集中管理 schema、词典、插件等配置项的加载与更新。
-- AssetDeployer：从 assets 部署 Rime 配置文件到可读写路径，确保运行时可用。
+- JNI 层 C++ 单例与 RAII
+  - Rime 单例：负责 librime 初始化、通知回调注册、会话生命周期管理、选项与方案操作、候选词获取与批量获取。
+  - SessionHolder：RAII 包装 RimeSessionId，构造时创建、析构时销毁，避免泄漏。
+  - helper-types.h：定义 CommitProto、ContextProto、StatusProto、CandidateProto、SchemaItem 等数据模型，完成 C 结构与 Kotlin 对象之间的转换。
+- Kotlin 桥接层
+  - RimeApi：定义所有 suspend 函数接口，统一异步与线程模型。
+  - SimpleRimeImpl：实现 RimeApi，所有方法通过 RimeDispatcher.dispatch 在专属线程执行；processKeyBulk 默认三次调用组合，生产实现走 JNI 单次跨界。
+  - RimeDispatcher：单线程 Executor + CoroutineDispatcher，确保 librime 线程安全。
+  - RimeNative：声明 external 方法，维护库加载状态，并提供 handleRimeMessage 回调入口。
+  - RimeMessageHandler：MutableSharedFlow 广播 librime 通知（schema/option/deploy）。
+- 业务层
+  - InputLogicController：以 processKeyBulk 为热路径，结合 Mutex 串行化按键事务，减少竞态与错配。
 
-章节来源
-- [app/src/main/java/com/ziyou/ime/core/RimeApi.kt](file://app/src/main/java/com/ziyou/ime/core/RimeApi.kt)
-- [app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeNative.kt](file://app/src/main/java/com/ziyou/ime/core/RimeNative.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt](file://app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeMessage.kt](file://app/src/main/java/com/ziyou/ime/core/RimeMessage.kt)
-- [app/src/main/java/com/ziyou/ime/core/ProtoTypes.kt](file://app/src/main/java/com/ziyou/ime/core/ProtoTypes.kt)
-- [app/src/main/java/com/ziyou/ime/daemon/RimeSession.kt](file://app/src/main/java/com/ziyou/ime/daemon/RimeSession.kt)
-- [app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt](file://app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt)
-- [app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt](file://app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt)
+**章节来源**
+- [rime_jni.cc:46-265](file://app/src/main/jni/librime_jni/rime_jni.cc#L46-L265)
+- [session.h:12-35](file://app/src/main/jni/librime_jni/session.h#L12-L35)
+- [helper-types.h:16-165](file://app/src/main/jni/librime_jni/helper-types.h#L16-L165)
+- [RimeApi.kt:10-105](file://app/src/main/java/com/ziyou/ime/core/RimeApi.kt#L10-L105)
+- [SimpleRimeImpl.kt:10-177](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt#L10-L177)
+- [RimeDispatcher.kt:22-91](file://app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt#L22-L91)
+- [RimeNative.kt:10-170](file://app/src/main/java/com/ziyou/ime/core/RimeNative.kt#L10-L170)
+- [RimeMessage.kt:29-42](file://app/src/main/java/com/ziyou/ime/core/RimeMessage.kt#L29-L42)
+- [InputLogicController.kt:126-185](file://app/src/main/java/com/ziyou/ime/ime/InputLogicController.kt#L126-L185)
 
 ## 架构总览
-整体架构遵循“上层 API -> 会话管理 -> JNI 桥接 -> 原生引擎”的分层设计。上层通过 RimeApi 暴露稳定接口，SimpleRimeImpl 保证线程安全与错误隔离；RimeSession 负责生命周期；RimeNative + rime_jni.cc 完成类型转换与内存管理；最终调用 librime 引擎进行分词、翻译与候选生成。
+下图展示从 UI 到 librime 的完整调用链，包括 JNI 回调消息流。
 
 ```mermaid
 sequenceDiagram
-participant UI as "IME/UI"
-participant API as "RimeApi/SimpleRimeImpl"
-participant Sess as "RimeSession"
+participant UI as "UI/业务层"
+participant Ctrl as "InputLogicController"
+participant Api as "SimpleRimeImpl"
+participant Disp as "RimeDispatcher"
 participant Nat as "RimeNative"
-participant JN as "rime_jni.cc"
-participant Eng as "librime(C++)"
-UI->>API : "提交按键事件"
-API->>Sess : "获取/创建会话"
-Sess-->>API : "会话句柄"
-API->>Nat : "native 调用(按键)"
-Nat->>JN : "JNI 入口"
-JN->>Eng : "调用引擎处理"
-Eng-->>JN : "返回候选/状态"
-JN-->>Nat : "转换为 Kotlin 对象"
-Nat-->>API : "回调结果"
-API-->>UI : "更新候选/状态"
+participant JNI as "JNI(rime_jni.cc)"
+participant Lib as "librime"
+UI->>Ctrl : 按键事件
+Ctrl->>Api : processKeyBulk(keycode, mask)
+Api->>Disp : dispatch { ... }
+Disp-->>Api : 在专属线程执行
+Api->>Nat : processRimeKeyBulk(...)
+Nat->>JNI : Java_com_..._processRimeKeyBulk(...)
+JNI->>Lib : rime->process_key(...)
+JNI->>JNI : commit()/context()
+JNI-->>Nat : [consumed, commit, context]
+Nat-->>Api : Array<Any?>
+Api-->>Ctrl : KeyEventResult
+Ctrl->>Ctrl : 解析结果并上屏/刷新UI
+Lib-->>JNI : 通知回调(schema/option/deploy)
+JNI-->>Nat : handleRimeMessage(type, args)
+Nat-->>Api : RimeMessageHandler.onMessage(...)
+Api-->>UI : SharedFlow<RimeMessage> 订阅更新
 ```
 
-图表来源
-- [app/src/main/java/com/ziyou/ime/core/RimeApi.kt](file://app/src/main/java/com/ziyou/ime/core/RimeApi.kt)
-- [app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeNative.kt](file://app/src/main/java/com/ziyou/ime/core/RimeNative.kt)
-- [app/src/main/jni/librime_jni/rime_jni.cc](file://app/src/main/jni/librime_jni/rime_jni.cc)
+**图表来源** 
+- [rime_jni.cc:366-384](file://app/src/main/jni/librime_jni/rime_jni.cc#L366-L384)
+- [rime_jni.cc:289-315](file://app/src/main/jni/librime_jni/rime_jni.cc#L289-L315)
+- [RimeNative.kt:158-169](file://app/src/main/java/com/ziyou/ime/core/RimeNative.kt#L158-L169)
+- [RimeMessage.kt:29-42](file://app/src/main/java/com/ziyou/ime/core/RimeMessage.kt#L29-L42)
+- [SimpleRimeImpl.kt:59-64](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt#L59-L64)
+- [InputLogicController.kt:126-185](file://app/src/main/java/com/ziyou/ime/ime/InputLogicController.kt#L126-L185)
 
 ## 详细组件分析
 
-### RimeApi 与 SimpleRimeImpl
-- RimeApi：定义统一的输入、查询、状态同步、配置重载等接口，屏蔽底层差异。
-- SimpleRimeImpl：
-  - 线程安全：内部使用锁或单线程调度器，避免并发访问 JNI 导致的崩溃。
-  - 参数校验：对按键、文本、索引等进行边界检查，防止越界。
-  - 错误处理：捕获 JNI 异常并转换为上层友好错误码/异常。
-  - 回调派发：通过 RimeDispatcher 将结果异步回传给 UI。
+### JNI 层：C++ 单例与 RAII 资源管理
+- Rime 单例
+  - 启动流程：设置环境变量（共享/用户目录、版本名），配置 traits，调用 setup/initialize，注册通知回调，启动维护任务。
+  - 会话管理：内部持有 shared_ptr<SessionHolder>，按需创建与复用；exit/sync 重置会话并释放资源。
+  - 输入与输出：processKey、commitComposition、clearComposition、replaceKey；commit/context/status 获取并转换为 Proto 对象。
+  - 方案与候选：schemaList/selectSchema、selectCandidate/deleteCandidate/changePage、getCandidates/getBulkCandidates。
+- SessionHolder（RAII）
+  - 构造时 create_session，析构时 destroy_session，异常安全且无泄漏。
+- 类型转换（helper-types.h）
+  - CommitProto/ContextProto/StatusProto/CandidateProto/SchemaItem：从 C 结构体拷贝字段，处理可选字符串与 UTF-8 距离计算。
+
+```mermaid
+classDiagram
+class Rime {
+-rime : RimeApi*
+-initialized_ : bool
+-session_ : shared_ptr<SessionHolder>
++Instance() Rime&
++startup(fullCheck, notificationHandler) void
++processKey(keycode, mask) bool
++commitComposition() bool
++clearComposition() void
++replaceKey(caretPos, length, replacement) bool
++commit() unique_ptr<CommitProto>
++context() unique_ptr<ContextProto>
++status() unique_ptr<StatusProto>
++setOption(key, value) void
++getOption(key) bool
++currentSchemaId() string
++schemaList() vector<SchemaItem>
++selectSchema(schemaId) bool
++selectCandidate(index, global) bool
++deleteCandidate(index, global) bool
++changePage(backward) bool
++getCandidates(startIndex, limit) vector<CandidateProto>
++getBulkCandidates() tuple<int,int,vector<CandidateProto>>
++exit() void
++sync() bool
+}
+class SessionHolder {
+-id_ : RimeSessionId
++SessionHolder()
++~SessionHolder()
++id() RimeSessionId
+}
+class CommitProto {
++text : optional<string>
+}
+class ContextProto {
++composition : CompositionProto
++menu : MenuProto
++input : string
++caretPos : int
+}
+class StatusProto {
++schemaId : string
++schemaName : string
++isDisabled : bool
++isComposing : bool
++isAsciiMode : bool
++isFullShape : bool
++isSimplified : bool
++isTraditional : bool
++isAsciiPunct : bool
+}
+Rime --> SessionHolder : "持有"
+Rime --> CommitProto : "返回"
+Rime --> ContextProto : "返回"
+Rime --> StatusProto : "返回"
+```
+
+**图表来源** 
+- [rime_jni.cc:46-265](file://app/src/main/jni/librime_jni/rime_jni.cc#L46-L265)
+- [session.h:12-35](file://app/src/main/jni/librime_jni/session.h#L12-L35)
+- [helper-types.h:35-165](file://app/src/main/jni/librime_jni/helper-types.h#L35-L165)
+
+**章节来源**
+- [rime_jni.cc:46-265](file://app/src/main/jni/librime_jni/rime_jni.cc#L46-L265)
+- [session.h:12-35](file://app/src/main/jni/librime_jni/session.h#L12-L35)
+- [helper-types.h:16-165](file://app/src/main/jni/librime_jni/helper-types.h#L16-L165)
+
+### RimeApi 接口设计与 SimpleRimeImpl 实现
+- RimeApi 接口
+  - 生命周期：startup/shutdown
+  - 输入处理：processKey/processKeyBulk/commitComposition/clearComposition/replaceKey
+  - 状态查询：getCommit/getContext/getStatus/getCandidates
+  - 候选操作：selectCandidate/deleteCandidate/changePage
+  - 方案管理：getSchemaList/getCurrentSchema/selectSchema
+  - 运行时选项：setOption/getOption
+  - 同步：syncUserData
+  - 消息流：messageFlow（SharedFlow<RimeMessage>）
+- SimpleRimeImpl 实现
+  - 所有 suspend 方法通过 dispatcher.dispatch 在专属线程执行。
+  - processKeyBulk 默认实现为三次调用组合（便于测试/Fake），生产实现由 JNI 单次跨界返回三元组。
+  - messageFlow 直接转发至 RimeMessageHandler.messageFlow。
 
 ```mermaid
 classDiagram
 class RimeApi {
-+submitKey(keyEvent)
-+getCandidates()
-+syncState()
-+reloadConfig()
-+dispose()
+<<interface>>
++startup(sharedDir, userDir, version, fullCheck) suspend Boolean
++shutdown() suspend void
++processKey(keycode, mask) suspend Boolean
++processKeyBulk(keycode, mask) suspend KeyEventResult
++commitComposition() suspend Boolean
++clearComposition() suspend void
++replaceKey(caretPos, length, replacement) suspend Boolean
++getCommit() suspend CommitProto?
++getContext() suspend ContextProto?
++getStatus() suspend StatusProto?
++getCandidates(startIndex, limit) suspend List<CandidateProto>
++selectCandidate(index, global) suspend Boolean
++deleteCandidate(index, global) suspend Boolean
++changePage(backward) suspend Boolean
++getSchemaList() suspend List<SchemaItem>
++getCurrentSchema() suspend String
++selectSchema(schemaId) suspend Boolean
++setOption(key, value) suspend void
++getOption(key) suspend Boolean
++syncUserData() suspend Boolean
++messageFlow : SharedFlow<RimeMessage>
 }
 class SimpleRimeImpl {
--lock
--dispatcher
--nativeHandle
-+submitKey(keyEvent)
-+getCandidates()
-+syncState()
-+reloadConfig()
-+dispose()
+-dispatcher : RimeDispatcher
++startup(...)
++shutdown()
++processKey(...)
++processKeyBulk(...)
++commitComposition()
++clearComposition()
++replaceKey(...)
++getCommit()
++getContext()
++getStatus()
++getCandidates(...)
++selectCandidate(...)
++deleteCandidate(...)
++changePage(...)
++getSchemaList()
++getCurrentSchema()
++selectSchema(...)
++setOption(...)
++getOption(...)
++syncUserData()
++messageFlow
 }
-RimeApi <|.. SimpleRimeImpl : "实现"
+RimeApi <|.. SimpleRimeImpl
 ```
 
-图表来源
-- [app/src/main/java/com/ziyou/ime/core/RimeApi.kt](file://app/src/main/java/com/ziyou/ime/core/RimeApi.kt)
-- [app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt)
+**图表来源** 
+- [RimeApi.kt:10-105](file://app/src/main/java/com/ziyou/ime/core/RimeApi.kt#L10-L105)
+- [SimpleRimeImpl.kt:10-177](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt#L10-L177)
 
-章节来源
-- [app/src/main/java/com/ziyou/ime/core/RimeApi.kt](file://app/src/main/java/com/ziyou/ime/core/RimeApi.kt)
-- [app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt)
+**章节来源**
+- [RimeApi.kt:10-105](file://app/src/main/java/com/ziyou/ime/core/RimeApi.kt#L10-L105)
+- [SimpleRimeImpl.kt:10-177](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt#L10-L177)
 
-### JNI 接口与数据转换
-- RimeNative：声明 native 方法，作为 Kotlin 到 C++ 的桥接点。
-- rime_jni.cc：实现 JNI 函数，负责：
-  - 类型转换：将 Kotlin/Java 字符串、数组、对象转换为 std::string、std::vector、自定义结构体。
-  - 内存管理：使用局部引用/全局引用、释放本地指针，避免泄漏。
-  - 错误处理：捕获 C++ 异常，设置 Java 异常并返回安全值。
-- helper-types.h、jni-utils.h、objconv.h：提供通用类型转换工具与辅助宏。
+### RimeDispatcher 单线程调度器设计
+- 目标：确保所有 librime API 在同一线程顺序执行，避免数据竞争。
+- 实现要点：
+  - Executors.newSingleThreadExecutor 绑定协程调度器。
+  - dispatch 使用 withContext(dispatcher) 执行块，捕获异常并记录日志。
+  - dispatchWithTimeout 支持超时保护，避免阻塞。
+  - shutdown 幂等关闭，防止重复释放。
 
 ```mermaid
 flowchart TD
-Start(["JNI 调用入口"]) --> ParseArgs["解析参数<br/>字符串/数组/对象"]
-ParseArgs --> Validate{"参数有效?"}
-Validate --> |否| ThrowErr["抛出异常/返回空"]
-Validate --> |是| CallEngine["调用 librime 接口"]
-CallEngine --> Convert["转换返回值<br/>std::string/vector -> Java/Kotlin"]
-Convert --> Release["释放本地引用/临时对象"]
-Release --> Return["返回结果给上层"]
+Start(["进入 dispatch"]) --> CheckShutdown{"已关闭?"}
+CheckShutdown --> |是| ThrowErr["抛出 IllegalStateException"]
+CheckShutdown --> |否| WithCtx["withContext(dispatcher)"]
+WithCtx --> TryBlock["try { block() }"]
+TryBlock --> Success["返回结果"]
+TryBlock --> Catch["catch 异常 -> 记录日志并重新抛出"]
 ThrowErr --> End(["结束"])
-Return --> End
+Success --> End
+Catch --> End
 ```
 
-图表来源
-- [app/src/main/jni/librime_jni/rime_jni.cc](file://app/src/main/jni/librime_jni/rime_jni.cc)
-- [app/src/main/jni/librime_jni/helper-types.h](file://app/src/main/jni/librime_jni/helper-types.h)
-- [app/src/main/jni/librime_jni/jni-utils.h](file://app/src/main/jni/librime_jni/jni-utils.h)
-- [app/src/main/jni/librime_jni/objconv.h](file://app/src/main/jni/librime_jni/objconv.h)
+**图表来源** 
+- [RimeDispatcher.kt:48-60](file://app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt#L48-L60)
 
-章节来源
-- [app/src/main/java/com/ziyou/ime/core/RimeNative.kt](file://app/src/main/java/com/ziyou/ime/core/RimeNative.kt)
-- [app/src/main/jni/librime_jni/rime_jni.cc](file://app/src/main/jni/librime_jni/rime_jni.cc)
-- [app/src/main/jni/librime_jni/helper-types.h](file://app/src/main/jni/librime_jni/helper-types.h)
-- [app/src/main/jni/librime_jni/jni-utils.h](file://app/src/main/jni/librime_jni/jni-utils.h)
-- [app/src/main/jni/librime_jni/objconv.h](file://app/src/main/jni/librime_jni/objconv.h)
+**章节来源**
+- [RimeDispatcher.kt:22-91](file://app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt#L22-L91)
 
-### RimeSession 生命周期管理
-- 初始化：加载配置、部署 assets、创建引擎上下文。
-- 配置加载：读取 default.yaml、schema 与 dict，必要时合并用户配置。
-- 引擎启动：根据 schema 初始化翻译器、分词器、过滤器等组件。
-- 运行期：处理按键、生成候选、维护上下文状态。
-- 资源清理：释放引擎句柄、关闭数据库连接、清空缓存。
-
-```mermaid
-stateDiagram-v2
-[*] --> 未初始化
-未初始化 --> 已部署 : "部署配置"
-已部署 --> 已加载 : "加载 schema/dict"
-已加载 --> 已启动 : "初始化引擎"
-已启动 --> 运行中 : "处理按键/候选"
-运行中 --> 已启动 : "状态同步"
-已启动 --> 已清理 : "释放资源"
-已清理 --> [*]
-```
-
-图表来源
-- [app/src/main/java/com/ziyou/ime/daemon/RimeSession.kt](file://app/src/main/java/com/ziyou/ime/daemon/RimeSession.kt)
-- [app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt](file://app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt)
-- [app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt](file://app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt)
-
-章节来源
-- [app/src/main/java/com/ziyou/ime/daemon/RimeSession.kt](file://app/src/main/java/com/ziyou/ime/daemon/RimeSession.kt)
-- [app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt](file://app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt)
-- [app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt](file://app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt)
-
-### 消息传递机制
-- 按键事件：IME 捕获按键 -> RimeDispatcher -> RimeApi -> RimeNative -> rime_jni.cc -> librime。
-- 候选词生成：引擎返回候选列表 -> JNI 转换为 Kotlin 对象 -> RimeDispatcher -> UI 渲染。
-- 状态同步：编辑状态、选区、标点模式等通过消息同步，保持 UI 与引擎一致。
+### 批量 API 优化：processKeyBulk 单次跨界
+- 设计动机：减少主线程↔Rime 线程往返与 JNI 跨界次数，提升热路径性能。
+- 实现细节：
+  - JNI 层 processRimeKeyBulk：一次调用 processKey，若被消费则立即 commit+context，返回三元组数组。
+  - Kotlin 层 SimpleRimeImpl.parseBulkResult：将原生数组解析为 KeyEventResult。
+  - 默认接口实现（fallback）：三次调用组合，便于 Fake/测试覆盖。
 
 ```mermaid
 sequenceDiagram
-participant IME as "IME"
-participant Disp as "RimeDispatcher"
-participant API as "RimeApi"
-participant Nat as "RimeNative"
-participant JN as "rime_jni.cc"
-participant Eng as "librime"
-IME->>Disp : "按键事件"
-Disp->>API : "转发按键"
-API->>Nat : "native 提交"
-Nat->>JN : "JNI 调用"
-JN->>Eng : "处理按键"
-Eng-->>JN : "候选/状态"
-JN-->>Nat : "转换对象"
-Nat-->>API : "回调"
-API-->>Disp : "结果"
-Disp-->>IME : "更新 UI"
+participant Impl as "SimpleRimeImpl"
+participant Native as "RimeNative"
+participant JNI as "JNI(processRimeKeyBulk)"
+participant Lib as "librime"
+Impl->>Native : processRimeKeyBulk(keycode, mask)
+Native->>JNI : Java_..._processRimeKeyBulk(...)
+JNI->>Lib : process_key(...)
+alt 被消费
+JNI->>Lib : get_commit(...)
+JNI->>Lib : get_context(...)
+JNI-->>Native : [consumed=true, commit, context]
+else 未消费
+JNI-->>Native : [consumed=false, null, null]
+end
+Native-->>Impl : Array<Any?>
+Impl->>Impl : parseBulkResult(...)
+Impl-->>Caller : KeyEventResult
 ```
 
-图表来源
-- [app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt](file://app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeMessage.kt](file://app/src/main/java/com/ziyou/ime/core/RimeMessage.kt)
-- [app/src/main/java/com/ziyou/ime/core/ProtoTypes.kt](file://app/src/main/java/com/ziyou/ime/core/ProtoTypes.kt)
-- [app/src/main/jni/librime_jni/rime_jni.cc](file://app/src/main/jni/librime_jni/rime_jni.cc)
+**图表来源** 
+- [rime_jni.cc:366-384](file://app/src/main/jni/librime_jni/rime_jni.cc#L366-L384)
+- [SimpleRimeImpl.kt:23-28](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt#L23-L28)
+- [SimpleRimeImpl.kt:59-64](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt#L59-L64)
 
-章节来源
-- [app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt](file://app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeMessage.kt](file://app/src/main/java/com/ziyou/ime/core/RimeMessage.kt)
-- [app/src/main/java/com/ziyou/ime/core/ProtoTypes.kt](file://app/src/main/java/com/ziyou/ime/core/ProtoTypes.kt)
+**章节来源**
+- [rime_jni.cc:366-384](file://app/src/main/jni/librime_jni/rime_jni.cc#L366-L384)
+- [SimpleRimeImpl.kt:23-28](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt#L23-L28)
+- [SimpleRimeImpl.kt:59-64](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt#L59-L64)
 
-### 配置文件加载与管理策略
-- default.yaml：全局默认配置，控制行为开关、字体、布局等。
-- schema.yaml：定义输入方案（如拼音、仓颉），指定使用的词典与处理器。
-- dict.yaml：词典数据，支持 LevelDB、TSV 等格式。
-- symbols.yaml：符号表，用于快速插入标点与特殊字符。
-- AssetDeployer：将 assets 中的配置文件复制到可写目录，确保运行时可修改。
-- RimeConfigManager：集中管理配置项，支持热重载与增量更新。
+### 消息流 SharedFlow：处理 librime 通知回调
+- 触发点：JNI 层 set_notification_handler 注册回调，收到 schema/option/deploy 消息后调用 Java 层 handleRimeMessage。
+- 分发机制：RimeNative.handleRimeMessage 将消息映射为 RimeMessage 子类，并通过 RimeMessageHandler.onMessage 推入 MutableSharedFlow。
+- 消费方式：UI 订阅 RimeApi.messageFlow（即 RimeMessageHandler.messageFlow），接收状态变更通知。
 
 ```mermaid
-flowchart TD
-A["assets/rime/*"] --> B["AssetDeployer 部署"]
-B --> C["可写目录"]
-C --> D["RimeConfigManager 加载"]
-D --> E["default.yaml"]
-D --> F["schema.yaml"]
-D --> G["dict.yaml"]
-D --> H["symbols.yaml"]
-E --> I["引擎初始化"]
-F --> I
-G --> I
-H --> I
+sequenceDiagram
+participant Lib as "librime"
+participant JNI as "JNI回调"
+participant Nat as "RimeNative.handleRimeMessage"
+participant Handler as "RimeMessageHandler"
+participant UI as "订阅者"
+Lib-->>JNI : 通知(message_type, message_value)
+JNI-->>Nat : type=1/2/3, args=[value]
+Nat->>Handler : onMessage(RimeMessage)
+Handler-->>UI : SharedFlow.tryEmit(message)
+UI-->>UI : 更新UI/状态
 ```
 
-图表来源
-- [app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt](file://app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt)
-- [app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt](file://app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt)
-- [app/src/main/assets/rime/default.yaml](file://app/src/main/assets/rime/default.yaml)
-- [app/src/main/assets/rime/luna_pinyin.schema.yaml](file://app/src/main/assets/rime/luna_pinyin.schema.yaml)
-- [app/src/main/assets/rime/luna_pinyin.dict.yaml](file://app/src/main/assets/rime/luna_pinyin.dict.yaml)
-- [app/src/main/assets/rime/cangjie5.schema.yaml](file://app/src/main/assets/rime/cangjie5.schema.yaml)
-- [app/src/main/assets/rime/cangjie5.dict.yaml](file://app/src/main/assets/rime/cangjie5.dict.yaml)
-- [app/src/main/assets/rime/symbols.yaml](file://app/src/main/assets/rime/symbols.yaml)
+**图表来源** 
+- [rime_jni.cc:289-315](file://app/src/main/jni/librime_jni/rime_jni.cc#L289-L315)
+- [RimeNative.kt:158-169](file://app/src/main/java/com/ziyou/ime/core/RimeNative.kt#L158-L169)
+- [RimeMessage.kt:29-42](file://app/src/main/java/com/ziyou/ime/core/RimeMessage.kt#L29-L42)
 
-章节来源
-- [app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt](file://app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt)
-- [app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt](file://app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt)
-- [app/src/main/assets/rime/default.yaml](file://app/src/main/assets/rime/default.yaml)
-- [app/src/main/assets/rime/luna_pinyin.schema.yaml](file://app/src/main/assets/rime/luna_pinyin.schema.yaml)
-- [app/src/main/assets/rime/luna_pinyin.dict.yaml](file://app/src/main/assets/rime/luna_pinyin.dict.yaml)
-- [app/src/main/assets/rime/cangjie5.schema.yaml](file://app/src/main/assets/rime/cangjie5.schema.yaml)
-- [app/src/main/assets/rime/cangjie5.dict.yaml](file://app/src/main/assets/rime/cangjie5.dict.yaml)
-- [app/src/main/assets/rime/symbols.yaml](file://app/src/main/assets/rime/symbols.yaml)
-
-### 插件机制
-- Rime 支持动态插件（如预测、简化字转换、历史翻译等），通过配置文件启用。
-- 插件以共享库形式加载，需在 build 时链接或在运行时动态加载。
-- 在 Android 上，可通过 prebuilt 库或自行编译插件模块集成。
-
-章节来源
-- [app/src/main/jni/librime_jni/CMakeLists.txt](file://app/src/main/jni/librime_jni/CMakeLists.txt)
-- [app/src/main/assets/rime/default.yaml](file://app/src/main/assets/rime/default.yaml)
+**章节来源**
+- [rime_jni.cc:289-315](file://app/src/main/jni/librime_jni/rime_jni.cc#L289-L315)
+- [RimeNative.kt:158-169](file://app/src/main/java/com/ziyou/ime/core/RimeNative.kt#L158-L169)
+- [RimeMessage.kt:29-42](file://app/src/main/java/com/ziyou/ime/core/RimeMessage.kt#L29-L42)
 
 ## 依赖关系分析
-- 上层依赖：RimeApi -> SimpleRimeImpl -> RimeNative -> rime_jni.cc -> librime
-- 配置依赖：RimeConfigManager -> AssetDeployer -> assets/rime/*
-- 消息依赖：RimeDispatcher -> RimeMessage -> ProtoTypes
+- JNI 层依赖 librime API，通过 rime_get_api 获取接口指针；依赖 utf8 工具进行字符距离计算。
+- Kotlin 层依赖 kotlinx.coroutines 的 SharedFlow 与协程调度；依赖 Android Log 与 System.loadLibrary。
+- 业务层依赖 RimeApi 抽象，解耦具体实现；通过 InputLogicController 协调输入逻辑与 UI 渲染。
 
 ```mermaid
 graph LR
-API["RimeApi"] --> Impl["SimpleRimeImpl"]
-Impl --> Native["RimeNative"]
-Native --> JNI["rime_jni.cc"]
-JNI --> Engine["librime"]
-Config["RimeConfigManager"] --> Deploy["AssetDeployer"]
-Deploy --> Assets["assets/rime/*"]
-Disp["RimeDispatcher"] --> Msg["RimeMessage"]
-Msg --> Types["ProtoTypes"]
+Lib["librime"] --> JNI["rime_jni.cc"]
+JNI --> Types["helper-types.h"]
+JNI --> Session["session.h"]
+JNI --> Native["RimeNative.kt"]
+Native --> Impl["SimpleRimeImpl.kt"]
+Impl --> Dispatcher["RimeDispatcher.kt"]
+Impl --> Msg["RimeMessage.kt"]
+Impl --> Controller["InputLogicController.kt"]
 ```
 
-图表来源
-- [app/src/main/java/com/ziyou/ime/core/RimeApi.kt](file://app/src/main/java/com/ziyou/ime/core/RimeApi.kt)
-- [app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeNative.kt](file://app/src/main/java/com/ziyou/ime/core/RimeNative.kt)
-- [app/src/main/jni/librime_jni/rime_jni.cc](file://app/src/main/jni/librime_jni/rime_jni.cc)
-- [app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt](file://app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt)
-- [app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt](file://app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt](file://app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeMessage.kt](file://app/src/main/java/com/ziyou/ime/core/RimeMessage.kt)
-- [app/src/main/java/com/ziyou/ime/core/ProtoTypes.kt](file://app/src/main/java/com/ziyou/ime/core/ProtoTypes.kt)
+**图表来源** 
+- [rime_jni.cc:7-17](file://app/src/main/jni/librime_jni/rime_jni.cc#L7-L17)
+- [helper-types.h:1-15](file://app/src/main/jni/librime_jni/helper-types.h#L1-L15)
+- [session.h:1-11](file://app/src/main/jni/librime_jni/session.h#L1-L11)
+- [RimeNative.kt:10-27](file://app/src/main/java/com/ziyou/ime/core/RimeNative.kt#L10-L27)
+- [SimpleRimeImpl.kt:10-177](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt#L10-L177)
+- [RimeDispatcher.kt:22-91](file://app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt#L22-L91)
+- [RimeMessage.kt:29-42](file://app/src/main/java/com/ziyou/ime/core/RimeMessage.kt#L29-L42)
+- [InputLogicController.kt:126-185](file://app/src/main/java/com/ziyou/ime/ime/InputLogicController.kt#L126-L185)
 
-章节来源
-- [app/src/main/java/com/ziyou/ime/core/RimeApi.kt](file://app/src/main/java/com/ziyou/ime/core/RimeApi.kt)
-- [app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeNative.kt](file://app/src/main/java/com/ziyou/ime/core/RimeNative.kt)
-- [app/src/main/jni/librime_jni/rime_jni.cc](file://app/src/main/jni/librime_jni/rime_jni.cc)
-- [app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt](file://app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt)
-- [app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt](file://app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt](file://app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt)
-- [app/src/main/java/com/ziyou/ime/core/RimeMessage.kt](file://app/src/main/java/com/ziyou/ime/core/RimeMessage.kt)
-- [app/src/main/java/com/ziyou/ime/core/ProtoTypes.kt](file://app/src/main/java/com/ziyou/ime/core/ProtoTypes.kt)
+**章节来源**
+- [rime_jni.cc:7-17](file://app/src/main/jni/librime_jni/rime_jni.cc#L7-L17)
+- [helper-types.h:1-15](file://app/src/main/jni/librime_jni/helper-types.h#L1-L15)
+- [session.h:1-11](file://app/src/main/jni/librime_jni/session.h#L1-L11)
+- [RimeNative.kt:10-27](file://app/src/main/java/com/ziyou/ime/core/RimeNative.kt#L10-L27)
+- [SimpleRimeImpl.kt:10-177](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt#L10-L177)
+- [RimeDispatcher.kt:22-91](file://app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt#L22-L91)
+- [RimeMessage.kt:29-42](file://app/src/main/java/com/ziyou/ime/core/RimeMessage.kt#L29-L42)
+- [InputLogicController.kt:126-185](file://app/src/main/java/com/ziyou/ime/ime/InputLogicController.kt#L126-L185)
 
-## 性能考虑
-- 减少 JNI 调用频率：批量处理按键与候选，避免频繁跨进程切换。
-- 对象复用：重用消息对象与缓冲区，降低 GC 压力。
-- 线程隔离：将耗时操作（配置加载、词典编译）放入后台线程。
-- 缓存策略：缓存常用候选与状态，减少重复计算。
-- 内存管理：及时释放本地引用，避免 JNI 内存泄漏。
-- 配置热重载：增量更新而非全量重建，缩短重启时间。
+## 性能考量
+- 热路径优化：processKeyBulk 单次跨界返回 consumed/commit/context，减少线程切换与 JNI 调用开销。
+- 内存回收：JNI 层在部署完成后调用 mallopt(M_PURGE) 归还空闲页，降低常驻内存占用。
+- 超时保护：dispatchWithTimeout 避免长时间阻塞导致按键积压。
+- 编码长度上限：InputLogicController 限制 MAX_INPUT_LENGTH，防止超长编码导致搜索爆炸。
 
 [本节为通用指导，不直接分析具体文件]
 
 ## 故障排查指南
-- 常见错误：
-  - JNI 崩溃：检查参数有效性、字符串编码、数组边界。
-  - 配置加载失败：确认 assets 部署成功、路径正确、YAML 语法无误。
-  - 候选为空：检查 schema 与 dict 是否匹配、过滤条件是否过严。
-  - 内存泄漏：监控本地引用计数、释放临时对象。
-- 调试技巧：
-  - 打印关键路径日志（配置加载、JNI 调用、候选生成）。
-  - 使用 Android Studio 的 Native Debug 定位崩溃点。
-  - 验证 YAML 配置与词典完整性。
-  - 模拟按键序列复现问题。
+- 常见错误
+  - UnsatisfiedLinkError：native 库未加载或 ABI 不匹配。检查 RimeNative.isLoaded 与 .so 文件。
+  - IllegalStateException：RimeDispatcher 已关闭或 native 库未加载时调用 startup。
+  - 线程错乱：确认所有 RimeNative 调用均通过 RimeDispatcher.dispatch。
+- 调试建议
+  - 启用慢按键告警（SLOW_KEY_WARN_MS）定位耗时瓶颈。
+  - 观察 SharedFlow 消息，确认 schema/option/deploy 状态变更是否到达 UI。
+  - 使用单元测试覆盖 parseBulkResult 与 dispatcher 调度路径。
 
-章节来源
-- [app/src/main/jni/librime_jni/rime_jni.cc](file://app/src/main/jni/librime_jni/rime_jni.cc)
-- [app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt](file://app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt)
-- [app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt](file://app/src/main/java/com/ziyou/ime/config/AssetDeployer.kt)
+**章节来源**
+- [RimeNative.kt:18-27](file://app/src/main/java/com/ziyou/ime/core/RimeNative.kt#L18-L27)
+- [RimeDispatcher.kt:84-90](file://app/src/main/java/com/ziyou/ime/core/RimeDispatcher.kt#L84-L90)
+- [InputLogicController.kt:54-64](file://app/src/main/java/com/ziyou/ime/ime/InputLogicController.kt#L54-L64)
 
 ## 结论
-本项目通过清晰的分层架构与稳健的 JNI 桥接，实现了 Rime 引擎在 Android 上的高效集成。RimeApi 与 SimpleRimeImpl 提供了稳定的上层接口，RimeSession 管理生命周期，RimeDispatcher 与 RimeMessage 保障消息一致性。配置文件与词典的动态加载使得系统具备高度可扩展性。通过合理的性能优化与完善的故障排查手段，可在复杂场景下保持输入体验的流畅与稳定。
+本集成通过 C++ 单例与 RAII 保障 librime 资源安全，Kotlin 层以 RimeApi 抽象与 SimpleRimeImpl 实现统一异步与线程模型，RimeDispatcher 确保 librime 线程安全，processKeyBulk 显著优化热路径性能，SharedFlow 消息流实现 librime 通知的可靠分发。整体架构清晰、可测试性强，适合大规模输入法场景。
 
-[本节为总结，不直接分析具体文件]
+[本节为总结性内容，不直接分析具体文件]
 
-## 附录
-- 代码示例路径：
-  - JNI 调用示例：[rime_jni.cc](file://app/src/main/jni/librime_jni/rime_jni.cc)
-  - 配置加载示例：[RimeConfigManager.kt](file://app/src/main/java/com/ziyou/ime/config/RimeConfigManager.kt)
-  - 消息定义示例：[RimeMessage.kt](file://app/src/main/java/com/ziyou/ime/core/RimeMessage.kt)
-  - 协议类型示例：[ProtoTypes.kt](file://app/src/main/java/com/ziyou/ime/core/ProtoTypes.kt)
-- 调试命令：
-  - 查看日志：logcat | grep -i rime
-  - 崩溃分析：ndk-stack -sym <符号路径> -stack <崩溃堆栈>
+## 附录：使用示例与最佳实践
+- 启动与关闭
+  - 调用 RimeApi.startup 传入共享/用户目录与版本信息，fullCheck 首次启动设为 true。
+  - 应用退出时调用 shutdown 释放资源。
+- 输入处理
+  - 优先使用 processKeyBulk 获取 KeyEventResult，根据 consumed 分支处理 commit 与 UI 刷新。
+  - 未消费键按编辑器语义处理（退格/回车/可打印字符）。
+- 状态查询
+  - getContext 获取编码区与候选菜单；getStatus 获取当前模式与方案信息。
+- 方案与选项
+  - getSchemaList/selectSchema 动态切换方案；setOption/getOption 控制 ascii_mode/simplification 等。
+- 消息订阅
+  - 订阅 RimeApi.messageFlow，响应 schema/option/deploy 变更，更新 UI 状态。
 
-[本节为附录，不直接分析具体文件]
+**章节来源**
+- [RimeApi.kt:10-105](file://app/src/main/java/com/ziyou/ime/core/RimeApi.kt#L10-L105)
+- [SimpleRimeImpl.kt:32-49](file://app/src/main/java/com/ziyou/ime/core/SimpleRimeImpl.kt#L32-L49)
+- [InputLogicController.kt:126-185](file://app/src/main/java/com/ziyou/ime/ime/InputLogicController.kt#L126-L185)
+- [RimeMessage.kt:29-42](file://app/src/main/java/com/ziyou/ime/core/RimeMessage.kt#L29-L42)

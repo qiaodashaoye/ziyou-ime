@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: docs
+title: 输入法功能方案与开发文档集
+scope:
+    - docs/
+source_files: []
+depends_on: []
+related_to: []

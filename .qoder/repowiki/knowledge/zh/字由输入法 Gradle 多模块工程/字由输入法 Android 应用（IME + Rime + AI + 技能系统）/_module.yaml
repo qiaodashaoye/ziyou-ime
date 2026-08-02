@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: app
+title: 字由输入法 Android 应用（IME + Rime + AI + 技能系统）
+scope:
+    - app/
+source_files: []
+depends_on: []
+related_to: []

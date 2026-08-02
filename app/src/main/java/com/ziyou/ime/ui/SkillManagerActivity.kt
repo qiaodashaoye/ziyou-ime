@@ -3,6 +3,11 @@ package com.ziyou.ime.ui
 import android.net.Uri
 import android.os.Bundle
 import android.content.Intent
+import android.content.res.ColorStateList
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -40,6 +45,12 @@ class SkillManagerActivity : AppCompatActivity() {
 
     companion object {
         private const val DOWNLOAD_TIMEOUT_MS = 15_000
+
+        // ===== 设计令牌：顶部操作按钮（主色沿用项目 Material 约定） =====
+        private const val COLOR_PRIMARY = 0xFF1976D2.toInt()
+        private const val COLOR_TONAL_BG = 0xFFE3F2FD.toInt()
+        private const val ACTION_HEIGHT_DP = 40
+        private const val ACTION_RADIUS_DP = 20
     }
 
     private lateinit var listContainer: LinearLayout
@@ -63,22 +74,29 @@ class SkillManagerActivity : AppCompatActivity() {
             setPadding(dp(16), dp(16), dp(16), dp(16))
         }
 
-        // 顶部操作行：本地导入 / URL 导入 / 开发文档
-        val actionRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        actionRow.addView(Button(this).apply {
-            text = "导入 .skill 文件"
-            setOnClickListener { pickSkillFile.launch(arrayOf("*/*")) }
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        actionRow.addView(Button(this).apply {
-            text = "从 URL 导入"
-            setOnClickListener { showUrlImportDialog() }
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        actionRow.addView(Button(this).apply {
-            text = "开发文档"
-            setOnClickListener {
+        // 顶部操作行：本地导入（主）/ URL 导入（次）/ 开发文档（三级）
+        val actionRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, 0, dp(4))
+        }
+        actionRow.addView(
+            createActionButton("导入 .skill 文件", ActionButtonStyle.PRIMARY) {
+                pickSkillFile.launch(arrayOf("*/*"))
+            },
+            actionButtonLayoutParams(marginEndDp = 8)
+        )
+        actionRow.addView(
+            createActionButton("从 URL 导入", ActionButtonStyle.OUTLINE) {
+                showUrlImportDialog()
+            },
+            actionButtonLayoutParams(marginEndDp = 8)
+        )
+        actionRow.addView(
+            createActionButton("开发文档", ActionButtonStyle.TONAL) {
                 startActivity(Intent(this@SkillManagerActivity, SkillDevGuideActivity::class.java))
-            }
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            },
+            actionButtonLayoutParams()
+        )
         root.addView(actionRow)
 
         root.addView(TextView(this).apply {
@@ -95,6 +113,63 @@ class SkillManagerActivity : AppCompatActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         return root
     }
+
+    // ===== 顶部操作按钮 =====
+
+    /** 操作按钮三档视觉样式（Material 3：填充 / 描边 / 色调）。 */
+    private enum class ActionButtonStyle(
+        val bgColor: Int,
+        val strokeColor: Int, // 0 表示无描边
+        val textColor: Int,
+        val rippleColor: Int
+    ) {
+        /** 主操作：主色填充 + 白字 */
+        PRIMARY(COLOR_PRIMARY, 0, Color.WHITE, 0x33FFFFFF),
+
+        /** 次操作：白底 + 主色描边 + 主色字 */
+        OUTLINE(Color.WHITE, COLOR_PRIMARY, COLOR_PRIMARY, 0x1F1976D2),
+
+        /** 三级操作：浅色调底 + 主色字 */
+        TONAL(COLOR_TONAL_BG, 0, COLOR_PRIMARY, 0x1F1976D2)
+    }
+
+    /**
+     * 顶部操作按钮：胶囊圆角 + [RippleDrawable] 按压波纹反馈。
+     *
+     * 三档样式形成视觉层次：主操作主色填充、次操作主色描边、三级浅色调底；
+     * 点击逻辑完全由 [onClick] 决定，功能与原生 Button 一致。
+     */
+    private fun createActionButton(
+        label: String,
+        style: ActionButtonStyle,
+        onClick: () -> Unit
+    ): Button = Button(this).apply {
+        text = label
+        setTextColor(style.textColor)
+        textSize = 13f
+        setTypeface(null, Typeface.BOLD)
+        isAllCaps = false
+        minimumHeight = 0
+        minimumWidth = 0
+        stateListAnimator = null // 去掉默认抬升动画，按压反馈交给波纹
+        setPadding(dp(4), 0, dp(4), 0)
+        background = RippleDrawable(
+            ColorStateList.valueOf(style.rippleColor),
+            GradientDrawable().apply {
+                cornerRadius = dp(ACTION_RADIUS_DP).toFloat()
+                setColor(style.bgColor)
+                if (style.strokeColor != 0) setStroke(dp(1), style.strokeColor)
+            },
+            null // 无 mask：波纹裁剪到圆角矩形轮廓内
+        )
+        setOnClickListener { onClick() }
+    }
+
+    /** 操作按钮布局参数：等宽分布 + 统一高度 + 水平间距。 */
+    private fun actionButtonLayoutParams(marginEndDp: Int = 0): LinearLayout.LayoutParams =
+        LinearLayout.LayoutParams(0, dp(ACTION_HEIGHT_DP), 1f).apply {
+            setMargins(0, 0, dp(marginEndDp), 0)
+        }
 
     private fun refreshList() {
         listContainer.removeAllViews()

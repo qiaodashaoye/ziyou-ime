@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: skills_dev
+title: 星座查询技能（Constellation Skill）
+scope:
+    - skills-dev/
+source_files: []
+depends_on: []
+related_to:
+    - path: app/skill_system

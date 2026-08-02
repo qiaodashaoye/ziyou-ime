@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: jni_bindings
+title: RIME 输入法引擎 JNI 绑定库
+scope:
+    - libs/
+source_files: []
+depends_on: []
+related_to:
+    - path: app/core_rime

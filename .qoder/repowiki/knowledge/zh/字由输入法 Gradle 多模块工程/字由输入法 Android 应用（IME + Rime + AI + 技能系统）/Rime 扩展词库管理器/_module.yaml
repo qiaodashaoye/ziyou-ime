@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: app/dictionary_manager
+title: Rime 扩展词库管理器
+scope:
+    - app/src/main/java/com/ziyou/ime/dict/
+    - app/src/main/assets/rime/
+source_files: []
+depends_on: []
+related_to:
+    - path: app/ai_features
+    - path: app/ui_settings

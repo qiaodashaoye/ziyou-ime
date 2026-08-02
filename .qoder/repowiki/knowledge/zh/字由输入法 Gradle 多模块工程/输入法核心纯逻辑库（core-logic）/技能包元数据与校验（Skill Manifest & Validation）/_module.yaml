@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: core_logic/skill_system
+title: 技能包元数据与校验（Skill Manifest & Validation）
+scope:
+    - core-logic/src/main/java/com/ziyou/ime/core/skill/
+    - core-logic/src/test/java/com/ziyou/ime/core/skill/
+source_files: []
+depends_on: []
+related_to:
+    - path: app/skill_system

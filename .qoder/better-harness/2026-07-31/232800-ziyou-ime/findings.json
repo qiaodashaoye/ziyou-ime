@@ -1,0 +1,192 @@
+{
+  "summary": {
+    "projectName": "字由输入法（Ziyou IME）",
+    "locale": "zh-CN",
+    "modelId": "agent-work-loop-v4",
+    "reportContractVersion": 25,
+    "overview": "字由输入法在指令与代理资产层面覆盖完整：1 份根规则、9 个项目子代理、324 个纯 JVM 用例与一键发布脚本。本次评估以 Qoder 2026-07-01 至 07-31 的 34 个会话、当前工作树改动与 45 个提交的历史窗口为界，闭环薄弱点集中在三处：干净环境无法复原 native 预编译依赖、验收阈值仍按 38 个用例判定、合并与推送前没有绑定当前修订的必跑检查。",
+    "aiAgentPractice": {
+      "inspectedSurfaces": [
+        "Rules",
+        "Custom Agents"
+      ],
+      "coverageRows": [
+        {
+          "surface": "Rules",
+          "scopes": [
+            "Project"
+          ],
+          "count": 1,
+          "paths": [
+            "AGENTS.md"
+          ]
+        },
+        {
+          "surface": "Custom Agents",
+          "scopes": [
+            "Project"
+          ],
+          "count": 9,
+          "paths": [
+            ".qoder/agents/android-ime-developer.md",
+            ".qoder/agents/hot-path-performance-auditor.md",
+            ".qoder/agents/ime-architect.md",
+            ".qoder/agents/ime-code-reviewer.md",
+            ".qoder/agents/ime-product-planner.md",
+            ".qoder/agents/ime-ui-designer.md",
+            ".qoder/agents/minimal-change-engineer.md",
+            ".qoder/agents/release-gatekeeper.md",
+            ".qoder/agents/unit-test-engineer.md"
+          ]
+        },
+        {
+          "surface": "Memories",
+          "scopes": [
+            "Project"
+          ],
+          "count": 85
+        }
+      ]
+    },
+    "assignmentSummaries": [],
+    "dimensions": [
+      {
+        "id": "task-understanding",
+        "label": "任务理解",
+        "score": 70,
+        "summary": "AGENTS.md 与 ARCHITECTURE.md 完整给出五层架构、职责归属与七条硬性约束的路由，但测试基线等关键数字已与代码现状脱节。",
+        "findingRefs": []
+      },
+      {
+        "id": "controlled-execution",
+        "label": "可控执行",
+        "score": 52,
+        "summary": "常用命令与构建前置条件写得清楚，干净克隆却因子模块映射缺失走不通标准引导流程。",
+        "findingRefs": [
+          "native-submodule-bootstrap"
+        ]
+      },
+      {
+        "id": "change-validation",
+        "label": "改动验证",
+        "score": 56,
+        "summary": "324 个纯 JVM 用例与批量测试入口就位，但架构不变式与 UI 层没有任何检查覆盖，验收阈值也不再有区分力。",
+        "findingRefs": [
+          "test-baseline-threshold-stale",
+          "architecture-invariant-no-check",
+          "ui-change-no-verification-layer"
+        ]
+      },
+      {
+        "id": "reliable-delivery",
+        "label": "可靠交付",
+        "score": 45,
+        "summary": "发布脚本会校验签名并归档校验和，合并与推送侧没有绑定当前修订的必跑检查或验收记录。",
+        "findingRefs": [
+          "delivery-acceptance-missing"
+        ]
+      },
+      {
+        "id": "learning-capture",
+        "label": "经验沉淀",
+        "score": 42,
+        "summary": "九个子代理与项目记忆已成体系，本窗口却没有留下可判定重复工作、漂移与改进效果的验证记录。",
+        "findingRefs": [
+          "validation-evidence-not-retained"
+        ]
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "native-submodule-bootstrap",
+      "title": "干净克隆无法复原 librime 预编译依赖：predict 插件缺少子模块映射",
+      "severity": "High",
+      "reason": "事实：librime-prebuilt/plugins/librime-predict 以 gitlink（模式 160000）提交在索引中，而 .gitmodules 只登记了 librime-prebuilt/librime，`git submodule status` 因此以 fatal 结束（退出码 128）；.gitignore 排除 /libs/**/*.a，仓库内不含 librime.a，而 :app 固定以 -DWITH_PREDICT=ON 编译，链接时必须有 predict 模块。推论：新环境或流水线走标准 `git submodule update --init --recursive` 会中断，plugins/librime-predict 保持为空，`make librime`、`make predict` 与 build-release.sh --rebuild-native 都无法产出 libs/<abi>/librime.a。归属：仓库根 .gitmodules；librime-prebuilt/README.md 第 169 行目前用一条手工 git clone 绕过该缺口。不确定性：当前工作区该目录已就位，本机构建不受影响；托管端是否另有引导脚本未在本次范围内观察。",
+      "expectedOutput": [
+        "在 .gitmodules 补齐 librime-predict 的子模块登记，使新环境用一条标准初始化命令即可拿到 native 构建所需的插件源码。",
+        "把 README 里的手工 clone 步骤改写为子模块初始化说明，让引导路径只有一条且与索引一致。"
+      ],
+      "expectedArtifact": "Config",
+      "aiFixPrompt": "/better-harness fix this issue\n\n把 librime-prebuilt/plugins/librime-predict 登记为正式子模块，让干净克隆能一条命令复原 native 构建前置条件：在 .gitmodules 追加该路径的 submodule 段，url 用仓库内已可发现的 https://github.com/rime/librime-predict（与该目录 git remote 及 librime-prebuilt/README.md 第 169 行一致），保持索引中已有的 gitlink 提交不变；随后把 README.md 第 169 行的手工 clone 步骤改成子模块初始化说明。不要改动 libs/ 与 .gitignore，也不要新增网络下载脚本。\n\n## Validation\n\n- 运行 `git submodule status`，确认退出码为 0 且同时列出 librime-prebuilt/librime 与 librime-prebuilt/plugins/librime-predict\n- 运行 `git -C librime-prebuilt/plugins/librime-predict rev-parse HEAD`，确认与 `git ls-files -s librime-prebuilt/plugins/librime-predict` 记录的 gitlink 一致\n- 运行 `git status --porcelain`，确认除 .gitmodules 与 README.md 外没有额外改动",
+      "dimensionRefs": [
+        "controlled-execution"
+      ]
+    },
+    {
+      "id": "test-baseline-threshold-stale",
+      "title": "验收阈值仍写 38 个用例，实际已有 324 个，删掉大批用例也能过门禁",
+      "severity": "Medium",
+      "reason": "事实：app/src/test 与 core-logic/src/test 共 56 个测试文件、324 处 @Test；AGENTS.md 第 13 行、ARCHITECTURE.md 第 466 行（“共 38 用例”）、scripts/build-release.sh 第 100 行的门禁注释，以及 .qoder/agents 下三个子代理（unit-test-engineer 写明“38 个用例（:core-logic 25 + :app 13）”、release-gatekeeper 要求“用例数 ≥ 38”、android-ime-developer 的测试基线）仍以 38 为基线。推论：以“用例数 ≥ 38”作为验收条件时，套件即使缩减两百多个用例仍会判定通过，“基线只增不减”这条约束没有任何检查能发现违反；子代理据此汇报的用例数变化同样失真。归属：scripts/build-release.sh 的门禁与上述五处同一数字，最小修法是让数字由测试报告读取、文档只描述规则。不确定性：本次未运行套件，实际执行用例数可能因参数化用例与 @Test 计数存在差异。",
+      "expectedOutput": [
+        "把发布脚本的测试门禁改为对照实测用例数，使删除或忽略用例会直接让门禁失败。",
+        "让文档与子代理引用同一个用例基线来源，避免代理按过期数字判断覆盖情况。"
+      ],
+      "expectedArtifact": "Script",
+      "aiFixPrompt": "/better-harness fix this issue\n\n让“用例基线只增不减”重新具备区分力：先运行 `./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest` 得到当前真实用例数，在 scripts/build-release.sh 的测试门禁处改为从 Gradle 测试报告读取实际用例数并与仓库内记录的基线比较、低于基线即失败；再把 AGENTS.md 第 13 行、ARCHITECTURE.md 第 466 行与 .qoder/agents/unit-test-engineer.md、.qoder/agents/release-gatekeeper.md、.qoder/agents/android-ime-developer.md 中的 38 统一改为该实测数值或改成指向单一数字来源的描述。不要删除或跳过任何既有用例。\n\n## Validation\n\n- 运行 `./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest`，记录全绿与实际用例总数\n- 运行 `./scripts/build-release.sh --skip-tests` 之外的正常路径或直接执行脚本内的门禁片段，确认基线低于实测值时脚本会失败\n- 运行 `grep -rn \"38\" AGENTS.md ARCHITECTURE.md scripts/build-release.sh .qoder/agents/*.md`，确认不再有过期基线数字",
+      "dimensionRefs": [
+        "change-validation"
+      ]
+    },
+    {
+      "id": "delivery-acceptance-missing",
+      "title": "13 个提交已推到远端，仓库内没有任何必跑检查作为验收边界",
+      "severity": "Medium",
+      "reason": "事实：当前分支 feat-dev 相对 main 领先 13 个提交（190 个文件、+20497/-1491），且与远端同名分支完全一致（已推送）；仓库内没有任何持续集成配置，唯一的测试门禁位于 scripts/build-release.sh，仅在发布时运行且可用 --skip-tests 跳过。Qoder 本窗口 34 个会话、41 个任务 Episode 中没有保留任何变更或验证事件，交付证据上限为“未观察”。推论：合并与推送前没有绑定当前修订的可复现验收决策，某次改动是否跑过检查只能靠人工回忆，代理交付后也无从证明。归属：仓库根缺一个可运行的推送前检查入口（可先落在 scripts/ 加 AGENTS.md 的推送前清单）。不确定性：托管端（Gitee）的评审与流水线不在本次授权范围内，属未观察，不能据此断定托管端也没有门禁。",
+      "expectedOutput": [
+        "提供一个只做校验的推送前入口，让每次交付都有绑定当前修订的检查结论。",
+        "在 AGENTS.md 写明推送前必跑该检查并回报结果，使验收边界对人和代理都是同一条。"
+      ],
+      "expectedArtifact": "Script",
+      "aiFixPrompt": "/better-harness fix this issue\n\n给合并与推送加一条可复现的验收路径：在 scripts/ 下新增一个只做校验的入口脚本（复用 AGENTS.md 已记录的 `./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest` 与 `./gradlew :app:assembleDebug`），脚本输出当前 HEAD、用例结果与结论，并在 AGENTS.md 增补“推送前必须运行该脚本并在提交说明或交付回报中附结论”的要求。只新增校验脚本与文档段落，不要引入远端流水线配置、不要改动签名与发布逻辑；配置远端仓库设置或开启托管流水线需要另行授权。\n\n## Validation\n\n- 在当前工作区运行新脚本，确认退出码与测试结果一致、失败时能定位到具体 Gradle 任务\n- 确认脚本输出包含 `git rev-parse HEAD` 的修订号，使结论可绑定到具体修订\n- 运行 `git diff --shortstat main...feat-dev`，在回报中记录本次待验收的改动规模",
+      "dimensionRefs": [
+        "reliable-delivery"
+      ]
+    },
+    {
+      "id": "architecture-invariant-no-check",
+      "title": "七条硬性架构约束没有任何机械检查，越界只能靠人工评审拦截",
+      "severity": "Medium",
+      "reason": "事实：AGENTS.md 第 49-57 行列出七条硬性约束（Rime 调用必经 RimeDispatcher、输入热路径零磁盘 IO、:core-logic 禁止 Android/JNI 依赖、依赖装配只在组合根等）；仓库内没有 detekt/ktlint 或自定义 lint 配置，也没有断言这些不变式的测试；:core-logic 以 Android library 形态构建、编译类路径带 android.jar，因此“禁止 Android 依赖”不受编译器约束（当前实测 0 处 android 包导入，处于干净状态），只有 :app → :core-logic 的依赖方向由编译器强制。推论：新增违规不会被任何自动检查发现，只能依赖 ime-code-reviewer 与 hot-path-performance-auditor 的人工评审；评审未被触发时违规会随提交进入主线。归属：core-logic/src/test 缺一个纯 JVM 的约束测试。不确定性：热路径零 IO 属运行期行为，静态断言只能覆盖直接调用与导入，无法证明全部路径合规。",
+      "expectedOutput": [
+        "新增一个纯 JVM 约束测试，让 :core-logic 引入 Android 依赖或绕开 Rime 调度器的改动在测试阶段立刻失败。",
+        "把白名单写进测试而非仅写在文档里，使人工评审缺席时约束仍然有人守。"
+      ],
+      "expectedArtifact": "Test",
+      "aiFixPrompt": "/better-harness fix this issue\n\n把可静态判定的架构约束变成会失败的测试：在 core-logic/src/test 下新增一个纯 JVM 测试，扫描 core-logic/src/main 源文件断言不存在 android 包导入与 JNI 引用，并按 AGENTS.md 第 51 行的约束断言 :app 中直接引用 RimeNative 的文件仅限当前已知的白名单（core/RimeDispatcher.kt、core/SimpleRimeImpl.kt，以及只调用线程安全 trimNativeHeap/isLoaded 的 ime/ZiYouInputMethodService.kt），白名单外新增引用即失败。测试只读源文件、不改动被检查的业务代码；不要引入新的静态分析插件依赖。\n\n## Validation\n\n- 运行 `./gradlew :core-logic:testDebugUnitTest`，确认新测试在当前代码上通过\n- 临时在 core-logic 某个文件加入一行 android 包导入，确认该测试失败，随后撤销该临时改动\n- 运行 `./gradlew :app:testDebugUnitTest`，确认既有用例不受影响",
+      "dimensionRefs": [
+        "change-validation"
+      ]
+    },
+    {
+      "id": "ui-change-no-verification-layer",
+      "title": "设置页与画布键盘的改动没有任何验证层，回归只能装机手测",
+      "severity": "Low",
+      "reason": "事实：app 与 core-logic 都只有 src/test，没有设备侧测试目录；本次变更集中 SettingsActivity、UserDictManagerActivity、UserDictViewModel、ImeSetupActivity 与 BaseKeyboardView、CandidateToolbarView 等 UI 源文件改动没有伴随测试或快照，core-change-watch 变更漂移检查把它标为 UI 快照缺口（缺失伴随角色：test、fixture，严重度与置信度均为 medium）。变更集口径为该证据包的当前变更窗口（55 个文件、3701 行新增），与工作树 `git diff HEAD` 的 35 个文件、+1012/-489 是两种统计范围。推论：Canvas 绘制与 Compose 页面的回归只能靠人工装机验证，代理改完这些文件后没有可运行的检查可跑。归属：UI 相关的纯逻辑（ViewModel 状态、几何与配置解析）可下沉 :core-logic 并补 JVM 测试。不确定性：纯视觉回归是否值得自动化取决于产品取舍，本次未评估装机验证的实际成本。",
+      "expectedOutput": [
+        "把设置页与键盘中可脱离 Android 的逻辑下沉到 :core-logic 并补 JVM 用例，使 UI 改动有一条能跑的回归检查。",
+        "让后续代理修改这些文件时有明确的检查入口，减少只能装机手测的范围。"
+      ],
+      "expectedArtifact": "Test",
+      "aiFixPrompt": "/better-harness fix this issue\n\n给本轮 UI 改动补一层可运行的验证：从 UserDictViewModel 与设置页中挑出不依赖 Android framework 的状态与筛选逻辑，下沉到 :core-logic 对应包，并在 core-logic/src/test 补齐边界用例（空列表、非法输入、筛选与排序）；键盘侧优先为 BaseKeyboardView 的行列几何计算补纯逻辑测试。保持现有 UI 行为不变，不引入设备侧测试框架或新依赖。\n\n## Validation\n\n- 运行 `./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest`，确认新增用例全绿且总数增加\n- 运行 `./gradlew :app:assembleDebug`，确认下沉重构后仍可编译\n- 复核 `git diff --name-only`，确认改动只涉及被下沉的逻辑与新增测试",
+      "dimensionRefs": [
+        "change-validation"
+      ]
+    },
+    {
+      "id": "validation-evidence-not-retained",
+      "title": "本窗口无法判断改动是否验证过：会话与仓库都没留下检查结论",
+      "severity": "Low",
+      "reason": "事实：Qoder 2026-07-01 至 07-31 的窗口内分析了 34 个会话、41 个任务 Episode，保留的变更事件与验证事件均为 0，分析器同时标记重复性证据不足与效果评估待下一个窗口；4 次由会话生命周期钩子触发的自动安全扫描中有 1 次执行失败且没有保留后果。资产侧：项目记忆 85 条标题元数据中没有完全同名冲突，2 组近似标题（相似度 92% 与 81%）按元数据线索暂缓处理，正文未获授权读取故为未观察；项目级 Skills 为 0，但本窗口唯一的重复流程（4 次安全扫描）已有既有技能与钩子承接，因此不促成新增 Skill 的结论。推论：既无法判断这些会话里的改动是否验证过，也无法把重复工作或文档漂移沉淀为可复用机制，下一个窗口仍将缺同类证据。归属：让本地检查产生可留存的结论（scripts/ 的校验入口输出 + AGENTS.md 的回报要求）。不确定性：会话记录受采集边界限制，缺证据不等于没有验证。",
+      "expectedOutput": [
+        "在 AGENTS.md 明确交付时必须回报实际运行的检查与结果，使“改动到验证”的链条留在可读记录里。",
+        "让校验入口输出一份绑定修订的结论产物，为下一个窗口提供可比较的基线。"
+      ],
+      "expectedArtifact": "Runbook",
+      "aiFixPrompt": "/better-harness fix this issue\n\n让检查结论可留存、下个窗口可比较：在 AGENTS.md 增补一条交付回报要求——每次改动完成后必须写出实际运行的检查命令、结果与用例总数；并让 scripts/ 下的校验入口把 HEAD 修订、检查命令与结论写入仓库内一个被 .gitignore 排除的固定产物目录，供下一次评估读取。不要采集或写入任何输入内容与用户数据，遵守 AGENTS.md 第 56 行的隐私红线；不要新增外部上报或网络写入。\n\n## Validation\n\n- 运行校验入口一次，确认产物包含 HEAD 修订、命令行与通过/失败结论\n- 确认该产物目录已被 .gitignore 排除，`git status --porcelain` 无新增待提交文件\n- 复核产物内容只有命令与统计结果，不含任何输入文本",
+      "dimensionRefs": [
+        "learning-capture"
+      ]
+    }
+  ]
+}

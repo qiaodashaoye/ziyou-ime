@@ -1,0 +1,17 @@
+schema_version: 1
+module_path: ""
+title: 字由输入法 Gradle 多模块工程
+scope:
+    - ARCHITECTURE.md
+    - AGENTS.md
+    - .gitignore
+    - .gitmodules
+    - build.gradle.kts
+    - gradle.properties
+    - settings.gradle.kts
+    - gradlew.bat
+    - README.md
+    - gradlew
+source_files: []
+depends_on: []
+related_to: []

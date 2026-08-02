@@ -90,6 +90,12 @@
             android:exported="false"
             android:label="键盘皮肤" />
 
+        <!-- 皮肤开发文档 -->
+        <activity
+            android:name=".ui.SkinDevGuideActivity"
+            android:exported="false"
+            android:label="皮肤开发文档" />
+
         <!--
           FileProvider：把 cache/ime_images/ 下的待发送图片（涂鸦导出 / AI 答案转图 /
           技能图片输出）暴露为 content:// URI，

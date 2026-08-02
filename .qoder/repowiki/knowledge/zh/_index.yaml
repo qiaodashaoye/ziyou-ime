@@ -3,122 +3,196 @@ schema_version: 1
 locale: zh-CN
 branch: main
 nodes_managed: true
-exported_at: "2026-07-25T05:54:39Z"
+exported_at: "2026-08-02T01:44:53Z"
 modules:
     "":
-        dir_name: 字由输入法 Android 工程（Gradle 多模块聚合）
-        title: 字由输入法 Android 工程（Gradle 多模块聚合）
+        dir_name: 字由输入法 Gradle 多模块工程
+        title: 字由输入法 Gradle 多模块工程
         scope:
-            - README.md
             - ARCHITECTURE.md
+            - AGENTS.md
             - .gitignore
             - .gitmodules
-            - gradle.properties
             - build.gradle.kts
+            - gradle.properties
             - settings.gradle.kts
             - gradlew.bat
+            - README.md
             - gradlew
         source_files: []
         children:
             - app
+            - core_logic
+            - docs
+            - jni_bindings
             - librime_prebuilt
-            - native_libs
+            - skills_dev
         depends_on: []
         related_to: []
     app:
-        dir_name: 字由输入法 Android 应用宿主
-        title: 字由输入法 Android 应用宿主
+        dir_name: 字由输入法 Android 应用（IME + Rime + AI + 技能系统）
+        title: 字由输入法 Android 应用（IME + Rime + AI + 技能系统）
         scope:
             - app/
         source_files: []
         children:
-            - app/config_management
+            - app/ai_features
             - app/core_rime
-            - app/ime_service
-            - app/jni_bridge
-            - app/ui_components
+            - app/dictionary_manager
+            - app/input_method_engine
+            - app/skill_system
+            - app/ui_settings
         depends_on: []
         related_to: []
-    app/config_management:
-        dir_name: Rime 配置与主题资源管理
-        title: Rime 配置与主题资源管理
+    app/ai_features:
+        dir_name: AI 对话客户端与 Markdown 渲染
+        title: AI 对话客户端与 Markdown 渲染
         scope:
-            - app/src/main/java/com/ziyou/ime/config/
+            - app/src/main/java/com/ziyou/ime/ai/
         source_files: []
         children: []
         depends_on: []
         related_to:
-            - path: app/core_rime
-            - path: app/ime_service
-            - path: app/ui_components
+            - path: app/dictionary_manager
+            - path: app/input_method_engine
     app/core_rime:
-        dir_name: Rime输入法核心引擎与守护会话
-        title: Rime输入法核心引擎与守护会话
+        dir_name: Rime输入法核心引擎（Kotlin + JNI 桥接层）
+        title: Rime输入法核心引擎（Kotlin + JNI 桥接层）
         scope:
             - app/src/main/java/com/ziyou/ime/core/
-            - app/src/main/java/com/ziyou/ime/daemon/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: app/config_management
-            - path: app/ime_service
-            - path: app/jni_bridge
-            - path: app/ui_components
-    app/ime_service:
-        dir_name: 输入法键盘视图与候选区组件
-        title: 输入法键盘视图与候选区组件
-        scope:
-            - app/src/main/java/com/ziyou/ime/ime/
-            - app/src/main/java/com/ziyou/ime/ZiyouApplication.kt
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: app/config_management
-            - path: app/core_rime
-    app/jni_bridge:
-        dir_name: Rime 输入法 JNI 桥接层
-        title: Rime 输入法 JNI 桥接层
-        scope:
             - app/src/main/jni/librime_jni/
         source_files: []
         children: []
         depends_on: []
         related_to:
+            - path: app/input_method_engine
+            - path: app/ui_settings
+            - path: jni_bindings
+            - path: librime_prebuilt
+    app/dictionary_manager:
+        dir_name: Rime 扩展词库管理器
+        title: Rime 扩展词库管理器
+        scope:
+            - app/src/main/java/com/ziyou/ime/dict/
+            - app/src/main/assets/rime/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: app/ai_features
+            - path: app/ui_settings
+    app/input_method_engine:
+        dir_name: 输入法引擎与键盘视图层
+        title: 输入法引擎与键盘视图层
+        scope:
+            - app/src/main/java/com/ziyou/ime/ime/
+            - app/src/main/java/com/ziyou/ime/data/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: app/ai_features
             - path: app/core_rime
-            - path: native_libs
-    app/ui_components:
-        dir_name: 输入法设置界面与九宫格侧栏符号数据层
-        title: 输入法设置界面与九宫格侧栏符号数据层
+            - path: app/skill_system
+            - path: core_logic/t9_input
+    app/skill_system:
+        dir_name: 技能系统（Skill）运行时与 WebView 沙箱
+        title: 技能系统（Skill）运行时与 WebView 沙箱
+        scope:
+            - app/src/main/java/com/ziyou/ime/skill/
+            - app/src/main/assets/skills/
+            - app/src/main/assets/skill_runtime/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: app/input_method_engine
+            - path: core_logic/skill_system
+            - path: skills_dev
+    app/ui_settings:
+        dir_name: 设置与配置管理界面（UI + Rime 配置 + 等级系统）
+        title: 设置与配置管理界面（UI + Rime 配置 + 等级系统）
         scope:
             - app/src/main/java/com/ziyou/ime/ui/
-            - app/src/main/java/com/ziyou/ime/data/
-            - app/src/main/java/com/ziyou/ime/util/
+            - app/src/main/java/com/ziyou/ime/config/
+            - app/src/main/java/com/ziyou/ime/level/
         source_files: []
         children: []
         depends_on: []
         related_to:
-            - path: app/config_management
             - path: app/core_rime
-    librime_prebuilt:
-        dir_name: librime 预编译库构建模块（Android 静态库打包）
-        title: librime 预编译库构建模块（Android 静态库打包）
+            - path: app/dictionary_manager
+    core_logic:
+        dir_name: 输入法核心纯逻辑库（core-logic）
+        title: 输入法核心纯逻辑库（core-logic）
         scope:
-            - librime-prebuilt/
+            - core-logic/
+        source_files: []
+        children:
+            - core_logic/skill_system
+            - core_logic/t9_input
+        depends_on: []
+        related_to: []
+    core_logic/skill_system:
+        dir_name: 技能包元数据与校验（Skill Manifest & Validation）
+        title: 技能包元数据与校验（Skill Manifest & Validation）
+        scope:
+            - core-logic/src/main/java/com/ziyou/ime/core/skill/
+            - core-logic/src/test/java/com/ziyou/ime/core/skill/
         source_files: []
         children: []
         depends_on: []
         related_to:
-            - path: native_libs
-    native_libs:
-        dir_name: RIME 输入法引擎原生库头文件与预编译二进制
-        title: RIME 输入法引擎原生库头文件与预编译二进制
+            - path: app/skill_system
+    core_logic/t9_input:
+        dir_name: T9九宫格输入状态机与拼音映射工具
+        title: T9九宫格输入状态机与拼音映射工具
+        scope:
+            - core-logic/src/main/java/com/ziyou/ime/core/t9/
+            - core-logic/src/test/java/com/ziyou/ime/core/t9/
+            - core-logic/src/main/java/com/ziyou/ime/util/
+            - core-logic/src/test/java/com/ziyou/ime/util/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: app/input_method_engine
+    docs:
+        dir_name: 输入法功能方案与开发文档集
+        title: 输入法功能方案与开发文档集
+        scope:
+            - docs/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    jni_bindings:
+        dir_name: RIME 输入法引擎 JNI 绑定库
+        title: RIME 输入法引擎 JNI 绑定库
         scope:
             - libs/
         source_files: []
         children: []
         depends_on: []
         related_to:
-            - path: app/jni_bridge
-            - path: librime_prebuilt
+            - path: app/core_rime
+    librime_prebuilt:
+        dir_name: librime Android 预编译静态库构建模块
+        title: librime Android 预编译静态库构建模块
+        scope:
+            - librime-prebuilt/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: app/core_rime
+    skills_dev:
+        dir_name: 星座查询技能（Constellation Skill）
+        title: 星座查询技能（Constellation Skill）
+        scope:
+            - skills-dev/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: app/skill_system

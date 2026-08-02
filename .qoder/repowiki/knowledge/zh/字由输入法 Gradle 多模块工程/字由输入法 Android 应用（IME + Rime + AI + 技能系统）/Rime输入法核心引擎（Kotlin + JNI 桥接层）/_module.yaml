@@ -1,0 +1,13 @@
+schema_version: 1
+module_path: app/core_rime
+title: Rime输入法核心引擎（Kotlin + JNI 桥接层）
+scope:
+    - app/src/main/java/com/ziyou/ime/core/
+    - app/src/main/jni/librime_jni/
+source_files: []
+depends_on: []
+related_to:
+    - path: app/input_method_engine
+    - path: app/ui_settings
+    - path: jni_bindings
+    - path: librime_prebuilt

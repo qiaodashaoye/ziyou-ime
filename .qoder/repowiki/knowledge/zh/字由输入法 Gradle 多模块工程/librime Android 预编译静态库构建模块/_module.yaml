@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: librime_prebuilt
+title: librime Android 预编译静态库构建模块
+scope:
+    - librime-prebuilt/
+source_files: []
+depends_on: []
+related_to:
+    - path: app/core_rime

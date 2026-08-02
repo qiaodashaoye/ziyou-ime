@@ -1,0 +1,13 @@
+schema_version: 1
+module_path: app/skill_system
+title: 技能系统（Skill）运行时与 WebView 沙箱
+scope:
+    - app/src/main/java/com/ziyou/ime/skill/
+    - app/src/main/assets/skills/
+    - app/src/main/assets/skill_runtime/
+source_files: []
+depends_on: []
+related_to:
+    - path: app/input_method_engine
+    - path: core_logic/skill_system
+    - path: skills_dev

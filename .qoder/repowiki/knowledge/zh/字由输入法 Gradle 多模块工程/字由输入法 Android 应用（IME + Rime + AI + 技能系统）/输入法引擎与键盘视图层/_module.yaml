@@ -1,0 +1,13 @@
+schema_version: 1
+module_path: app/input_method_engine
+title: 输入法引擎与键盘视图层
+scope:
+    - app/src/main/java/com/ziyou/ime/ime/
+    - app/src/main/java/com/ziyou/ime/data/
+source_files: []
+depends_on: []
+related_to:
+    - path: app/ai_features
+    - path: app/core_rime
+    - path: app/skill_system
+    - path: core_logic/t9_input

@@ -1,0 +1,12 @@
+schema_version: 1
+module_path: core_logic/t9_input
+title: T9九宫格输入状态机与拼音映射工具
+scope:
+    - core-logic/src/main/java/com/ziyou/ime/core/t9/
+    - core-logic/src/test/java/com/ziyou/ime/core/t9/
+    - core-logic/src/main/java/com/ziyou/ime/util/
+    - core-logic/src/test/java/com/ziyou/ime/util/
+source_files: []
+depends_on: []
+related_to:
+    - path: app/input_method_engine

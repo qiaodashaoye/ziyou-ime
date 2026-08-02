@@ -28,8 +28,8 @@ android {
         minSdk = 24
         targetSdk = 35
         // versionCode 变更会触发 AssetDeployer 重新部署（schema 变更/predict.db 需随升版生效）
-        versionCode = 4
-        versionName = "1.0.3"
+        versionCode = 1
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -110,12 +110,16 @@ android {
     }
 }
 
-// ===== 技能开发指南同步进 assets（单一来源：docs/，构建时自动拷贝，供 App 内文档页展示）=====
+// ===== 开发文档同步进 assets（单一来源：docs/，构建时自动拷贝，供 App 内文档页展示）=====
 
-/** 把仓库根 docs/技能插件开发指南.md 拷为 assets/docs/skill_dev_guide.md（ASCII 文件名避免编码问题） */
-abstract class SyncSkillDevGuideTask : DefaultTask() {
+/** 把仓库根 docs/ 下的开发文档拷为 assets/docs/<destName>（ASCII 文件名避免编码问题） */
+abstract class SyncDevDocTask : DefaultTask() {
     @get:InputFile
     abstract val guideFile: RegularFileProperty
+
+    /** assets/docs/ 下的目标文件名 */
+    @get:Input
+    abstract val destName: Property<String>
 
     @get:OutputDirectory
     abstract val outputDir: DirectoryProperty
@@ -123,19 +127,29 @@ abstract class SyncSkillDevGuideTask : DefaultTask() {
     @TaskAction
     fun sync() {
         val destDir = outputDir.get().asFile.resolve("docs").apply { mkdirs() }
-        guideFile.get().asFile.copyTo(destDir.resolve("skill_dev_guide.md"), overwrite = true)
+        guideFile.get().asFile.copyTo(destDir.resolve(destName.get()), overwrite = true)
     }
 }
 
-val syncSkillDevGuide = tasks.register<SyncSkillDevGuideTask>("syncSkillDevGuide") {
-    guideFile.set(rootProject.file("docs/技能插件开发指南.md"))
+val syncSkillDevGuide = tasks.register<SyncDevDocTask>("syncSkillDevGuide") {
+    guideFile.set(rootProject.file("docs/自定义技能开发教程.md"))
+    destName.set("skill_dev_guide.md")
     outputDir.set(layout.buildDirectory.dir("generated/skillDocsAssets"))
+}
+
+val syncSkinDevGuide = tasks.register<SyncDevDocTask>("syncSkinDevGuide") {
+    guideFile.set(rootProject.file("docs/自定义皮肤开发指南.md"))
+    destName.set("skin_dev_guide.md")
+    outputDir.set(layout.buildDirectory.dir("generated/skinDocsAssets"))
 }
 
 androidComponents {
     onVariants { variant ->
         variant.sources.assets?.addGeneratedSourceDirectory(
-            syncSkillDevGuide, SyncSkillDevGuideTask::outputDir
+            syncSkillDevGuide, SyncDevDocTask::outputDir
+        )
+        variant.sources.assets?.addGeneratedSourceDirectory(
+            syncSkinDevGuide, SyncDevDocTask::outputDir
         )
     }
 }

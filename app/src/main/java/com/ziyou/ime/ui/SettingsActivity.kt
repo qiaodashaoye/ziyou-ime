@@ -259,7 +259,7 @@ class SettingsActivity : AppCompatActivity() {
             createSettingItem("☁️", "同步用户词典", "同步用户自定义词组和输入历史") {
                 syncUserData()
             },
-            createSettingItem("🔁", "重新部署", "重新部署Rime配置文件（解决配置异常）") {
+            createSettingItem("🔁", "重新部署", "重新部署配置文件（解决配置异常）") {
                 redeployRime()
             }
         ))
@@ -267,8 +267,7 @@ class SettingsActivity : AppCompatActivity() {
         // ===== 关于 =====
         column.addView(createSectionHeader("关于"))
         column.addView(createCard(
-            createSettingItem("ℹ️", "版本", getVersionInfo()),
-            createSettingItem("✨", "字由输入法", "基于Rime引擎的简洁中文输入法")
+            createSettingItem("ℹ️", "版本", getVersionInfo())
         ))
 
         // 宽屏下内容列被限宽后由 FrameLayout 水平居中
@@ -602,36 +601,80 @@ class SettingsActivity : AppCompatActivity() {
     // ===== AI 问答服务配置 =====
 
     /**
-     * AI 服务配置弹窗：API 地址 / API Key / 模型名三项，
+     * AI 服务配置弹窗：平台下拉选择 / API Key / 模型名三项，
+     * 预置国内主流 AI 平台（OpenAI 兼容端点），选“自定义”时可手动录入地址。
+     * API Key 与模型名不做任何预填充，留空时由 AiConfig 回退到内置默认值。
      * 保存前校验地址必须为 HTTPS（与 AiChatClient 的安全基线一致）。
      */
     private fun showAiConfigDialog() {
+        val providers = AiConfig.PRESET_PROVIDERS
+        val currentUrl = AiConfig.getApiUrl(this)
+        // 匹配当前已保存的 URL 对应的预置平台；无匹配则选中「自定义」
+        val matchedIndex = AiConfig.matchProviderIndex(currentUrl)
+        val customIndex = providers.size // 「自定义」位于列表末尾
+
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), dp(8))
         }
+
+        // 平台选择标签 + 下拉框
+        container.addView(TextView(this).apply {
+            text = "AI 平台"
+            textSize = 12f
+            setTextColor(0xFF757575.toInt())
+        })
+        val spinner = Spinner(this)
+        val spinnerItems = providers.map { it.name } + "自定义…"
+        spinner.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_item, spinnerItems
+        ).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        container.addView(spinner)
+
+        // 自定义地址输入框（仅选择「自定义」时可见）
         val urlInput = EditText(this).apply {
             hint = "API 地址（OpenAI 兼容 chat/completions）"
-            setText(AiConfig.getApiUrl(this@SettingsActivity))
+            setText(currentUrl)
+            visibility = if (matchedIndex >= 0) View.GONE else View.VISIBLE
         }
+        container.addView(urlInput)
+
+        // API Key 与模型名不预填充，由用户自行填写；留空保存时 AiConfig 会回退内置默认值
         val keyInput = EditText(this).apply {
             hint = "API Key"
             inputType = android.text.InputType.TYPE_CLASS_TEXT or
                 android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setText(AiConfig.getApiKey(this@SettingsActivity))
         }
         val modelInput = EditText(this).apply {
             hint = "模型名（如 ${AiConfig.DEFAULT_MODEL}）"
-            setText(AiConfig.getModel(this@SettingsActivity))
         }
-        container.addView(urlInput)
         container.addView(keyInput)
         container.addView(modelInput)
+
+        // 下拉选择联动：预置平台隐藏地址输入框；自定义则显示手动输入框
+        // （切换平台仅影响地址，API Key 与模型名始终保持用户输入状态）
+        spinner.setSelection(if (matchedIndex >= 0) matchedIndex else customIndex)
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: AdapterView<*>?, view: View?, position: Int, id: Long
+            ) {
+                urlInput.visibility = if (position < providers.size) View.GONE else View.VISIBLE
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
         AlertDialog.Builder(this)
             .setTitle("AI 服务配置")
             .setView(container)
             .setPositiveButton("保存") { _, _ ->
-                val url = urlInput.text.toString().trim()
+                val position = spinner.selectedItemPosition
+                val url = if (position < providers.size) {
+                    providers[position].apiUrl
+                } else {
+                    urlInput.text.toString().trim()
+                }
                 if (!url.startsWith("https://")) {
                     showToast("API 地址必须以 https:// 开头")
                     return@setPositiveButton
@@ -871,7 +914,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun redeployRime() {
         AlertDialog.Builder(this)
             .setTitle("重新部署")
-            .setMessage("将重新部署所有Rime配置文件并重启引擎，可能需要几秒钟。是否继续？")
+            .setMessage("将重新部署所有配置文件并重启引擎，可能需要几秒钟。是否继续？")
             .setPositiveButton("确定") { _, _ ->
                 showToast("开始重新部署...")
                 lifecycleScope.launch {
@@ -1170,7 +1213,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun getVersionInfo(): String {
         return try {
             val packageInfo = packageManager.getPackageInfo(packageName, 0)
-            "v${packageInfo.versionName} (${packageInfo.versionCode})"
+            "v${packageInfo.versionName}(${packageInfo.versionCode})"
         } catch (e: Exception) {
             "未知版本"
         }

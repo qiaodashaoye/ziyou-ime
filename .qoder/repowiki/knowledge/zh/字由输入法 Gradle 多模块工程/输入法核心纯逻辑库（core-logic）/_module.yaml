@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: core_logic
+title: 输入法核心纯逻辑库（core-logic）
+scope:
+    - core-logic/
+source_files: []
+depends_on: []
+related_to: []
