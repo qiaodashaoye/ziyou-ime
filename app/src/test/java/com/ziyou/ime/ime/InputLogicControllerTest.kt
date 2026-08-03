@@ -365,6 +365,64 @@ class InputLogicControllerTest {
         assertTrue(keyRecordStack.isEmpty())
     }
 
+    @Test
+    fun selectCandidate_globalIndex_selectsWithGlobalFlag() = runTest {
+        // 视图传来全局索引，应以 global=true 原样传给引擎（无二次转换）
+        fakeEngine.api.selectCandidateResult = true
+        fakeEngine.api.nextCommit = CommitProto("他")
+        fakeEngine.api.nextContext = testContext(input = "", candidates = emptyList())
+        keyRecordStack.pushT9Key('8')
+
+        controller.selectCandidate(2)
+
+        assertEquals(2, fakeEngine.api.selectCandidateCalls.last().first)
+        assertTrue(fakeEngine.api.selectCandidateCalls.last().second)
+    }
+
+    @Test
+    fun selectCandidate_crossPageGlobalIndex_noDoubleConversion() = runTest {
+        // 复现旧缺陷：翻到第 1 页(pageSize=5)后点击，全局索引 7 必须原样传给引擎，
+        // 不能再被二次换算成页内局部索引（旧实现会错位成 0）。
+        fakeEngine.api.selectCandidateResult = true
+        fakeEngine.api.nextCommit = CommitProto("地")
+        fakeEngine.api.nextContext = testContext(
+            input = "",
+            candidates = listOf("大" to "da", "地" to "di", "的" to "de", "大" to "da", "得" to "de"),
+            pageNumber = 1,
+            pageSize = 5
+        )
+        keyRecordStack.pushT9Key('3')
+
+        controller.selectCandidate(7)
+
+        // 全局索引 7 原样传递 + global=true
+        assertEquals(7, fakeEngine.api.selectCandidateCalls.last().first)
+        assertTrue(fakeEngine.api.selectCandidateCalls.last().second)
+    }
+
+    @Test
+    fun selectCandidate_crossPageSelected_commitsAndClearsStack() = runTest {
+        // 跨页选中（全局索引落在旧页，menu.candidates 取不到 comment）：
+        // 仍应正常上屏并清栈，不因 selected=null 崩溃。
+        fakeEngine.api.selectCandidateResult = true
+        fakeEngine.api.nextCommit = CommitProto("好")
+        fakeEngine.api.nextContext = testContext(
+            input = "",
+            candidates = listOf("你" to "ni"),
+            pageNumber = 1,
+            pageSize = 5
+        )
+        keyRecordStack.pushT9Key('4')
+
+        // 全局索引 2 落在第 0 页（引擎当前在第 1 页），selected=null 降级
+        controller.selectCandidate(2)
+
+        verify { inputConnection.commitText("好", 1) }
+        assertTrue(keyRecordStack.isEmpty())
+        assertEquals(2, fakeEngine.api.selectCandidateCalls.last().first)
+        assertTrue(fakeEngine.api.selectCandidateCalls.last().second)
+    }
+
     // ===== retypeUnconfirmed（存在确认段时的编码更新路径）=====
 
     @Test
@@ -463,11 +521,14 @@ class InputLogicControllerTest {
 
     private fun testContext(
         input: String,
-        candidates: List<Pair<String, String>> = emptyList()
+        candidates: List<Pair<String, String>> = emptyList(),
+        pageNumber: Int = 0,
+        pageSize: Int = -1
     ): ContextProto {
-        val menu = if (candidates.isEmpty()) null else MenuProto(
-            pageSize = candidates.size,
-            pageNumber = 0,
+        val effectivePageSize = if (pageSize >= 0) pageSize else candidates.size
+        val menu = if (candidates.isEmpty() && pageSize < 0) null else MenuProto(
+            pageSize = effectivePageSize.coerceAtLeast(1),
+            pageNumber = pageNumber,
             isLastPage = true,
             highlightedCandidateIndex = 0,
             candidates = candidates.map { (text, comment) ->

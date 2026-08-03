@@ -10,6 +10,7 @@ import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
+import android.widget.OverScroller
 import com.ziyou.ime.core.CandidateProto
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.core.skin.SkinColor
@@ -42,6 +43,77 @@ class SimpleCandidatesView @JvmOverloads constructor(
         private const val CANDIDATE_TEXT_SIZE_SP = 16f
         /** 候选词水平内边距（dp） */
         private const val CANDIDATE_PADDING_H_DP = 12
+
+        /**
+         * 将累积缓冲中的索引转换为 Rime 当前页的局部索引。
+         *
+         * @param accumulatedIndex 累积缓冲中的位置
+         * @param currentPageNumber 当前引擎页码
+         * @param accumulatedPageStart 累积缓冲起始页码
+         * @param currentPageSize 每页候选词数
+         * @return 页内局部索引（用于 Rime select_candidate_on_current_page）
+         */
+        internal fun toLocalIndex(
+            accumulatedIndex: Int,
+            currentPageNumber: Int,
+            accumulatedPageStart: Int,
+            currentPageSize: Int
+        ): Int {
+            val offset = (currentPageNumber - accumulatedPageStart) * currentPageSize
+            return (accumulatedIndex - offset).coerceAtLeast(0)
+        }
+
+        /**
+         * 将累积缓冲中的索引转换为 Rime 全局候选索引（跨页选词用）。
+         *
+         * 全局索引 = 起始页的全局偏移 + 累积缓冲内偏移，供 Rime
+         * select_candidate(global) 直接选中任意可见候选（含旧页）。
+         *
+         * @param accumulatedIndex 累积缓冲中的位置
+         * @param accumulatedPageStart 累积缓冲起始页码
+         * @param currentPageSize 每页候选词数
+         * @return Rime 全局候选索引
+         */
+        internal fun toGlobalIndex(
+            accumulatedIndex: Int,
+            accumulatedPageStart: Int,
+            currentPageSize: Int
+        ): Int = accumulatedPageStart * currentPageSize + accumulatedIndex
+
+        /**
+         * 计算候选数据更新后应采用的高亮索引。
+         *
+         * 翻页（输入未变）必须清除高亮：新页面在用户重新选择前不应有选中项，
+         * 否则 Rime 默认的页内高亮（通常是首项）会残留在新页上造成误导；
+         * 输入变更（新按键/删除）则沿用引擎页内高亮（新组合的默认选中态）。
+         *
+         * @param inputChanged 编码串/光标是否变化（true=新按键/删除，false=翻页等）
+         * @param engineHighlightIndex Rime 报告的页内高亮索引（-1 表示无）
+         * @return 应采用的高亮索引（-1 表示无高亮）
+         */
+        internal fun resolveHighlight(
+            inputChanged: Boolean,
+            engineHighlightIndex: Int
+        ): Int = if (inputChanged) engineHighlightIndex else -1
+
+        /**
+         * 判断当前页码相对于累积缓冲是否为前翻页方向。
+         *
+         * @param currentPageNumber 当前引擎页码
+         * @param accumulatedPageStart 累积缓冲起始页码
+         * @param accumulatedSize 累积缓冲当前大小
+         * @param pageSize 每页候选词数
+         * @return true 表示前翻页，false 表示后翻页
+         */
+        internal fun isForwardPage(
+            currentPageNumber: Int,
+            accumulatedPageStart: Int,
+            accumulatedSize: Int,
+            pageSize: Int
+        ): Boolean {
+            val pagesLoaded = if (pageSize > 0) accumulatedSize / pageSize else 1
+            return currentPageNumber >= accumulatedPageStart + pagesLoaded
+        }
     }
 
     /** 候选词点击回调 */
@@ -72,6 +144,12 @@ class SimpleCandidatesView @JvmOverloads constructor(
     // 候选词数据
     private var candidates: Array<CandidateProto> = emptyArray()
     private var highlightIndex: Int = -1
+
+    /**
+     * 高亮候选在累积缓冲中的位置（由页内 [highlightIndex] 换算而来）。
+     * onDraw 用它在跨页累积数组上正确定位高亮项；-1 表示无高亮。
+     */
+    private var highlightAccumulatedIndex: Int = -1
 
     /**
      * 是否处于引擎预测态（librime-predict 在 commit 后产生的 prediction 候选）。
@@ -111,6 +189,32 @@ class SimpleCandidatesView @JvmOverloads constructor(
     // 滑动偏移量
     private var scrollOffset = 0f
 
+    // OverScroller：惯性滚动 + 边缘回弹
+    private val scroller = OverScroller(context)
+
+    /** 缓存的候选内容总宽度（recalculateLayout 时更新） */
+    private var totalContentWidth = 0f
+
+    // ===== 跨页累积缓冲（前翻页追加候选，输入变更时清空） =====
+
+    /** 累积候选词缓冲 */
+    private var accumulatedCandidates = mutableListOf<CandidateProto>()
+    /** 上次输入的编码串（用于区分新按键 vs 翻页） */
+    private var lastInput = ""
+    private var lastCaretPos = 0
+    /** 累积缓冲对应的起始页码 */
+    private var accumulatedPageStart = 0
+    /** 当前页码（来自 MenuProto.pageNumber） */
+    internal var currentPageNumber = 0
+    /** 当前页大小（来自 MenuProto.pageSize） */
+    internal var currentPageSize = 5
+    /** 是否为最后一页 */
+    private var isLastPage = true
+    /** 边缘翻页防重复标记 */
+    private var edgeTriggerFired = false
+    /** 翻页加载中标记 */
+    private var isPageLoading = false
+
     // 手势检测器
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent): Boolean = true
@@ -118,10 +222,12 @@ class SimpleCandidatesView @JvmOverloads constructor(
         override fun onSingleTapUp(e: MotionEvent): Boolean {
             val x = e.x + scrollOffset
             val y = e.y
-            // 查找点击的候选词
+            // 查找点击的候选词（rects 为内容坐标，点击 x 已补偿 scrollOffset）
             for (i in candidateRects.indices) {
                 if (candidateRects[i].contains(x, y)) {
-                    onCandidateClick?.invoke(i)
+                    // 累积索引 → Rime 全局候选索引（跨页可见候选均可选中）
+                    val globalIndex = toGlobalIndex(i, accumulatedPageStart, currentPageSize)
+                    onCandidateClick?.invoke(globalIndex)
                     return true
                 }
             }
@@ -134,11 +240,12 @@ class SimpleCandidatesView @JvmOverloads constructor(
             distanceX: Float,
             distanceY: Float
         ): Boolean {
-            // 水平滚动
-            scrollOffset += distanceX
-            // 限制滚动范围
-            val maxScroll = calculateTotalWidth() - width
-            scrollOffset = scrollOffset.coerceIn(0f, maxScroll.coerceAtLeast(0f))
+            // 手指跟随滚动（duration=0 即时定位）
+            scroller.startScroll(scrollOffset.toInt(), 0, distanceX.toInt(), 0, 0)
+            scroller.computeScrollOffset()
+            scrollOffset = scroller.currX.toFloat()
+            val maxScroll = (totalContentWidth - width).coerceAtLeast(0f)
+            scrollOffset = scrollOffset.coerceIn(0f, maxScroll)
             invalidate()
             return true
         }
@@ -149,10 +256,17 @@ class SimpleCandidatesView @JvmOverloads constructor(
             velocityX: Float,
             velocityY: Float
         ): Boolean {
-            // 快速滑动翻页
-            if (Math.abs(velocityX) > 500) {
-                onPageChange?.invoke(velocityX < 0) // 向左滑 = 下一页
-            }
+            if (Math.abs(velocityX) < 500) return false
+            val maxScroll = (totalContentWidth - width).coerceAtLeast(0f).toInt()
+            if (maxScroll <= 0) return false
+            // OverScroller 物理 fling；边缘翻页由 computeScroll 检测触发
+            scroller.fling(
+                scrollOffset.toInt(), 0, -velocityX.toInt(), 0,
+                0, maxScroll, 0, 0,
+                (maxScroll / 4).coerceAtLeast(1), 0
+            )
+            edgeTriggerFired = false
+            postInvalidateOnAnimation()
             return true
         }
     })
@@ -200,21 +314,73 @@ class SimpleCandidatesView @JvmOverloads constructor(
      *        点击路由不受影响（预测词仍经 Rime selectCandidate 选词）。
      */
     fun updateCandidates(context: ContextProto?, predictionMode: Boolean = false) {
+        isPageLoading = false
         if (context == null) {
+            accumulatedCandidates.clear()
             candidates = emptyArray()
             highlightIndex = -1
+            lastInput = ""
+            lastCaretPos = 0
+            scrollOffset = 0f
+            scroller.abortAnimation()
+            isPredictionMode = false
         } else {
-            candidates = context.menu?.candidates ?: emptyArray()
-            highlightIndex = context.menu?.highlightedCandidateIndex ?: -1
+            val newInput = context.input
+            val newCaretPos = context.caretPos
+            val inputChanged = newInput != lastInput || newCaretPos != lastCaretPos
+
+            val menu = context.menu
+            val pageCandidates = menu?.candidates ?: emptyArray()
+            currentPageNumber = menu?.pageNumber ?: 0
+            currentPageSize = menu?.pageSize ?: 5
+            isLastPage = menu?.isLastPage ?: true
+            // 翻页（输入未变）清除高亮：新页面在用户重新选择前不带选中项；
+            // 输入变更时沿用引擎页内高亮
+            highlightIndex = resolveHighlight(inputChanged, menu?.highlightedCandidateIndex ?: -1)
+            isPredictionMode = predictionMode && pageCandidates.isNotEmpty()
+
+            if (inputChanged) {
+                // 新按键/删除：重置一切
+                accumulatedCandidates.clear()
+                accumulatedCandidates.addAll(pageCandidates)
+                accumulatedPageStart = currentPageNumber
+                scrollOffset = 0f
+                scroller.abortAnimation()
+            } else {
+                // 翻页：判断方向，前翻页追加候选保持 scrollOffset 连续
+                val forward = isForwardPage(currentPageNumber, accumulatedPageStart,
+                    accumulatedCandidates.size, currentPageSize)
+                if (forward || accumulatedCandidates.isEmpty()) {
+                    // 前翻页或首次：追加
+                    accumulatedCandidates.addAll(pageCandidates)
+                } else {
+                    // 后翻页：重置（Rime 不支持随机跳页，无法无缝后翻）
+                    accumulatedCandidates.clear()
+                    accumulatedCandidates.addAll(pageCandidates)
+                    accumulatedPageStart = currentPageNumber
+                    scrollOffset = 0f
+                    scroller.abortAnimation()
+                }
+            }
+
+            lastInput = newInput
+            lastCaretPos = newCaretPos
+            candidates = accumulatedCandidates.toTypedArray()
         }
-        isPredictionMode = predictionMode && candidates.isNotEmpty()
-        scrollOffset = 0f
+
+        // 页内高亮索引换算为累积缓冲位置，确保跨页后高亮不错位
+        highlightAccumulatedIndex = if (highlightIndex >= 0) {
+            (currentPageNumber - accumulatedPageStart) * currentPageSize + highlightIndex
+        } else {
+            -1
+        }
+
         recalculateLayout()
         invalidate()
     }
 
     /**
-     * 重新计算候选词布局位置
+     * 重新计算候选词布局位置，并缓存内容总宽度供滚动边界使用。
      */
     private fun recalculateLayout() {
         candidateRects.clear()
@@ -228,6 +394,7 @@ class SimpleCandidatesView @JvmOverloads constructor(
             candidateRects.add(RectF(x, 0f, x + itemWidth, height.toFloat()))
             x += itemWidth
         }
+        totalContentWidth = x
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -265,7 +432,7 @@ class SimpleCandidatesView @JvmOverloads constructor(
             // 预测态下整栏使用强调色常规字重，与普通候选词区分
             val paint = when {
                 isPredictionMode -> predictionPaint
-                i == highlightIndex -> highlightedCandidatePaint
+                i == highlightAccumulatedIndex -> highlightedCandidatePaint
                 else -> candidatePaint
             }
             val textX = rect.left + dp2px(CANDIDATE_PADDING_H_DP.toFloat())
@@ -280,11 +447,26 @@ class SimpleCandidatesView @JvmOverloads constructor(
     }
 
     /**
-     * 计算所有候选词的总宽度
+     * 返回缓存的候选内容总宽度（recalculateLayout 时更新）。
      */
-    private fun calculateTotalWidth(): Float {
-        if (candidateRects.isNotEmpty()) return candidateRects.last().right
-        return 0f
+    private fun calculateTotalWidth(): Float = totalContentWidth
+
+    /**
+     * 驱动 OverScroller 动画帧；到达右边缘时自动触发下一页加载。
+     */
+    override fun computeScroll() {
+        if (scroller.computeScrollOffset()) {
+            scrollOffset = scroller.currX.toFloat()
+            // 边缘翻页检测：fling 到达右边缘且还有更多页
+            val maxScroll = (totalContentWidth - width).coerceAtLeast(0f)
+            if (!edgeTriggerFired && !isPageLoading && !isLastPage
+                && maxScroll > 0f && scrollOffset >= maxScroll) {
+                edgeTriggerFired = true
+                isPageLoading = true
+                onPageChange?.invoke(true) // 下一页
+            }
+            invalidate()
+        }
     }
 
     // ===== 单位转换工具（已叠加缩放因子，悬浮模式下尺寸统一缩放） =====

@@ -192,14 +192,26 @@ class InputLogicController(
      * 此时需把所选候选的注音音节同步进九宫格状态机（[KeyRecordStack.confirmLeading]），
      * 否则后续侧栏选拼音的替换偏移会错位；同步失败则整栈 clear 降级。
      */
-    fun selectCandidate(index: Int) {
+    fun selectCandidate(globalIndex: Int) {
         scope.launch {
             inputMutex.withLock {
                 try {
-                    // 选词前取所选候选的注音（comment），供分段确认后同步状态机
-                    val selected = engine.api.getContext()?.menu?.candidates?.getOrNull(index)
-                    val success = engine.api.selectCandidate(index)
-                    Log.d(TAG, "selectCandidate($index) -> $success")
+                    val ctx = engine.api.getContext()
+                    val menu = ctx?.menu
+                    // 视图传来的是 Rime 全局候选索引（累积缓冲位置换算而来）。
+                    // 用 global 模式选择，支持跨页累积缓冲中任意可见候选，
+                    // 避免页内局部索引与视图累积索引双重转换导致的选词错位。
+                    // 选词前取所选候选的注音（comment），供分段确认后同步状态机：
+                    // 全局索引落在当前页时可从 menu.candidates 直接取；跨页取不到则
+                    // 为 null，分段确认将降级为清栈（syncStackAfterPartialSelect 对 null 安全）。
+                    val selected = if (menu != null && menu.pageSize > 0) {
+                        val pageStartGlobal = menu.pageNumber * menu.pageSize
+                        menu.candidates.getOrNull(globalIndex - pageStartGlobal)
+                    } else {
+                        null
+                    }
+                    val success = engine.api.selectCandidate(globalIndex, global = true)
+                    Log.d(TAG, "selectCandidate(global=$globalIndex) -> $success")
 
                     if (success) {
                         val commit = engine.api.getCommit()
