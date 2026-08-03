@@ -23,6 +23,7 @@ import com.ziyou.ime.config.DisplayModeManager
 import com.ziyou.ime.config.SchemaPreference
 import com.ziyou.ime.skin.SkinManager
 import com.ziyou.ime.skin.SkinTheme
+import com.ziyou.ime.core.CandidateProto
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.core.RimeMessage
 import com.ziyou.ime.core.RimeNative
@@ -502,7 +503,7 @@ class ZiYouInputMethodService : InputMethodService() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
             scaleFactor = scale
-            onCandidateClick = { index -> handleCandidateClick(index) }
+            onCandidateClick = { index, candidate -> handleCandidateClick(index, candidate) }
             onPageChange = { forward -> handlePageChange(forward) }
             applySkin(skin)
         }
@@ -1138,8 +1139,10 @@ class ZiYouInputMethodService : InputMethodService() {
 
     // ===== 候选词操作（委托 InputLogicController）=====
 
-    /** 处理候选词点击（含引擎预测词，均经 Rime 选词路径）。 */
-    private fun handleCandidateClick(index: Int) = inputLogic.selectCandidate(index)
+    /** 处理候选词点击（含引擎预测词，均经 Rime 选词路径）；
+     *  携带被点候选本体供分段确认同步（跨页时引擎当前页 menu 查不到其注音）。 */
+    private fun handleCandidateClick(index: Int, candidate: CandidateProto) =
+        inputLogic.selectCandidate(index, candidate)
 
     /** 处理翻页。@param forward true=下一页, false=上一页 */
     private fun handlePageChange(forward: Boolean) = inputLogic.changePage(forward)

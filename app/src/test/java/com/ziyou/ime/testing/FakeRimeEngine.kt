@@ -108,10 +108,12 @@ class FakeRimeApi : RimeApi {
     }
 
     var nextContext: ContextProto? = null
+    /** getContext 的返回值序列（按调用顺序消费；耗尽后回落到 [nextContext]） */
+    val contextQueue = mutableListOf<ContextProto?>()
     var contextCalls = 0
     override suspend fun getContext(): ContextProto? {
         contextCalls++
-        return nextContext
+        return if (contextQueue.isNotEmpty()) contextQueue.removeAt(0) else nextContext
     }
 
     var nextStatus: StatusProto? = null

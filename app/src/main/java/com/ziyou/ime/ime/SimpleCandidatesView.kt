@@ -116,8 +116,9 @@ class SimpleCandidatesView @JvmOverloads constructor(
         }
     }
 
-    /** 候选词点击回调 */
-    var onCandidateClick: ((index: Int) -> Unit)? = null
+    /** 候选词点击回调（携带被点候选本体：跨页分段确认同步需其注音，
+     *  引擎当前页 menu 可能查不到旧页候选） */
+    var onCandidateClick: ((index: Int, candidate: CandidateProto) -> Unit)? = null
 
     /** 翻页回调：true=下一页, false=上一页 */
     var onPageChange: ((forward: Boolean) -> Unit)? = null
@@ -227,7 +228,7 @@ class SimpleCandidatesView @JvmOverloads constructor(
                 if (candidateRects[i].contains(x, y)) {
                     // 累积索引 → Rime 全局候选索引（跨页可见候选均可选中）
                     val globalIndex = toGlobalIndex(i, accumulatedPageStart, currentPageSize)
-                    onCandidateClick?.invoke(globalIndex)
+                    onCandidateClick?.invoke(globalIndex, candidates[i])
                     return true
                 }
             }

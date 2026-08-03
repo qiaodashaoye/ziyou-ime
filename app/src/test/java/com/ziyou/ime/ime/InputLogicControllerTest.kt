@@ -423,6 +423,159 @@ class InputLogicControllerTest {
         assertTrue(fakeEngine.api.selectCandidateCalls.last().second)
     }
 
+    // ===== 分段确认后编码区预览（端到端：状态机 + PinyinHintProvider）=====
+
+    @Test
+    fun selectCandidate_crossPageTapped_syncUsesViewCandidate() = runTest {
+        // 跨页点击旧页候选（全局索引落在第 0 页、引擎当前在第 1 页）：
+        // 引擎当前页 menu 查不到旧页候选，分段确认同步必须用视图透传的
+        // 被点候选注音，不得降级清栈（否则编码区回退为数字）。
+        val afterContext = partialConfirmContext()
+        fakeEngine.api.contextQueue.add(afterContext)   // 选词前 getContext
+        fakeEngine.api.contextQueue.add(afterContext)   // 末尾 updateUI
+        fakeEngine.api.nextCommit = null
+        fakeEngine.api.selectCandidateResult = true
+        fakeEngine.api.bulkResults = mutableListOf(
+            KeyEventResult(consumed = true, commit = null, context = afterContext)
+        )
+        "64426".forEach { keyRecordStack.pushT9Key(it) }
+        val tapped = com.ziyou.ime.core.CandidateProto("你", "ni", "")
+
+        controller.selectCandidate(0, tapped)
+
+        assertTrue(keyRecordStack.hasConfirmed())
+        assertEquals(2, keyRecordStack.confirmedRawLength())
+        val preview = PinyinHintProvider.buildPreview(afterContext, keyRecordStack.confirmedRawLength())
+        assertEquals("你hao", preview)
+    }
+
+    /** 构造分段确认后的引擎上下文（如 64426 选“你”：preedit=你hao、selStart=1、input 保持原始数字编码） */
+    private fun partialConfirmContext(): ContextProto = ContextProto(
+        composition = CompositionProto(
+            length = 4, cursorPos = 4, selStart = 1, selEnd = 1,
+            preedit = "你hao", commitTextPreview = null
+        ),
+        menu = MenuProto(
+            pageSize = 5, pageNumber = 0, isLastPage = true,
+            highlightedCandidateIndex = 0,
+            candidates = arrayOf(
+                com.ziyou.ime.core.CandidateProto("好", "hao", ""),
+                com.ziyou.ime.core.CandidateProto("号", "hao", "")
+            ),
+            selectKeys = "", selectLabels = emptyArray()
+        ),
+        input = "64426",
+        caretPos = 5
+    )
+
+    @Test
+    fun selectCandidate_partialConfirm_tapPath_preeditPreviewStaysPinyin() = runTest {
+        // 用户流程：九宫格输入 64426(nihao) → 点击候选“你”→ 分段确认。
+        // 编码区预览必须保持拼音形态（你hao），不得回退为 Rime 原始 preedit 中的数字。
+        val beforeContext = ContextProto(
+            composition = CompositionProto(
+                length = 5, cursorPos = 5, selStart = 0, selEnd = 5,
+                preedit = "64426", commitTextPreview = null
+            ),
+            menu = MenuProto(
+                pageSize = 5, pageNumber = 0, isLastPage = false,
+                highlightedCandidateIndex = 0,
+                candidates = arrayOf(
+                    com.ziyou.ime.core.CandidateProto("你", "ni", ""),
+                    com.ziyou.ime.core.CandidateProto("你好", "ni'hao", ""),
+                    com.ziyou.ime.core.CandidateProto("尼", "ni", "")
+                ),
+                selectKeys = "", selectLabels = emptyArray()
+            ),
+            input = "64426",
+            caretPos = 5
+        )
+        val afterContext = partialConfirmContext()
+        // getContext 序列：选词前（取所选候选 comment）→ 末尾 updateUI（分段确认后）
+        fakeEngine.api.contextQueue.add(beforeContext)
+        fakeEngine.api.contextQueue.add(afterContext)
+        fakeEngine.api.nextCommit = null            // 分段确认：无 commit
+        fakeEngine.api.selectCandidateResult = true
+        // 补发 End 的 processKey 返回分段确认后的上下文
+        fakeEngine.api.bulkResults = mutableListOf(
+            KeyEventResult(consumed = true, commit = null, context = afterContext)
+        )
+        "64426".forEach { keyRecordStack.pushT9Key(it) }
+
+        controller.selectCandidate(0)
+
+        assertTrue(keyRecordStack.hasConfirmed())
+        assertEquals(2, keyRecordStack.confirmedRawLength())
+        // 补发 End 后按分段确认后的上下文刷新了 UI
+        assertEquals(afterContext, callbacks.lastRenderedContext)
+        // 编码区预览：已确认汉字 + 剩余拼音（字母形态，非数字）
+        val preview = PinyinHintProvider.buildPreview(afterContext, keyRecordStack.confirmedRawLength())
+        assertEquals("你hao", preview)
+    }
+
+    @Test
+    fun processKey_partialConfirmViaKey_stackSyncedAndPreviewStaysPinyin() = runTest {
+        // 用户流程：九宫格输入 64426(nihao)，高亮候选为单字“你”（仅覆盖编码前缀），
+        // 按空格（或 select_keys 等）触发分段确认：引擎消费按键、无 commit、preedit=你hao。
+        // 该路径与点击候选同属分段确认，状态机同样需要同步确认段，
+        // 否则编码区预览将回退为 Rime 原始 preedit（已选汉字后残留数字）。
+        // 按键前上下文：高亮候选为单字“你”（仅覆盖编码前缀），无确认前缀
+        val beforeContext = ContextProto(
+            composition = CompositionProto(
+                length = 5, cursorPos = 5, selStart = 0, selEnd = 5,
+                preedit = "64426", commitTextPreview = null
+            ),
+            menu = MenuProto(
+                pageSize = 5, pageNumber = 0, isLastPage = false,
+                highlightedCandidateIndex = 0,
+                candidates = arrayOf(
+                    com.ziyou.ime.core.CandidateProto("你", "ni", ""),
+                    com.ziyou.ime.core.CandidateProto("你好", "ni'hao", "")
+                ),
+                selectKeys = "", selectLabels = emptyArray()
+            ),
+            input = "64426",
+            caretPos = 5
+        )
+        val afterContext = partialConfirmContext()
+        fakeEngine.api.bulkResults = mutableListOf(
+            // 末位编码键：建立按键前高亮缓存（高亮=你）
+            KeyEventResult(consumed = true, commit = null, context = beforeContext),
+            // 空格：引擎分段确认高亮候选，无 commit
+            KeyEventResult(consumed = true, commit = null, context = afterContext)
+        )
+        "64426".forEach { keyRecordStack.pushT9Key(it) }
+
+        controller.processKey('6'.code, 0)
+        controller.processKey(KeyCode.XK_space, 0)
+
+        // 状态机同步出确认段（ni 占 2 个原始键）
+        assertTrue("分段确认后状态机应含确认段", keyRecordStack.hasConfirmed())
+        assertEquals(2, keyRecordStack.confirmedRawLength())
+        // 编码区预览保持拼音形态
+        val preview = PinyinHintProvider.buildPreview(afterContext, keyRecordStack.confirmedRawLength())
+        assertEquals("你hao", preview)
+    }
+
+    @Test
+    fun processKey_normalComposing_noConfirmedPrefix_stackUntouched() = runTest {
+        // 守卫：普通编码态（消费无 commit 但无确认前缀）不得触发分段确认同步，
+        // 栈内 T9 键完整保留（避免误清栈导致拼音提示/智能退格失效）
+        fakeEngine.api.bulkResults = mutableListOf(
+            KeyEventResult(consumed = true, commit = null, context = testContext(
+                input = "644", candidates = listOf("你" to "ni")))
+        )
+        keyRecordStack.pushT9Key('6')
+        keyRecordStack.pushT9Key('4')
+        keyRecordStack.pushT9Key('4')
+
+        controller.processKey('4'.code, 0)
+
+        assertFalse(keyRecordStack.isEmpty())
+        assertFalse(keyRecordStack.hasConfirmed())
+        assertEquals("644", keyRecordStack.unconfirmedRawChars())
+    }
+
     // ===== retypeUnconfirmed（存在确认段时的编码更新路径）=====
 
     @Test

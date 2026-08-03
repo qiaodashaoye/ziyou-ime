@@ -117,6 +117,14 @@ class InputLogicController(
     private var lastInputLength = 0
 
     /**
+     * 最近一次引擎上下文的高亮候选缓存（每次引擎交互成功后用返回上下文更新）。
+     * 按键路径的分段确认同步专用：分段确认后引擎菜单已切到下一音节，
+     * 只有**按键前**的高亮候选才是本次被确认的候选（空格选高亮项）；
+     * 缓存零额外引擎调用，不破坏热路径性能约束。
+     */
+    private var lastHighlightedCandidate: CandidateProto? = null
+
+    /**
      * 核心按键处理：将按键发送给 Rime 引擎并处理返回结果。
      * 被 Rime 消费则取 commit 文本上屏 + 刷新 UI；未消费则退格删字符、回车按编辑器语义
      * 落地（见 [handleEnterKey]）或可打印字符直接上屏。
@@ -153,6 +161,16 @@ class InputLogicController(
                     commitAndCount(text)
                     keyRecordStack.clear()
                 }
+                if (result.commit == null) {
+                    // 消费但无 commit：可能是按键触发的分段确认（空格选高亮候选、
+                    // select_keys 数字选词等，所选候选仅覆盖编码前缀）。与点击候选
+                    // 同源的引擎语义，须同步九宫格状态机确认段，否则编码区预览
+                    // 因确认偏移不可信回退为 Rime 原始 preedit（已选汉字后残留数字）。
+                    // 被确认的候选 = 按键前的高亮候选（分段确认后菜单已切到下一音节）
+                    syncStackAfterKeyPartialConfirm(result.context, lastHighlightedCandidate)
+                }
+                // 更新按键前高亮缓存（供下一次按键的分段确认同步）
+                lastHighlightedCandidate = highlightedCandidate(result.context)
                 // 用随批量结果返回的上下文刷新候选词与编码区UI；若引擎已启用
                 // librime-predict，commit 后的预测词会出现在 context.menu 中随本次刷新一并展示
                 withContext(Dispatchers.Main) {
@@ -191,8 +209,11 @@ class InputLogicController(
      * 引擎无 commit，但内部已确认该段（preedit 变为“你hao”，候选切到下一段）。
      * 此时需把所选候选的注音音节同步进九宫格状态机（[KeyRecordStack.confirmLeading]），
      * 否则后续侧栏选拼音的替换偏移会错位；同步失败则整栈 clear 降级。
+     *
+     * @param tapped 视图层传来的被点候选本体（含注音 comment）；优先于引擎当前页
+     *        menu 查找，保证跨页点击旧页候选时分段确认同步仍能取到注音。
      */
-    fun selectCandidate(globalIndex: Int) {
+    fun selectCandidate(globalIndex: Int, tapped: CandidateProto? = null) {
         scope.launch {
             inputMutex.withLock {
                 try {
@@ -202,9 +223,10 @@ class InputLogicController(
                     // 用 global 模式选择，支持跨页累积缓冲中任意可见候选，
                     // 避免页内局部索引与视图累积索引双重转换导致的选词错位。
                     // 选词前取所选候选的注音（comment），供分段确认后同步状态机：
-                    // 全局索引落在当前页时可从 menu.candidates 直接取；跨页取不到则
-                    // 为 null，分段确认将降级为清栈（syncStackAfterPartialSelect 对 null 安全）。
-                    val selected = if (menu != null && menu.pageSize > 0) {
+                    // 首选视图透传的被点候选；回退到全局索引落在当前页时从
+                    // menu.candidates 直接取（跨页取不到则为 null，分段确认将
+                    // 降级为清栈，syncStackAfterPartialSelect 对 null 安全）。
+                    val selected = tapped ?: if (menu != null && menu.pageSize > 0) {
                         val pageStartGlobal = menu.pageNumber * menu.pageSize
                         menu.candidates.getOrNull(globalIndex - pageStartGlobal)
                     } else {
@@ -244,16 +266,53 @@ class InputLogicController(
      */
     private fun syncStackAfterPartialSelect(candidate: CandidateProto?) {
         if (keyRecordStack.isEmpty()) return
-        val syllables = candidate?.comment?.trim()
-            ?.split('\'', ' ')
-            ?.filter { seg -> seg.isNotEmpty() && seg.all { it.isLetter() } }
-            .orEmpty()
+        val syllables = syllablesOf(candidate)
         val synced = candidate != null && syllables.isNotEmpty() &&
             keyRecordStack.confirmLeading(candidate.text, syllables)
         if (!synced) {
             Log.w(TAG, "分段确认同步失败，清栈降级 (comment=${candidate?.comment})")
             keyRecordStack.clear()
         }
+    }
+
+    /** 候选注音音节解析（comment 按 ' / 空格切分，仅保留纯字母段）。 */
+    private fun syllablesOf(candidate: CandidateProto?): List<String> =
+        candidate?.comment?.trim()
+            ?.split('\'', ' ')
+            ?.filter { seg -> seg.isNotEmpty() && seg.all { it.isLetter() } }
+            .orEmpty()
+
+    /**
+     * 按键路径的分段确认同步（空格选高亮候选 / select_keys 等）：
+     * 引擎已出现确认前缀（preedit 头部汉字，selStart > 0）而栈尚未记录时，
+     * 以按键前高亮候选（[selected]）的注音为音节依据合并栈头。确认段文本取自
+     * preedit 确认前缀（可能长于候选文本）；普通编码态（无确认前缀）与栈已有
+     * 确认段的后续分段确认不在本路径处理（后者降级行为与历史一致）。
+     */
+    private fun syncStackAfterKeyPartialConfirm(context: ContextProto?, selected: CandidateProto?) {
+        if (keyRecordStack.isEmpty() || keyRecordStack.hasConfirmed()) return
+        val composition = context?.composition ?: return
+        val selStart = composition.selStart
+        if (selStart <= 0) return
+        val preedit = composition.preedit ?: return
+        val codePoints = preedit.codePointCount(0, preedit.length)
+        if (selStart > codePoints) return
+        val confirmedText = preedit.substring(0, preedit.offsetByCodePoints(0, selStart))
+        val syllables = syllablesOf(selected)
+        if (syllables.isEmpty()) return
+        if (!keyRecordStack.confirmLeading(confirmedText, syllables)) {
+            Log.w(TAG, "按键分段确认同步失败，清栈降级 (comment=${selected?.comment})")
+            keyRecordStack.clear()
+        }
+    }
+
+    /** 上下文当前高亮候选（无高亮时取首位），供按键路径的分段确认同步。 */
+    private fun highlightedCandidate(context: ContextProto?): CandidateProto? {
+        val menu = context?.menu ?: return null
+        val candidates = menu.candidates
+        if (candidates.isEmpty()) return null
+        val index = menu.highlightedCandidateIndex.takeIf { it in candidates.indices } ?: 0
+        return candidates[index]
     }
 
     /** 处理翻页。@param forward true=下一页, false=上一页 */
@@ -531,6 +590,8 @@ class InputLogicController(
         try {
             val context: ContextProto? = engine.api.getContext()
             lastInputLength = context?.input?.length ?: 0
+            // 同步按键前高亮缓存（选词/翻页等旁路后的最新高亮）
+            lastHighlightedCandidate = highlightedCandidate(context)
             withContext(Dispatchers.Main) {
                 callbacks.renderContext(context)
             }
