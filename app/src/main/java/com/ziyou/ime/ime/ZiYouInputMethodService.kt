@@ -306,6 +306,10 @@ class ZiYouInputMethodService : InputMethodService() {
     /** 进入数字键盘前的布局类型，用于「返回」键恢复（数字键盘为临时面板） */
     private var keyboardBeforeNumber: KeyboardType? = null
 
+    /** 九宫格“中→英”进入 QWERTY 英文前的布局，用于英→中返回原布局
+     *  （null 表示非九宫格中→英入口；任何手动布局切换都会清除，避免陈旧恢复） */
+    private var qwertyEnglishOrigin: KeyboardType? = null
+
     /** 候选词视图引用 */
     private var candidatesView: SimpleCandidatesView? = null
 
@@ -626,16 +630,22 @@ class ZiYouInputMethodService : InputMethodService() {
     /**
      * 九宫格“中→英”专用切换：强制 ascii_mode=true 并切到 QWERTY。
      * 不走 handleSoftKeyPress 异步路径，避免与 applyEngineForKeyboard 竞态。
+     * 同时记录进入前布局，供 QWERTY 上英→中时返回原布局（如九宫格）。
      */
     private fun switchToQwertyEnglish() {
         pendingEnglishMode = true
+        val origin = currentKeyboardType
         switchKeyboard(KeyboardType.QWERTY)
+        // 在 switchKeyboard 之后记录（switchKeyboard 会统一清除该标记）
+        qwertyEnglishOrigin = origin
     }
 
     /**
      * 切换键盘布局，重建视图并同步方案 / 中英文模式 / 编码区。
      */
     private fun switchKeyboard(type: KeyboardType) {
+        // 任何布局切换都使“中→英”的英→中返回标记失效（经其他路径手动切换后不再自动返回）
+        qwertyEnglishOrigin = null
         if (type == currentKeyboardType && keyboardView != null) return
         keyRecordStack.clear()
         installKeyboard(type)
@@ -940,6 +950,18 @@ class ZiYouInputMethodService : InputMethodService() {
                             return@launch
                         }
                         val currentAscii = rime.api.getOption("ascii_mode")
+                        // 九宫格“中→英”返回：QWERTY 英文下按中英键时恢复进入前布局
+                        // （applyEngineForKeyboard 保证切回 t9 方案并强制中文模式），
+                        // 而非仅翻转 ascii_mode 停留在 QWERTY
+                        val origin = qwertyEnglishOrigin
+                        if (currentAscii && origin != null && currentKeyboardType == KeyboardType.QWERTY) {
+                            qwertyEnglishOrigin = null
+                            Log.d(TAG, "英→中返回进入前布局: $origin")
+                            switchKeyboard(origin)
+                            return@launch
+                        }
+                        // 其他翻转场景消费标记，避免后续切换被陈旧标记误恢复
+                        qwertyEnglishOrigin = null
                         rime.api.setOption("ascii_mode", !currentAscii)
                         // 视图不再预翻转，统一在此按引擎结果回写
                         keyboardView?.isChineseMode = currentAscii // 反转
