@@ -1,0 +1,174 @@
+# Rime dictionary
+# encoding: utf-8
+#
+# 字由输入法内置英文词 + 表情映射表
+#
+# 用途：中文模式下直接输入英文单词（全键盘键入 ok）或九宫格数字编码
+# （t9 方案的 speller/algebra 会把编码派生出 65）时，
+# 在中文候选之外追加英文词与表情候选。
+#
+# 词条格式：上屏文本<TAB>编码<TAB>权重
+#   - 编码统一以数字 0 作标记前缀（如 0ok），配合方案 algebra 末尾两条规则：
+#       abbrev/^0(.+)$/$1/  去标记并降级为简拼(abbrev)拼写
+#       erase/^0.*$/        清除残留标记拼写
+#     标记是必需的：若英文码的九宫格数字拼写（如 ok→65）以 normal 类型进入
+#     prism，Syllabifier 的音节图剪枝会视其为「全拼整段命中」，把同编码上的
+#     全部中文简拼(kAbbreviation)路径当作次等拼写剪掉，导致输入 65 时只剩
+#     ok/👌、中文候选消失。降级为 abbrev 后两者共存（英文码带轻微降权，
+#     候选排位自然位于高频中文之后）。
+#   - 0 不出现在任何拼音音节中，且九宫格/全键盘中文模式都不会输入数字 0，
+#     标记不会与拼音编码冲突。
+#   - 权重按同编码中文竞争者数据校准（候选排序 ≈ 权重原始值线性降序，
+#     见 script_translator 的 quality 公式）：
+#     * Tier S（ok/OK/👌，编码 65 无全拼拼音音节冲突）：权重压过全部竞争者
+#       （含首键单字），与主流输入法「65→OK 置顶」体验一致；
+#     * 其余词条：压过同编码整段简拼中文词，但不超过全拼单音节词
+#       （如 88 的 图 必须压过 tv）与顶级单字（是/一/的 等），
+#       上限 120 万，保证中文候选正常排序不受扰动。
+#
+---
+name: en_base
+version: "2026-08-04"
+sort: by_weight
+...
+
+# ===== 高频应答 / 口语 =====
+ok	0ok	12321860
+OK	0ok	10426188
+yes	0yes	690367
+no	0no	814349
+yeah	0yeah	246355
+yep	0yep	690367
+nope	0nope	65527
+sure	0sure	60000
+alright	0alright	40000
+maybe	0maybe	50000
+fine	0fine	139001
+good	0good	80000
+nice	0nice	60000
+cool	0cool	60000
+wow	0wow	575448
+omg	0omg	325422
+lol	0lol	442612
+btw	0btw	151680
+haha	0haha	70000
+hehe	0hehe	66137
+
+# ===== 问候 / 礼貌 =====
+hi	0hi	1200000
+hey	0hey	452721
+hello	0hello	80000
+bye	0bye	541804
+goodbye	0goodbye	40000
+thanks	0thanks	80000
+thankyou	0thankyou	50000
+sorry	0sorry	70000
+please	0please	60000
+welcome	0welcome	40000
+morning	0morning	50000
+goodnight	0goodnight	40000
+
+# ===== 常用名词 / 状态 =====
+love	0love	70000
+like	0like	60000
+happy	0happy	60000
+sad	0sad	273977
+angry	0angry	40000
+busy	0busy	40000
+tired	0tired	40000
+hungry	0hungry	30000
+today	0today	50000
+tomorrow	0tomorrow	50000
+yesterday	0yesterday	40000
+weekend	0weekend	40000
+later	0later	40000
+nothing	0nothing	40000
+someone	0someone	30000
+everyone	0everyone	30000
+
+# ===== 科技 / 数码 =====
+wifi	0wifi	80000
+app	0app	359019
+bug	0bug	137869
+email	0email	60000
+web	0web	454824
+blog	0blog	40000
+video	0video	50000
+music	0music	50000
+movie	0movie	50000
+game	0game	60000
+photo	0photo	50000
+phone	0phone	50000
+laptop	0laptop	30000
+keyboard	0keyboard	30000
+screen	0screen	30000
+network	0network	40000
+password	0password	40000
+account	0account	40000
+login	0login	40000
+download	0download	40000
+upload	0upload	30000
+update	0update	40000
+search	0search	40000
+share	0share	40000
+location	0location	30000
+bluetooth	0bluetooth	30000
+battery	0battery	30000
+internet	0internet	40000
+online	0online	50000
+offline	0offline	40000
+data	0data	40000
+file	0file	56155
+link	0link	40000
+server	0server	30000
+cloud	0cloud	30000
+ai	0ai	702753
+vr	0vr	737732
+ar	0ar	1200000
+gps	0gps	146723
+usb	0usb	40000
+cpu	0cpu	82133
+tv	0tv	533497
+vip	0vip	140444
+id	0id	1200000
+pk	0pk	1200000
+vs	0vs	737732
+pc	0pc	1059079
+qq	0qq	586902
+ktv	0ktv	113287
+
+# ===== 英文词 → 表情映射（编码与英文词候选同源，并列展示）=====
+👌	0ok	12795777
+✌️	0yeah	261752
+👍	0good	95000
+👍	0nice	65000
+👎	0bad	376907
+❤️	0love	95000
+💔	0broken	30000
+😄	0happy	75000
+😂	0lol	575396
+😭	0cry	429083
+😢	0sad	301375
+😊	0smiley	40000
+😡	0angry	45000
+😴	0sleepy	30000
+🤔	0think	40000
+😱	0shock	30000
+😘	0kiss	40000
+🙏	0thanks	85000
+🙏	0please	65000
+👏	0clap	89913
+🤝	0deal	109831
+💪	0fighting	40000
+👋	0bye	575667
+🌹	0rose	40000
+🎂	0birthday	50000
+🎉	0party	40000
+🎁	0gift	40000
+☕	0coffee	40000
+🍺	0cheers	30000
+🌙	0moon	35794
+☀️	0sunny	30000
+⭐	0lucky	30000
+🔥	0hot	225090
+💯	0perfect	40000

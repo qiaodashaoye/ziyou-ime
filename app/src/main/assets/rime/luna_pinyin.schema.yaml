@@ -4,7 +4,7 @@
 schema:
   schema_id: luna_pinyin
   name: 朙月拼音·简体
-  version: "2026-07-23"
+  version: "2026-08-04.1"
   author:
     - 佛振 <chen.sst@gmail.com>
   description: |
@@ -85,6 +85,12 @@ speller:
     - derive/ong$/on/correction
     - derive/ao$/oa/correction
     - derive/([iu])a(o|ng?)$/a$1$2/correction
+    # ── 内置英文词/表情标记码（0 前缀）去标记与降级 ──
+    # 英文词编码以 0 作标记前缀（如 0ok），去标记后降级为简拼(abbrev)拼写，
+    # 避免英文整码以 normal 拼写触发 Syllabifier 剪枝挤掉中文候选；
+    # 与 t9.schema.yaml 的同名规则保持同步（详见该文件注释）。
+    - abbrev/^0(.+)$/$1/
+    - erase/^0.*$/
 
 translator:
   dictionary: luna_pinyin

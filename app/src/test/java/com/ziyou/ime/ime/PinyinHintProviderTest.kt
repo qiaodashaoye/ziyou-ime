@@ -81,6 +81,17 @@ class PinyinHintProviderTest {
     }
 
     @Test
+    fun buildHints_fallback_skipsEnglishWordMarkedComments() {
+        // 内置英文词/表情候选的注音是标记码（如 0ok，含数字），
+        // 回退提取时必须跳过，不能当拼音提示展示
+        val ctx = context(
+            input = "guo",
+            candidates = listOf(candidate("👌", "0ok"), candidate("过", "guo"))
+        )
+        assertEquals(listOf("guo"), PinyinHintProvider.buildHints(ctx))
+    }
+
+    @Test
     fun buildPreview_followsHighlightedCandidatePinyin() {
         // 核心缺陷场景：输入 48，首位候选是"乎"(hu)，
         // 编码区必须展示 hu（与候选读音一致），而非本地 T9 表序的 gu

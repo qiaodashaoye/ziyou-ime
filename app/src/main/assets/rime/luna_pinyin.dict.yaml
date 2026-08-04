@@ -11,11 +11,12 @@
 #   - 扩展词库（多音字注音）
 #   - 腾讯词向量大词库
 #   - 其他杂项补充
+#   - 内置英文词与表情映射表（中文模式下输入 ok / 65 可出英文词与表情候选）
 #
 
 ---
 name: luna_pinyin
-version: "2026-07-23"
+version: "2026-08-04"
 sort: by_weight
 import_tables:
   - cn_dicts/8105     # 字表（通用规范汉字表）
@@ -23,6 +24,7 @@ import_tables:
   - cn_dicts/ext      # 扩展词库
   - cn_dicts/tencent  # 腾讯词向量（大词库）
   - cn_dicts/others   # 杂项补充
+  - en_dicts/base     # 内置英文词与表情映射表
 ...
 
 # 大写字母（支持拼音中混入大写字母造词，如 DNA、GDP）

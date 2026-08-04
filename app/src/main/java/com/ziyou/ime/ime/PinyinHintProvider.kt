@@ -39,13 +39,15 @@ object PinyinHintProvider {
             val pinyins = T9PinYinUtils.t9KeyToPinyin(digitSegment).filter { it.isNotBlank() }
             if (pinyins.isNotEmpty()) return pinyins.take(MAX_HINTS)
         }
-        // 回退：从候选词 comment 提取（分段确认后候选已是未确认段的，天然对齐）
+        // 回退：从候选词 comment 提取（分段确认后候选已是未确认段的，天然对齐）；
+        // 仅接受纯字母/分隔符 comment：内置英文词候选的注音是标记码（如 0ok），
+        // 含数字不可作拼音提示展示
         val candidates = context.menu?.candidates ?: return null
         if (candidates.isEmpty()) return null
         val hints = LinkedHashSet<String>()
         for (candidate in candidates) {
             val py = candidate.comment.trim()
-            if (py.isNotEmpty()) hints.add(py)
+            if (py.isNotEmpty() && py.all { it == '\'' || it == ' ' || it.isLetter() }) hints.add(py)
             if (hints.size >= MAX_HINTS) break
         }
         return hints.toList().takeIf { it.isNotEmpty() }

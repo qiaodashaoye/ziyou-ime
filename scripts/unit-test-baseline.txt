@@ -8,5 +8,5 @@
 #   ./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest
 #   把实测总数写到下面（首个纯数字行即基线，其余行为注释）。
 #
-# 当前实测：:core-logic 179 + :app 185（2026-08-04，全绿、0 跳过）
-364
+# 当前实测：:core-logic 179 + :app 186（2026-08-04，全绿、0 跳过）
+365

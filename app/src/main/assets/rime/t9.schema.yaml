@@ -13,7 +13,7 @@
 schema:
   schema_id: t9
   name: 中文九键
-  version: "2.1"
+  version: "2.3"
   author:
     - 字由输入法
   description: |
@@ -94,6 +94,14 @@ speller:
     - derive/[pqrs]/7/
     - derive/[tuv]/8/
     - derive/[wxyz]/9/
+    # ── 内置英文词/表情标记码（0 前缀）去标记与降级（必须在数字 derive 之后）──
+    # 英文词编码以 0 作标记前缀（如 0ok），经上方 derive 派生出带标记的
+    # 数字拼写（0ok→065）后，在此去标记并降级为简拼(abbrev)拼写。
+    # 降级是必需的：若英文词的九宫格整码（65）以 normal 拼写进入 prism，
+    # Syllabifier 音节图剪枝会视其为「全拼整段命中」，把同编码上的全部
+    # 中文简拼(kAbbreviation)路径剪掉，导致输入 65 只剩 ok/👌、中文候选消失。
+    - abbrev/^0(.+)$/$1/
+    - erase/^0.*$/
 
 translator:
   dictionary: luna_pinyin
