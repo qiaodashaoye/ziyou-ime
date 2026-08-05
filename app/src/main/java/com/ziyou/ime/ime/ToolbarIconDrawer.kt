@@ -23,7 +23,7 @@ class ToolbarIconDrawer {
 
     /** 图标目录：动态按钮（对应 [ToolbarItem]）+ 固定收起/Logo 按钮 +
      *  工具面板专属设置项（[ToolPanelCatalog]） */
-    enum class Icon { THEME, SCHEMA, DOODLE, SKILL, AI, CLIPBOARD, FLOATING, KEYBOARD, HIDE, SETTINGS, LOGO }
+    enum class Icon { THEME, SCHEMA, DOODLE, SKILL, AI, CLIPBOARD, FLOATING, KEYBOARD, VOICE, HIDE, SETTINGS, LOGO }
 
     /** 单个图标的绘制规格：描边主体 + 可选填充细节（如颜料点/键帽） */
     private class Spec(val stroke: Path, val fill: Path? = null)
@@ -56,6 +56,7 @@ class ToolbarIconDrawer {
         Icon.CLIPBOARD to clipboard(),
         Icon.FLOATING to floating(),
         Icon.KEYBOARD to keyboard(),
+        Icon.VOICE to voice(),
         Icon.HIDE to hide(),
         Icon.SETTINGS to settings(),
         Icon.LOGO to logo()
@@ -239,6 +240,24 @@ class ToolbarIconDrawer {
             addRect(16.2f, 11.2f, 17.8f, 12.8f, Path.Direction.CW)
         }
         return Spec(stroke, fill)
+    }
+
+    /** 语音：麦克风（胶囊咪头描边 + 弧形拾音架 + 立杆，Material mic 线性同款） */
+    private fun voice(): Spec {
+        val stroke = Path().apply {
+            // 咪头胶囊：圆角矩形描边
+            addRoundRect(RectF(9f, 2.5f, 15f, 12.5f), 3f, 3f, Path.Direction.CW)
+            // 拾音弧架：左右两侧向下包拢的圆弧
+            moveTo(5.5f, 10f)
+            arcTo(RectF(5.5f, 7f, 18.5f, 20f), 180f, -90f, false)
+            arcTo(RectF(5.5f, 7f, 18.5f, 20f), 90f, -90f, false)
+            // 立杆 + 底座
+            moveTo(12f, 20f)
+            lineTo(12f, 22f)
+            moveTo(8.5f, 22f)
+            lineTo(15.5f, 22f)
+        }
+        return Spec(stroke)
     }
 
     /** 收起：键盘 + 下方收起箭头（Android IME 标准符号） */

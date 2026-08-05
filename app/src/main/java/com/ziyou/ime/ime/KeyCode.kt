@@ -111,6 +111,8 @@ object KeyCode {
     const val KEYCODE_TOOL_PANEL = -115
     /** 用于内部标识键盘选择面板开关（候选区按钮栏，列表选择主键盘布局） */
     const val KEYCODE_KEYBOARD_PICKER = -116
+    /** 用于内部标识语音输入面板开关（候选区按钮栏，流式语音转文字） */
+    const val KEYCODE_VOICE_PANEL = -117
 
     /**
      * 将Android KeyEvent的keyCode转换为Rime keysym

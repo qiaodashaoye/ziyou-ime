@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 语音输入：仅本地离线识别，音频不落盘不上传（见 docs/实时语音输入可行性方案.md） -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!--
       allowBackup=false：输入法的用户词典（rime_user/）会随使用积累已输入词汇，属敏感数据。

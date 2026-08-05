@@ -33,7 +33,7 @@ object ToolbarConfigRepository {
 
     /** 全量按钮配置（「全功能」预设，历史默认顺序 + 新增按钮追加在后） */
     private val FULL_IDS = listOf(
-        "theme", "schema", "doodle", "skill", "ai", "clipboard", "floating", "keyboard"
+        "theme", "schema", "doodle", "skill", "ai", "clipboard", "floating", "keyboard", "voice"
     )
 
     /** 预设模板（设置页「预设模板」入口展示；设置/收起键盘常驻，不在模板内） */

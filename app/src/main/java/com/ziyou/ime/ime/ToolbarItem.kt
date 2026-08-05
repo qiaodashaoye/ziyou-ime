@@ -35,6 +35,7 @@ enum class ToolbarItem(
     AI("ai", "AI", "AI 问答", ToolbarIconDrawer.Icon.AI, KeyCode.KEYCODE_AI_ASSISTANT),
     CLIPBOARD("clipboard", "贴", "粘贴板历史", ToolbarIconDrawer.Icon.CLIPBOARD, KeyCode.KEYCODE_CLIPBOARD_PANEL),
     FLOATING("floating", "浮", "悬浮键盘切换", ToolbarIconDrawer.Icon.FLOATING, KeyCode.KEYCODE_TOGGLE_FLOATING),
+    VOICE("voice", "声", "语音输入", ToolbarIconDrawer.Icon.VOICE, KeyCode.KEYCODE_VOICE_PANEL),
     KEYBOARD("keyboard", "键", "键盘切换", ToolbarIconDrawer.Icon.KEYBOARD, KeyCode.KEYCODE_KEYBOARD_PICKER);
 
     companion object {

@@ -1,6 +1,8 @@
 package com.ziyou.ime.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
@@ -38,6 +40,9 @@ import com.ziyou.ime.ime.ToolbarItem
 import com.ziyou.ime.core.toolbar.ToolbarConfigLogic
 import com.ziyou.ime.core.level.LevelEngine
 import com.ziyou.ime.level.LevelRepository
+import com.ziyou.ime.voice.VoiceModelCatalog
+import com.ziyou.ime.voice.VoiceModelManager
+import com.ziyou.ime.voice.VoiceModelManager.VoiceCommitMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -64,6 +69,15 @@ class SettingsActivity : AppCompatActivity() {
         /** Intent 额外项：打开时直接弹出九宫格拼音侧栏符号管理（由输入法侧栏「＋」触发） */
         const val EXTRA_OPEN_SIDE_SYMBOLS = "open_side_symbols"
 
+        /** Intent 额外项：打开时直接弹出语音模型管理（由语音面板授权/下载引导触发） */
+        const val EXTRA_OPEN_VOICE = "open_voice_settings"
+
+        /** Intent 额外项：语音入口来意为「请求录音权限」时置 true，直接弹系统授权 */
+        const val EXTRA_VOICE_REQUEST_PERMISSION = "voice_request_permission"
+
+        /** 录音权限请求码 */
+        private const val REQUEST_CODE_RECORD_AUDIO = 1001
+
         // ===== 设计令牌：页面统一配色与尺寸（集中定义，避免各处魔法数漂移） =====
         /** 宽屏（平板/横屏）下内容列的最大宽度，超出后限宽居中 */
         private const val CONTENT_MAX_WIDTH_DP = 640
@@ -82,6 +96,10 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var levelValueText: TextView
     private lateinit var personaValueText: TextView
     private lateinit var knowledgeValueText: TextView
+    private lateinit var voiceModelValueText: TextView
+
+    /** 正在下载中的模型 id（防重复点击并发写同一 .part 损坏文件） */
+    private val downloadingModelIds = mutableSetOf<String>()
 
     /** Rime 引擎（经 DI 容器获取，依赖接口而非 RimeSession 单例） */
     private val rime get() = AppContainer.rimeEngine
@@ -107,6 +125,14 @@ class SettingsActivity : AppCompatActivity() {
         // 由输入法侧栏「＋」拉起时，直接弹出侧栏符号管理
         if (intent?.getBooleanExtra(EXTRA_OPEN_SIDE_SYMBOLS, false) == true) {
             window.decorView.post { showSideSymbolManager() }
+        }
+
+        // 由语音面板拉起时：「去授权」直达系统权限弹窗，「下载模型」弹模型管理
+        if (intent?.getBooleanExtra(EXTRA_OPEN_VOICE, false) == true) {
+            val forPermission = intent?.getBooleanExtra(EXTRA_VOICE_REQUEST_PERMISSION, false) == true
+            window.decorView.post {
+                if (forPermission) requestAudioPermission() else showVoiceModelManager()
+            }
         }
     }
 
@@ -217,6 +243,26 @@ class SettingsActivity : AppCompatActivity() {
                 "横屏输入（如游戏内聊天）时自动切换为悬浮键盘",
                 checked = DisplayModeManager.isAutoFloatInLandscape(this),
                 onChange = { enabled -> DisplayModeManager.setAutoFloatInLandscape(this, enabled) })
+        ))
+
+        // ===== 语音输入 =====
+        column.addView(createSectionHeader("语音输入"))
+        val voiceModelItem = createSettingItemWithValue("🎤", "语音识别模型") { voiceModelValueText = it }
+        voiceModelItem.setOnClickListener { showVoiceModelManager() }
+        column.addView(createCard(
+            voiceModelItem,
+            createSwitchItem("⏱", "逐句自动上屏",
+                "开启：每句说完自动写入输入框；关闭：面板内攒句后点「发送」一次上屏",
+                checked = VoiceModelManager.getCommitMode(this) == VoiceCommitMode.AUTO_COMMIT,
+                onChange = { enabled ->
+                    VoiceModelManager.setCommitMode(
+                        this,
+                        if (enabled) VoiceCommitMode.AUTO_COMMIT else VoiceCommitMode.BUFFER_SEND
+                    )
+                }),
+            createSettingItem("🔐", "录音权限", audioPermissionSummary()) {
+                requestAudioPermission()
+            }
         ))
 
         // ===== AI 服务 =====
@@ -983,6 +1029,201 @@ class SettingsActivity : AppCompatActivity() {
             val enabled = KnowledgeRepository.isEnabled(this)
             knowledgeValueText.text =
                 "已导入 $count 条 · " + if (enabled) "已启用" else "未启用"
+        }
+
+        if (::voiceModelValueText.isInitialized) {
+            val active = VoiceModelManager.getActiveSpec(this)
+            voiceModelValueText.text = if (VoiceModelManager.isInstalled(this, active)) {
+                active.name
+            } else {
+                "未下载"
+            }
+        }
+    }
+
+    // ===== 语音输入：模型管理与录音权限 =====
+
+    /** 录音权限状态文案（设置项说明行）。 */
+    private fun audioPermissionSummary(): String {
+        val granted = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        return if (granted) "已授权（仅本地识别，音频不上传）" else "未授权，点击授予（仅本地识别，音频不上传）"
+    }
+
+    /** 请求录音权限；已授权时仅提示。 */
+    private fun requestAudioPermission() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            == PackageManager.PERMISSION_GRANTED
+        ) {
+            showToast("录音权限已授予")
+            return
+        }
+        requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_CODE_RECORD_AUDIO)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_CODE_RECORD_AUDIO) return
+        val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+        showToast(if (granted) "录音权限已授予" else "未授予录音权限，语音输入不可用")
+        // 重建页面刷新权限条目文案（纯代码布局下最简的局部刷新方式）
+        setContentViewWithTitleBar("字由输入法 设置", buildSettingsView())
+    }
+
+    /**
+     * 语音模型管理弹窗：列出全部可选模型（状态/下载/删除/设为激活）。
+     * 模型清单硬编码于 [VoiceModelCatalog]，下载走白名单安全链路
+     *（[com.ziyou.ime.voice.VoiceModelDownloader]）；文件不入 APK，按需下载。
+     */
+    private fun showVoiceModelManager() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(12))
+        }
+        val scroll = ScrollView(this).apply {
+            isVerticalScrollBarEnabled = false
+            addView(container, ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        renderVoiceModels(container)
+        AlertDialog.Builder(this)
+            .setTitle("语音识别模型")
+            .setView(scroll)
+            .setPositiveButton("关闭", null)
+            .show()
+    }
+
+    /** 重建模型列表行（下载/删除/激活变更后整体刷新）。 */
+    private fun renderVoiceModels(container: LinearLayout) {
+        container.removeAllViews()
+        val activeId = VoiceModelManager.getActiveSpec(this).id
+        for (spec in VoiceModelCatalog.ALL) {
+            val installed = VoiceModelManager.isInstalled(this, spec)
+            val statusText = TextView(this).apply {
+                textSize = 12f
+                setTextColor(COLOR_SUMMARY)
+                text = when {
+                    installed && spec.id == activeId -> "已下载 · 使用中"
+                    installed -> "已下载"
+                    else -> "未下载"
+                }
+            }
+            val actions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.END
+            }
+            if (!installed) {
+                actions.addView(createVoiceActionButton("下载") {
+                    startModelDownload(spec, container, statusText)
+                })
+            } else {
+                if (spec.id != activeId) {
+                    actions.addView(createVoiceActionButton("设为使用中") {
+                        VoiceModelManager.setActiveSpec(this@SettingsActivity, spec)
+                        renderVoiceModels(container)
+                        refreshDisplay()
+                    })
+                }
+                actions.addView(createVoiceActionButton("删除") {
+                    AlertDialog.Builder(this@SettingsActivity)
+                        .setTitle("删除模型")
+                        .setMessage("确定删除「${spec.name}」？删除后可重新下载。")
+                        .setPositiveButton("删除") { _, _ ->
+                            VoiceModelManager.deleteModel(this@SettingsActivity, spec)
+                            renderVoiceModels(container)
+                            refreshDisplay()
+                        }
+                        .setNegativeButton("取消", null)
+                        .show()
+                })
+            }
+            container.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, dp(8), 0, dp(8))
+                addView(TextView(this@SettingsActivity).apply {
+                    text = spec.name
+                    textSize = 15f
+                    setTextColor(COLOR_TITLE)
+                    setTypeface(null, Typeface.BOLD)
+                })
+                addView(TextView(this@SettingsActivity).apply {
+                    text = spec.summary
+                    textSize = 13f
+                    setTextColor(COLOR_SUMMARY)
+                    setPadding(0, dp(2), 0, dp(4))
+                })
+                addView(LinearLayout(this@SettingsActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(statusText, LinearLayout.LayoutParams(0,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                    addView(actions)
+                })
+                addView(createInsetDivider())
+            })
+        }
+    }
+
+    /** 模型行操作小按钮（下载/删除/设为使用中）。 */
+    private fun createVoiceActionButton(label: String, onClick: () -> Unit): TextView {
+        return TextView(this).apply {
+            text = label
+            textSize = 13f
+            setTextColor(ContextCompat.getColor(this@SettingsActivity, R.color.primary))
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            background = GradientDrawable().apply {
+                setColor(COLOR_BADGE_BG)
+                cornerRadius = dp(8).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginStart = dp(8) }
+            setOnClickListener { onClick() }
+        }
+    }
+
+    /** 启动模型下载：状态行实时展示进度，完成/失败后刷新列表。 */
+    private fun startModelDownload(
+        spec: VoiceModelCatalog.VoiceModelSpec,
+        container: LinearLayout,
+        statusText: TextView,
+    ) {
+        // 并发防护：同一模型重复点击直接忽略（两个协程并发写同一 .part 会损坏文件）
+        if (!downloadingModelIds.add(spec.id)) {
+            showToast("正在下载中，请稍候")
+            return
+        }
+        statusText.text = "准备下载…"
+        lifecycleScope.launch {
+            try {
+                val error = VoiceModelManager.downloadModel(
+                    applicationContext, spec
+                ) { done, total, curBytes, curTotal ->
+                    runOnUiThread {
+                        val percent = if (curTotal > 0) "${curBytes * 100 / curTotal}%" else "…"
+                        statusText.text = "下载中 文件 ${done + 1}/$total · $percent"
+                    }
+                }
+                if (error == null) {
+                    // 仅当用户从未显式选过激活模型时才自动激活，不覆盖既有选择
+                    if (!VoiceModelManager.hasExplicitActiveChoice(this@SettingsActivity)) {
+                        VoiceModelManager.setActiveSpec(this@SettingsActivity, spec)
+                    }
+                    showToast("「${spec.name}」下载完成")
+                } else {
+                    showToast("下载失败：$error")
+                }
+                renderVoiceModels(container)
+                refreshDisplay()
+            } finally {
+                downloadingModelIds.remove(spec.id)
+            }
         }
     }
 

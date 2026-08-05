@@ -32,6 +32,7 @@ cd librime-prebuilt && make librime   # 可选插件: make lua / octagram / pred
 - Gradle 9.5 + AGP 9.x，daemon 需 **JDK 21**（`gradle.properties` 已固定 `org.gradle.java.installations.paths` 指向 Android Studio JBR，并关闭 auto-detect；不要改回自动探测，IDE 同捆 JRE 缺 jlink 会导致构建失败）。
 - NDK r26+ / CMake 3.22.1；当前仅打包 `arm64-v8a`（`app/build.gradle.kts` 的 `abiFilters`）。
 - `:app` 的 JNI 链接依赖 `libs/arm64-v8a/librime.a` + `libs/include/rime_api.h`（由 `librime-prebuilt/` 生成，通常已就位，勿删）。
+- 语音识别依赖 `app/libs/sherpa-onnx-1.13.3.aar`（不入 git；缺失时跑 `scripts/fetch-sherpa-onnx.sh` 下载，默认走 GitHub Release，备选 hf-mirror 镜像）。
 
 ## 架构大图
 

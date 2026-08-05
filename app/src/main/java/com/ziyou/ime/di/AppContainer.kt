@@ -6,6 +6,8 @@ import com.ziyou.ime.daemon.RimeEngine
 import com.ziyou.ime.daemon.RimeSession
 import com.ziyou.ime.dict.DictManager
 import com.ziyou.ime.level.LevelStats
+import com.ziyou.ime.voice.SherpaOnnxEngine
+import com.ziyou.ime.voice.SpeechRecognizerEngine
 
 /**
  * 轻量依赖容器（手写 DI 的组合根 composition root）。
@@ -27,6 +29,9 @@ object AppContainer {
     @Volatile
     private var rimeEngineOverride: RimeEngine? = null
 
+    @Volatile
+    private var speechEngineOverride: SpeechRecognizerEngine? = null
+
     /** 生产引擎：首次访问时完成部署步骤装配（懒装配，线程安全由 lazy 保证）。 */
     private val defaultEngine: RimeEngine by lazy {
         RimeSession.deploySteps = listOf(
@@ -42,6 +47,18 @@ object AppContainer {
     /** Rime 引擎（默认生产实现为 [RimeSession]，可被测试覆盖）。 */
     val rimeEngine: RimeEngine
         get() = rimeEngineOverride ?: defaultEngine
+
+    /** 语音识别引擎（懒装配：首次访问才构造，不触发 JNI 库加载与模型加载）。 */
+    private val defaultSpeechEngine: SpeechRecognizerEngine by lazy { SherpaOnnxEngine() }
+
+    /** 流式语音识别引擎（默认生产实现为 [SherpaOnnxEngine]，可被测试覆盖）。 */
+    val speechEngine: SpeechRecognizerEngine
+        get() = speechEngineOverride ?: defaultSpeechEngine
+
+    /** 测试注入点：用 fake 引擎替换默认语音识别实现。 */
+    fun overrideSpeechEngine(engine: SpeechRecognizerEngine?) {
+        speechEngineOverride = engine
+    }
 
     /**
      * 编辑器路径上屏监听（注入 InputLogicController）：

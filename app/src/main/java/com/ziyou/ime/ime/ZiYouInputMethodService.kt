@@ -273,6 +273,40 @@ class ZiYouInputMethodService : InputMethodService() {
         override fun onPanelWillOpen() = clearCompositionForPanel()
     }
 
+    /** 语音输入面板协调器（会话编排与键盘收放，与其他面板同一拆分纪律） */
+    private val voicePanels by lazy {
+        VoicePanelCoordinator(this, voicePanelHost, serviceScope)
+    }
+
+    /** 提供给 [VoicePanelCoordinator] 的宿主能力：容器访问与语音文本直达上屏出口。 */
+    private val voicePanelHost = object : VoicePanelCoordinator.Host {
+        override fun contentLayout(): LinearLayout? = this@ZiYouInputMethodService.contentLayout
+
+        override fun keyboardContainer(): FrameLayout? =
+            this@ZiYouInputMethodService.keyboardContainer
+
+        override fun candidatesContainer(): LinearLayout? =
+            this@ZiYouInputMethodService.candidatesContainer
+
+        override fun keyboardView(): BaseKeyboardView? = this@ZiYouInputMethodService.keyboardView
+
+        override fun isFloatingMode(): Boolean =
+            displayModeCtrl.currentMode == DisplayMode.FLOATING
+
+        override fun commitVoiceTextToEditor(text: String) = inputLogic.commitDirectToEditor(text)
+
+        override fun onPanelWillOpen() = clearCompositionForPanel()
+
+        override fun openVoiceSettings(requestPermission: Boolean) {
+            val intent = Intent(this@ZiYouInputMethodService, SettingsActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                putExtra(SettingsActivity.EXTRA_OPEN_VOICE, true)
+                putExtra(SettingsActivity.EXTRA_VOICE_REQUEST_PERMISSION, requestPermission)
+            }
+            startActivity(intent)
+        }
+    }
+
     /** 剪贴板变更监听：复制即收录历史（持强引用，onCreate 注册 / onDestroy 注销） */
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
         captureClipboardToHistory()
@@ -454,12 +488,13 @@ class ZiYouInputMethodService : InputMethodService() {
      * 形态切换（[switchDisplayMode]）时也经本方法重建，与 onCreateInputView 同源。
      */
     private fun buildInputView(mode: DisplayMode): View {
-        // 重建前释放技能/AI/涂鸦/粘贴板/工具面板（旧容器即将废弃，WebView/进行中请求/离屏 bitmap 必须显式释放）
+        // 重建前释放技能/AI/涂鸦/粘贴板/工具/语音面板（旧容器即将废弃，WebView/进行中请求/录音会话必须显式释放）
         skillPanels.close()
         aiPanels.close()
         doodlePanels.close()
         clipboardPanels.close()
         toolPanels.close()
+        voicePanels.close()
         val skin = SkinManager.getCurrentSkin(this)
         // 悬浮形态下键盘/候选/编码区统一缩放，停靠形态保持 1.0 零影响
         val scale = if (mode == DisplayMode.FLOATING) DisplayModeManager.FLOATING_SCALE else 1f
@@ -853,12 +888,13 @@ class ZiYouInputMethodService : InputMethodService() {
         super.onFinishInputView(finishingInput)
         Log.d(TAG, "onFinishInputView")
 
-        // 强制关闭技能面板（销毁 WebView，避免后台常驻内存/定时器）与 AI/涂鸦/粘贴板/工具面板
+        // 强制关闭技能面板（销毁 WebView，避免后台常驻内存/定时器）与 AI/涂鸦/粘贴板/工具/语音面板
         skillPanels.close()
         aiPanels.close()
         doodlePanels.close()
         clipboardPanels.close()
         toolPanels.close()
+        voicePanels.close()
 
         // 丢弃未提交的多击预览并清空编码区
         keyboardView?.resetInputState()
@@ -897,6 +933,7 @@ class ZiYouInputMethodService : InputMethodService() {
             doodlePanels.close()
             clipboardPanels.close()
             toolPanels.close()
+            voicePanels.close()
             // 同步归还 native 堆持留的空闲页（部署残留，真机实测 20~27MB）
             if (RimeNative.isLoaded) RimeNative.trimNativeHeap()
         }
@@ -985,6 +1022,7 @@ class ZiYouInputMethodService : InputMethodService() {
                 clipboardPanels.close()
                 toolPanels.close()
                 keyboardPickers.close()
+                voicePanels.close()
                 skillPanels.toggle()
             }
             
@@ -995,6 +1033,7 @@ class ZiYouInputMethodService : InputMethodService() {
                 clipboardPanels.close()
                 toolPanels.close()
                 keyboardPickers.close()
+                voicePanels.close()
                 aiPanels.toggle()
             }
             
@@ -1011,6 +1050,7 @@ class ZiYouInputMethodService : InputMethodService() {
                     clipboardPanels.close()
                     toolPanels.close()
                     keyboardPickers.close()
+                    voicePanels.close()
                     doodlePanels.toggle()
                 }
             }
@@ -1023,6 +1063,7 @@ class ZiYouInputMethodService : InputMethodService() {
                 doodlePanels.close()
                 toolPanels.close()
                 keyboardPickers.close()
+                voicePanels.close()
                 clipboardPanels.toggle()
             }
 
@@ -1034,6 +1075,7 @@ class ZiYouInputMethodService : InputMethodService() {
                 doodlePanels.close()
                 clipboardPanels.close()
                 keyboardPickers.close()
+                voicePanels.close()
                 toolPanels.toggle()
             }
 
@@ -1046,7 +1088,21 @@ class ZiYouInputMethodService : InputMethodService() {
                 doodlePanels.close()
                 clipboardPanels.close()
                 toolPanels.close()
+                voicePanels.close()
                 keyboardPickers.toggle()
+            }
+
+            // 语音输入面板开关：收起键盘展示语音面板（与其他面板互斥）；
+            // 识别文本经 commitDirectToEditor 直达宿主输入框，不接管 commitTarget；
+            // 权限/模型未就绪时面板内展示引导态，跳转设置页语音入口
+            KeyCode.KEYCODE_VOICE_PANEL -> {
+                skillPanels.close()
+                aiPanels.close()
+                doodlePanels.close()
+                clipboardPanels.close()
+                toolPanels.close()
+                keyboardPickers.close()
+                voicePanels.toggle()
             }
 
             // 收起键盘（候选区按钮栏）
@@ -1561,6 +1617,9 @@ class ZiYouInputMethodService : InputMethodService() {
         // 释放技能面板（销毁 WebView）与 AI 面板（取消进行中请求）
         skillPanels.close()
         aiPanels.close()
+        // 释放语音面板（停止录音会话）并归还语音识别引擎全部 native 资源
+        voicePanels.close()
+        AppContainer.speechEngine.release()
         // 服务销毁前落盘剩余的上屏计分
         LevelStats.flush()
         // 取消所有协程

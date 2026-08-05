@@ -8,5 +8,7 @@
 #   ./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest
 #   把实测总数写到下面（首个纯数字行即基线，其余行为注释）。
 #
-# 当前实测：:core-logic 179 + :app 186（2026-08-04，全绿、0 跳过）
-365
+# 当前实测：:core-logic 216 + :app 199（2026-08-05，全绿、0 跳过；
+# 新增语音输入：纯逻辑 VoiceUtteranceBuffer/VoiceSessionStateMachine/VoiceModelFiles/
+# VoiceTextCaseRestorer（中英混合大小写恢复）与 VoiceEngineWiringTest/VoiceModelCatalogTest）
+415

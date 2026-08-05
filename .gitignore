@@ -11,6 +11,9 @@
 /libs/*.a
 /libs/**/*.a
 
+# sherpa-onnx 预编译 AAR（语音识别，经 scripts/fetch-sherpa-onnx.sh 下载）
+/app/libs/*.aar
+
 # librime-prebuilt 构建产物
 librime-prebuilt/superbuild/
 librime-prebuilt/boost/
