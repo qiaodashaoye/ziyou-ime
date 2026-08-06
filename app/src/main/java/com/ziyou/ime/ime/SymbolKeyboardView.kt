@@ -280,7 +280,7 @@ class SymbolKeyboardView @JvmOverloads constructor(
                 i == pressedCategory -> pressedKeyBgPaint
                 else -> funcKeyBgPaint
             }
-            canvas.drawRoundRect(rect, keyRadius, keyRadius, bgPaint)
+            canvas.drawRoundRect(rect, radiusFor(rect), radiusFor(rect), bgPaint)
             val textPaint = if (selected) categorySelectedPaint else categoryPaint
             val y = rect.centerY() - (textPaint.descent() + textPaint.ascent()) / 2f
             canvas.drawText(categories[i].label, rect.centerX(), y, textPaint)
@@ -317,7 +317,7 @@ class SymbolKeyboardView @JvmOverloads constructor(
                 val top = gridArea.top + row * rowStride
                 val rect = RectF(left, top, left + cellW, top + cellH)
                 val bgPaint = if (index == pressedCell) pressedKeyBgPaint else keyBgPaint
-                canvas.drawRoundRect(rect, keyRadius, keyRadius, bgPaint)
+                canvas.drawRoundRect(rect, radiusFor(rect), radiusFor(rect), bgPaint)
                 drawFittedSymbol(canvas, symbols[index], rect)
             }
         }
@@ -343,7 +343,8 @@ class SymbolKeyboardView @JvmOverloads constructor(
             val key = bottomRow[i]
             val rect = bottomKeyRects.getOrNull(i) ?: continue
             // 复用基类配色选择（回车强调色 > 按下 > 功能键 > 普通键）
-            canvas.drawRoundRect(rect, keyRadius, keyRadius, backgroundPaintFor(key, i == pressedBottomKey))
+            val radius = radiusFor(rect)
+            canvas.drawRoundRect(rect, radius, radius, backgroundPaintFor(key, i == pressedBottomKey))
             val textPaint = textPaintFor(key)
             val y = rect.centerY() - (textPaint.descent() + textPaint.ascent()) / 2f
             canvas.drawText(key.label, rect.centerX(), y, textPaint)

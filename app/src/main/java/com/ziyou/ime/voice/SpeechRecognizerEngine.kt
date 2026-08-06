@@ -33,6 +33,14 @@ interface SpeechRecognizerEngine {
     val isModelLoaded: Boolean
 
     /**
+     * 引擎是否已被 [release]（容器据此判定需重建实例）。
+     *
+     * IME Service 销毁会 release 引擎归还 native 内存，但进程可能存活且
+     * Service 随后重建——已释放的实例不得继续使用，组合根须返回全新实例。
+     */
+    val isReleased: Boolean
+
+    /**
      * 指定模型目录是否已加载完成。
      *
      * 用户在设置页切换激活模型后，协调器据此决定是否需要重新加载：

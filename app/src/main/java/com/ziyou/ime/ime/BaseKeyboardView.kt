@@ -55,6 +55,17 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
         private const val REPEAT_INTERVAL_MS = 60L
         /** 强调键按下态的压暗比例（向黑色混色） */
         private const val ACCENT_PRESSED_DARKEN = 0.18f
+        /** T9 系列键盘（九宫格/数字）共享的按键高度倍率 */
+        const val T9_FAMILY_HEIGHT_FACTOR = 1.08f
+        /** T9 系列键盘功能列相对宽度 */
+        const val T9_FAMILY_FUNC_COL_WIDTH = 0.8f
+
+        /**
+         * 圆角半径相对按键短边的上限比例。大圆角皮肤（12~16dp 拟态风格）作用在
+         * QWERTY 十列窄键上时弧度过大、键面趋近胶囊，按短边收限后窄键弧度合理，
+         * 九宫格等宽键不触及上限、保留皮肤原设计。
+         */
+        private const val KEY_RADIUS_MAX_RATIO = 0.28f
     }
 
     // ===== Shift 状态枚举（供全键盘等使用） =====
@@ -156,6 +167,36 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
      */
     protected open val gridColumns: Int? = null
 
+    // ===== 网格几何属性（供左侧栏对齐用，子类可按需覆写）=====
+
+    /**
+     * 网格首行按键顶部的 y 偏移（px），供侧栏列表顶部对齐。
+     * 默认实现与 [keyboardPadding] 一致；子类可覆写以适配特殊布局。
+     */
+    open val gridTop: Float
+        get() = keyboardPadding
+
+    /**
+     * 网格行间距（px），供侧栏列表与底部「符号」键之间的间距对齐。
+     * 默认实现与 [keyGap] 一致。
+     */
+    open val gridRowGap: Float
+        get() = keyGap
+
+    /**
+     * 单行按键高度（px，含高度倍率），供侧栏底部「符号」键对齐。
+     * 默认实现与 `keyHeight * keyHeightMultiplier` 一致。
+     */
+    open val gridRowHeight: Float
+        get() = keyHeight * keyHeightMultiplier
+
+    /**
+     * 底行（最后一行）顶部相对本视图的 y 偏移（px），供侧栏底部「符号」键对齐。
+     * 默认实现基于 3 行网格 + 间距计算；子类可覆写。
+     */
+    open val bottomRowTop: Float
+        get() = keyboardPadding + 3 * (gridRowHeight + keyGap)
+
     // ===== 按键矩形位置缓存 =====
     protected data class KeyRect(
         val key: Key,
@@ -229,6 +270,16 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
     protected open val keyHeightMultiplier: Float = 1.0f
 
     /**
+     * 按键间距倍率（默认 1.0）。子类可覆写收窄间距，如全键盘 10 列窄键布局
+     * 收紧间距让键面更宽。收窄的间距会自动等比作用于 insetGap 等以 [keyGap]
+     * 为单位的布局参数，各行对齐关系不变。
+     */
+    protected open val keyGapScale: Float get() = 1.0f
+
+    /** 键盘整体内边距倍率（默认 1.0），与 [keyGapScale] 配套供子类收窄水平留白加宽键面。 */
+    protected open val keyboardPaddingScale: Float get() = 1.0f
+
+    /**
      * 强制指定按键宽度单元值（px）。
      * 当非 null 时，recalculateKeyPositions 使用该值代替根据当前视图宽度自动计算的值，
      * 用于底栏等需要与上方网格保持按键宽度一致的场景。
@@ -249,9 +300,9 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
      */
     private fun refreshDimensions() {
         keyHeight = dp2px(KEY_HEIGHT_DP.toFloat()) * skin.keyHeightScale
-        keyGap = dp2px(skin.keyGapDp)
+        keyGap = dp2px(skin.keyGapDp) * keyGapScale
         keyRadius = dp2px(skin.keyCornerRadiusDp)
-        keyboardPadding = dp2px(skin.keyboardPaddingDp)
+        keyboardPadding = dp2px(skin.keyboardPaddingDp) * keyboardPaddingScale
         keyTextPaint.textSize = sp2px(skin.keyTextSizeSp)
         funcTextPaint.textSize = sp2px(skin.funcTextSizeSp)
         accentTextPaint.textSize = sp2px(skin.funcTextSizeSp)
@@ -273,6 +324,13 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
 
     /** 缩放因子变更回调：子类在此同步自有画笔（如九宫格数字/字母画笔）的文字大小 */
     protected open fun onScaleChanged() {}
+
+    /**
+     * 指定按键的实际圆角半径：皮肤圆角与键面短边 × [KEY_RADIUS_MAX_RATIO] 取小。
+     * 仅影响绘制外观，触摸命中区域仍为完整矩形。
+     */
+    protected fun radiusFor(rect: RectF): Float =
+        keyRadius.coerceAtMost(minOf(rect.width(), rect.height()) * KEY_RADIUS_MAX_RATIO)
 
     // ===== 皮肤 =====
 
@@ -407,6 +465,8 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
     /** 绘制单个按键（按皮肤 keyStyle 分支：填充 / 描边 / 无键面） */
     private fun drawKey(canvas: Canvas, keyRect: KeyRect, isPressed: Boolean) {
         val rect = keyRect.rect
+        // 圆角按当前键尺寸自适应收限（窄键防胶囊化，宽键保留皮肤圆角）
+        val radius = radiusFor(rect)
 
         when (skin.keyStyle) {
             SkinKeyStyle.FILLED -> {
@@ -416,24 +476,24 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
                 if (shadow != null && !isPressed) {
                     val shadowRect = RectF(rect)
                     shadowRect.offset(dp2px(shadow.dxDp), dp2px(shadow.dyDp))
-                    canvas.drawRoundRect(shadowRect, keyRadius, keyRadius, keyShadowPaint)
+                    canvas.drawRoundRect(shadowRect, radius, radius, keyShadowPaint)
                 }
-                canvas.drawRoundRect(rect, keyRadius, keyRadius, backgroundPaintFor(keyRect.key, isPressed))
+                canvas.drawRoundRect(rect, radius, radius, backgroundPaintFor(keyRect.key, isPressed))
                 if (skin.keyBorderWidthDp > 0f) {
-                    canvas.drawRoundRect(rect, keyRadius, keyRadius, keyBorderPaint)
+                    canvas.drawRoundRect(rect, radius, radius, keyBorderPaint)
                 }
             }
             SkinKeyStyle.OUTLINE -> {
                 // 描边风格：无填充无阴影，按下态仍绘高亮底
                 if (isPressed) {
-                    canvas.drawRoundRect(rect, keyRadius, keyRadius, pressedKeyBgPaint)
+                    canvas.drawRoundRect(rect, radius, radius, pressedKeyBgPaint)
                 }
-                canvas.drawRoundRect(rect, keyRadius, keyRadius, keyBorderPaint)
+                canvas.drawRoundRect(rect, radius, radius, keyBorderPaint)
             }
             SkinKeyStyle.FLAT -> {
                 // 无键面风格（Gboard 无边框）：仅按下态绘高亮底
                 if (isPressed) {
-                    canvas.drawRoundRect(rect, keyRadius, keyRadius, pressedKeyBgPaint)
+                    canvas.drawRoundRect(rect, radius, radius, pressedKeyBgPaint)
                 }
             }
         }

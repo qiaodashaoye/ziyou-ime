@@ -48,12 +48,31 @@ object AppContainer {
     val rimeEngine: RimeEngine
         get() = rimeEngineOverride ?: defaultEngine
 
-    /** 语音识别引擎（懒装配：首次访问才构造，不触发 JNI 库加载与模型加载）。 */
-    private val defaultSpeechEngine: SpeechRecognizerEngine by lazy { SherpaOnnxEngine() }
+    /**
+     * 语音识别引擎默认实现（懒装配：首次访问才构造，不触发 JNI 库加载与模型加载）。
+     *
+     * 不用 `by lazy`：Service onDestroy 会 [SpeechRecognizerEngine.release] 归还
+     * native 内存，但进程可能存活且 Service 随后重建——已释放实例的
+     * `destroyed` 是单向闩锁，懒获取处须能重建全新实例（见 speechEngine）。
+     */
+    @Volatile
+    private var defaultSpeechEngine: SpeechRecognizerEngine? = null
 
     /** 流式语音识别引擎（默认生产实现为 [SherpaOnnxEngine]，可被测试覆盖）。 */
     val speechEngine: SpeechRecognizerEngine
-        get() = speechEngineOverride ?: defaultSpeechEngine
+        get() {
+            speechEngineOverride?.let { return it }
+            val current = defaultSpeechEngine
+            if (current != null && !current.isReleased) return current
+            return synchronized(this) {
+                val rechecked = defaultSpeechEngine
+                if (rechecked != null && !rechecked.isReleased) {
+                    rechecked
+                } else {
+                    SherpaOnnxEngine().also { defaultSpeechEngine = it }
+                }
+            }
+        }
 
     /** 测试注入点：用 fake 引擎替换默认语音识别实现。 */
     fun overrideSpeechEngine(engine: SpeechRecognizerEngine?) {

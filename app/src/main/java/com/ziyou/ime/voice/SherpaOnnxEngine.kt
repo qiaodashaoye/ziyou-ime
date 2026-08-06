@@ -57,6 +57,8 @@ class SherpaOnnxEngine(
 
     override val isModelLoaded: Boolean get() = recognizer != null
 
+    override val isReleased: Boolean get() = destroyed
+
     override fun isModelLoadedFor(modelDir: File): Boolean =
         recognizer != null && loadedModelDir?.absolutePath == modelDir.absolutePath
 
@@ -253,6 +255,10 @@ class SherpaOnnxEngine(
         } catch (e: Throwable) {
             Log.e(TAG, "解码异常", e)
             sessionActive = false
+            // 防御性兜底：解码已终止时立即停采集（采集线程自身调 stop() 安全，
+            // 内部跳过 join 并释放录音设备），否则麦克风与读取线程会在 Error 态
+            // 持续运行直到下一次 startSession/stopSession——发热与隐私隐患
+            capture?.stop()
             listener?.onError("识别解码异常: ${e.message}")
         }
     }

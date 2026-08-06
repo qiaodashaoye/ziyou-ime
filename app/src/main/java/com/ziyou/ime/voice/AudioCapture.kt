@@ -98,7 +98,8 @@ class AudioCapture(
     fun stop(): Boolean {
         running = false
         val worker = thread
-        if (worker != null && Thread.currentThread() != worker) {
+        val self = worker != null && Thread.currentThread() == worker
+        if (worker != null && !self) {
             // 读取循环有天然界（read 每轮 ≤100ms + 有限解码），线程必然退出；
             // 循环 join 直到退出或总超时，绝不带“可放弃的短超时”静默继续
             val deadline = System.currentTimeMillis() + JOIN_TIMEOUT_MS
@@ -112,7 +113,8 @@ class AudioCapture(
         }
         thread = null
         releaseRecorder()
-        return worker == null || !worker.isAlive
+        // 采集线程自身调用时本轮读循环返回后线程即退出，视为已退出（与 KDoc 契约一致）
+        return worker == null || self || !worker.isAlive
     }
 
     private fun releaseRecorder() {

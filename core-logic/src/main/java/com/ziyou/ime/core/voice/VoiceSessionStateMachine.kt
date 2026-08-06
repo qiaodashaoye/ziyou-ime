@@ -26,7 +26,8 @@ sealed class VoiceSessionEvent {
     /** 一句话经端点确认落段。 */
     data object UtteranceEnd : VoiceSessionEvent()
 
-    /** 静默超时（LISTENING 态=没说话；COOLDOWN 态=说完了）。 */
+    /** 静默超时（任何活跃态均自动收尾：LISTENING=没说话；SPEAKING=窗口内未断句；
+     * COOLDOWN=说完了）。 */
     data object SilenceTimeout : VoiceSessionEvent()
 
     /** 用户手动停止（任何状态下生效）。 */
@@ -46,6 +47,8 @@ sealed class VoiceSessionEvent {
  * ```
  * IDLE --Start--> LISTENING --SpeechDetected--> SPEAKING --UtteranceEnd--> COOLDOWN
  *                LISTENING --SilenceTimeout--> IDLE（自动收尾：什么都没录到）
+ *                SPEAKING  --SilenceTimeout--> IDLE（自动收尾：超时窗内未断句，
+ *                                        防止定时器断链后会话脱离超时保护）
  *                COOLDOWN  --SpeechDetected--> SPEAKING（用户续说）
  *                COOLDOWN  --SilenceTimeout--> IDLE（自动收尾：说完了）
  * 任意状态 --UserStop/Reset--> IDLE
@@ -97,7 +100,10 @@ class VoiceSessionStateMachine {
             }
 
             VoiceSessionEvent.SilenceTimeout -> when (phase) {
-                VoicePhase.LISTENING, VoicePhase.COOLDOWN -> {
+                // SPEAKING 也须响应：超时定时器在 onPartial 后会于 SPEAKING 态 arm，
+                // 若到期被忽略且不再续期（端点未如期断句），会话将永久脱离超时保护，
+                // 麦克风与解码线程无限运行——持续发热的主要逃逸口
+                VoicePhase.LISTENING, VoicePhase.SPEAKING, VoicePhase.COOLDOWN -> {
                     phase = VoicePhase.IDLE
                     autoStopped = true
                 }

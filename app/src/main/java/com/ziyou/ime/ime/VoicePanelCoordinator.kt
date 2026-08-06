@@ -3,6 +3,7 @@ package com.ziyou.ime.ime
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Looper
+import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewGroup
@@ -60,6 +61,10 @@ class VoicePanelCoordinator(
 
         /** 说话中/断句后静默超时：判定说完了，自动结束（ms） */
         private const val COOLDOWN_TIMEOUT_MS = 4_000L
+
+        /** 会话绝对时长上限：噪声环境下 partial 可能持续重 arm 静默定时器使会话
+         *  无限延长（麦克风+解码持续烧 CPU），到期后下一次定时器触发时强制收尾（ms） */
+        private const val MAX_SESSION_MS = 60_000L
     }
 
     /** 协调器需要 Service 提供的能力：视图容器访问与上屏出口。 */
@@ -106,6 +111,9 @@ class VoicePanelCoordinator(
 
     /** 静默超时任务（每次识别产出到达时重置） */
     private var silenceTimer: Runnable? = null
+
+    /** 本轮会话绝对时长截止点（[startListening] 时设置，硬超时兜底） */
+    private var sessionDeadlineMs = 0L
 
     /** 模型异步加载任务（面板关闭时取消） */
     private var modelLoadJob: Job? = null
@@ -162,21 +170,22 @@ class VoicePanelCoordinator(
      */
     fun close() {
         val current = panel ?: return
-        // 先注销静默定时器再置空面板（removeCallbacks 需要 view 引用，
-        // 否则残留 Runnable 会在下一轮新会话中误触发自动收尾）
+        // 无条件停止会话（幂等）：解码异常后 fsm 可能已回 IDLE 但采集线程仍在运行，
+        // 不得依赖 fsm.isActive 守卫，否则面板关闭后麦克风仍被占用。
+        // 先于 panel 置空执行，让尾段冲刷 onFinal 能同步落入 buffer 交付
+        engine.stopSession()
+        // 注销静默定时器：尾段 onFinal 可能刚重 arm，须在 stopSession 之后再清
+        // （removeCallbacks 需要 view 引用）
         current.removeCallbacks(silenceTimeoutAction)
         silenceTimer = null
-        panel = null
-        modelLoadJob?.cancel()
-        modelLoadJob = null
-        if (fsm.isActive) {
-            engine.stopSession()
-        }
-        fsm.onEvent(VoiceSessionEvent.Reset)
         // 尾段与历史确认段统一交付（AUTO 模式通常已在逐句 drain，此处只兜底残余）
         buffer.drainConfirmed().takeIf { it.isNotEmpty() }
             ?.let { host.commitVoiceTextToEditor(it) }
         buffer.reset()
+        fsm.onEvent(VoiceSessionEvent.Reset)
+        panel = null
+        modelLoadJob?.cancel()
+        modelLoadJob = null
         host.keyboardContainer()?.visibility = View.VISIBLE
         host.candidatesContainer()?.visibility = View.VISIBLE
         (current.parent as? ViewGroup)?.removeView(current)
@@ -222,6 +231,7 @@ class VoicePanelCoordinator(
             return
         }
         view.showState(VoicePanelView.State.Listening)
+        sessionDeadlineMs = SystemClock.uptimeMillis() + MAX_SESSION_MS
         armSilenceTimer(LISTENING_TIMEOUT_MS)
     }
 
@@ -253,6 +263,9 @@ class VoicePanelCoordinator(
         }
 
         override fun onError(message: String) {
+            // 引擎异常时会话已终止，但识别流等会话资源须到 stopSession 才释放；
+            // 引擎内部已在异常处停掉采集，此处补齐会话侧释放（幂等）
+            engine.stopSession()
             onMainThread {
                 val view = panel ?: return@onMainThread
                 fsm.onEvent(VoiceSessionEvent.UserStop)
@@ -262,11 +275,13 @@ class VoicePanelCoordinator(
         }
     }
 
-    /** 静默超时：投递给会话状态机，自动收尾则结束本轮。 */
+    /** 静默超时：投递给会话状态机，自动收尾则结束本轮；到达会话绝对时长
+     *  上限时无条件强制收尾（防噪声驱动的无限会话）。 */
     private val silenceTimeoutAction = Runnable {
         val view = panel ?: return@Runnable
         fsm.onEvent(VoiceSessionEvent.SilenceTimeout)
-        if (fsm.autoStopped) {
+        val hardTimeout = SystemClock.uptimeMillis() >= sessionDeadlineMs
+        if (fsm.autoStopped || hardTimeout) {
             engine.stopSession() // 尾段冲刷 → onFinal → 按策略交付
             view.showState(VoicePanelView.State.Idle)
         }

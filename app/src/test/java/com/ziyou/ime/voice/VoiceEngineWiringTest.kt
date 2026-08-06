@@ -7,6 +7,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -45,6 +46,35 @@ class VoiceEngineWiringTest {
         assertSame(fake, AppContainer.speechEngine)
         AppContainer.overrideSpeechEngine(null)
         assertTrue(AppContainer.speechEngine is SherpaOnnxEngine)
+    }
+
+    @Test
+    fun `release 后 speechEngine 返回全新可用实例`() {
+        // 回归：Service onDestroy 会 release 引擎归还 native 内存，但进程可能存活且
+        // Service 随后重建——已释放实例的 destroyed 是单向闩锁，若懒获取仍返回
+        // 旧实例，loadModel 将永远报「引擎已释放」，语音功能直到杀进程才恢复
+        val first = AppContainer.speechEngine
+        assertFalse(first.isReleased)
+        first.release()
+        assertTrue(first.isReleased)
+
+        val second = AppContainer.speechEngine
+        assertNotSame(first, second)
+        assertTrue(second is SherpaOnnxEngine)
+        assertFalse(second.isReleased)
+        assertFalse(second.isModelLoaded)
+        // 清理：避免已释放实例残留在容器内影响后续用例（下次访问会自动重建）
+        second.release()
+    }
+
+    @Test
+    fun `override 实例不受 release 重建逻辑影响`() {
+        val fake = FakeSpeechRecognizerEngine()
+        AppContainer.overrideSpeechEngine(fake)
+        fake.release()
+        // override 是显式注入，容器不得擅自动替换（即使已释放也由测试自己还原）
+        assertSame(fake, AppContainer.speechEngine)
+        assertTrue(fake.isReleased)
     }
 
     @Test

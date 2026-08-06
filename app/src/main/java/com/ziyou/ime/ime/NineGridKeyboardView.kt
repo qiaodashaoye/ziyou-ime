@@ -49,11 +49,10 @@ class NineGridKeyboardView @JvmOverloads constructor(
         private const val BOTTOM_TEXT_SIZE_SP = 14f
         /** Escape 键值（用于重输功能） */
         private const val ESCAPE_CODE = 0xff1b
-        /** 九宫格按键高度倍率：4 行均在本视图内渲染（底行已合入网格），
-         *  因此只需少量加高便于点击，避免整体键盘过高挤占屏幕 */
-        private const val T9_HEIGHT_FACTOR = 1.08f
-        /** 右侧功能列相对宽度（与截图版式一致，略窄于字母列） */
-        private const val FUNC_COL_WIDTH = 0.8f
+        /** 九宫格按键高度倍率：复用 T9 系列共享常量，与数字键盘保持一致 */
+        private const val T9_HEIGHT_FACTOR = T9_FAMILY_HEIGHT_FACTOR
+        /** 右侧功能列相对宽度：复用 T9 系列共享常量 */
+        private const val FUNC_COL_WIDTH = T9_FAMILY_FUNC_COL_WIDTH
     }
 
     /** 九宫格按键略高于标准键盘（四行布局，高度适度不挤占屏幕） */
@@ -128,19 +127,19 @@ class NineGridKeyboardView @JvmOverloads constructor(
         private set
 
     /** 单行按键高度（px，含高度倍率），供侧栏底部「符号」键对齐 */
-    val gridRowHeight: Float
+    override val gridRowHeight: Float
         get() = keyHeight * keyHeightMultiplier
 
     /** 网格首行按键顶部的 y 偏移（px），供侧栏列表顶部对齐 */
-    val gridTop: Float
+    override val gridTop: Float
         get() = keyboardPadding
 
     /** 网格行间距（px），供侧栏列表与底部「符号」键之间的间距对齐 */
-    val gridRowGap: Float
+    override val gridRowGap: Float
         get() = keyGap
 
     /** 第 4 行（底行）顶部相对本视图的 y 偏移（px），供侧栏底部「符号」键对齐 */
-    val bottomRowTop: Float
+    override val bottomRowTop: Float
         get() = keyboardPadding + 3 * (gridRowHeight + keyGap)
 
     override fun recalculateKeyPositions() {

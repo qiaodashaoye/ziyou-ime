@@ -49,7 +49,7 @@ class KeyboardLayoutManager(
     /**
      * 安装指定类型的键盘到容器，完成回调绑定、皮肤、缩放与布局组装。
      *
-     * 停靠形态下九宫格在键盘左侧挂载 [PinyinSideBarView]（`侧栏 : 网格 ≈ 18 : 82` 权重），
+     * 停靠形态下九宫格和数字键盘在键盘左侧挂载 [PinyinSideBarView]（`侧栏 : 网格 ≈ 18 : 82` 权重），
      * 侧栏高度与 4 行网格一致，并在布局完成后把底行几何同步给侧栏，
      * 使侧栏底部的「符号」键与网格底行水平对齐。
      *
@@ -75,16 +75,17 @@ class KeyboardLayoutManager(
         if (view is SymbolKeyboardView) {
             view.onSymbolInput = { value -> callbacks.onSideSymbolInput(value) }
         }
-        // 数字键盘：数字/小数点/正负号同样经 Service 统一 commit 出口直接上屏
+        // 数字键盘：数字/小数点同样经 Service 统一 commit 出口直接上屏
         if (view is NumberKeyboardView) {
             view.onNumberInput = { value -> callbacks.onSideSymbolInput(value) }
         }
         container.removeAllViews()
 
-        // 悬浮形态的九宫格：无左侧栏，底行自带「符」键保留符号入口，
-        // 拼音消歧仍可经候选栏完成（首版简化，窄版侧栏留待二期）
-        if (floating && type == KeyboardType.NINE_GRID) {
-            (view as NineGridKeyboardView).setFloatingLayout(true)
+        // 悬浮形态（九宫格/数字键盘）：无左侧栏，视图独立渲染
+        if (floating && (type == KeyboardType.NINE_GRID || type == KeyboardType.NUMBER)) {
+            if (type == KeyboardType.NINE_GRID) {
+                (view as NineGridKeyboardView).setFloatingLayout(true)
+            }
             view.layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT
@@ -93,7 +94,8 @@ class KeyboardLayoutManager(
             return Installed(view, null)
         }
 
-        if (type != KeyboardType.NINE_GRID) {
+        // 非九宫格/数字键盘类型：无侧栏，直接放入容器
+        if (type != KeyboardType.NINE_GRID && type != KeyboardType.NUMBER) {
             view.layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT
@@ -102,11 +104,24 @@ class KeyboardLayoutManager(
             return Installed(view, null)
         }
 
-        // 停靠形态：4 行网格（字母键 + 右侧功能列 + 底行），符号入口位于左侧栏
-        val grid = view as NineGridKeyboardView
-        grid.setFloatingLayout(false)
+        // 停靠形态：4 行网格 + 左侧拼音侧栏（九宫格/数字键盘共享装配逻辑）
+        if (type == KeyboardType.NINE_GRID) {
+            (view as NineGridKeyboardView).setFloatingLayout(false)
+        }
+        return installWithSideBar(container, view, skin)
+    }
 
-        // 左侧拼音侧栏（高度与 4 行网格一致，底部「符号」键对齐网格底行）
+    /**
+     * 为停靠形态的九宫格/数字键盘安装左侧符号栏。
+     *
+     * 两种键盘共享同一套装配逻辑：横向 [侧栏 weight=1.8][网格 weight=8.2]，
+     * 布局完成后把网格底行几何同步给侧栏，使侧栏底部「符号」键与网格底行水平对齐。
+     */
+    private fun installWithSideBar(
+        container: FrameLayout,
+        view: BaseKeyboardView,
+        skin: com.ziyou.ime.skin.SkinTheme
+    ): Installed {
         val sideBar = PinyinSideBarView(context).apply {
             applySkin(skin)
             setSideSymbols(SideSymbolRepository.getPinyinSideSymbols(context))
@@ -124,17 +139,17 @@ class KeyboardLayoutManager(
             )
         }
         root.addView(sideBar, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.8f))
-        grid.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 8.2f)
-        root.addView(grid)
+        view.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 8.2f)
+        root.addView(view)
         container.addView(root)
 
         // 布局完成后把网格底行几何同步给侧栏，使侧栏底部「符号」键与底行对齐
-        grid.viewTreeObserver.addOnGlobalLayoutListener(object :
+        view.viewTreeObserver.addOnGlobalLayoutListener(object :
             ViewTreeObserver.OnGlobalLayoutListener {
             override fun onGlobalLayout() {
-                grid.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                view.viewTreeObserver.removeOnGlobalLayoutListener(this)
                 sideBar.setGridGeometry(
-                    grid.gridTop, grid.gridRowGap, grid.bottomRowTop, grid.gridRowHeight
+                    view.gridTop, view.gridRowGap, view.bottomRowTop, view.gridRowHeight
                 )
             }
         })

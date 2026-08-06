@@ -32,6 +32,12 @@ class QwertyKeyboardView @JvmOverloads constructor(
     var shiftState: ShiftState = ShiftState.OFF
         private set
 
+    // ===== 间距收窄：10 列窄键布局下收紧间距与留白，把让出的宽度还给键面 =====
+    // （皮肤级 keyGapDp / keyboardPaddingDp 为全体键盘共用，九宫格大键距是
+    //   投影落脚空间等刻意设计，故在此以布局级倍率单独收窄全键盘）
+    override val keyGapScale: Float get() = QWERTY_GAP_SCALE
+    override val keyboardPaddingScale: Float get() = QWERTY_GAP_SCALE
+
     // ===== 键盘布局定义（width = 跨列数，各行合计 10 列填满整行）=====
 
     /** 以第 1 行 10 个字母键为基准的列网格，各行严格对齐同一套列 */
@@ -134,5 +140,10 @@ class QwertyKeyboardView @JvmOverloads constructor(
                 }
             }
         }
+    }
+
+    private companion object {
+        /** 全键盘间距/内边距收窄倍率：键宽 ≈ +14%（360dp 屏：28.3dp → 32.2dp） */
+        const val QWERTY_GAP_SCALE = 0.5f
     }
 }

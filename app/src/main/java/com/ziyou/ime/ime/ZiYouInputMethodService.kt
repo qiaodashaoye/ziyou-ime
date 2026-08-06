@@ -937,6 +937,11 @@ class ZiYouInputMethodService : InputMethodService() {
             // 同步归还 native 堆持留的空闲页（部署残留，真机实测 20~27MB）
             if (RimeNative.isLoaded) RimeNative.trimNativeHeap()
         }
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+            // 高水位连语音识别模型（数百 MB native）一并释放；面板已在上方关闭，
+            // 引擎 release 后经 AppContainer 懒获取可重建，不影响后续使用
+            AppContainer.speechEngine.release()
+        }
     }
 
     // ===== 物理按键处理 =====
@@ -1394,7 +1399,10 @@ class ZiYouInputMethodService : InputMethodService() {
         val preview = buildPinyinPreview(context)
         preeditOverlay?.setText(preview ?: context?.composition?.preedit)
         // 左侧拼音侧栏：有候选拼音则展示拼音，否则展示自定义符号
-        pinyinSideBar?.setPinyinCandidates(pinyinHints)
+        // 仅在九宫格模式下更新拼音候选；数字键盘侧栏始终为符号模式
+        if (currentKeyboardType == KeyboardType.NINE_GRID) {
+            pinyinSideBar?.setPinyinCandidates(pinyinHints)
+        }
     }
 
     /**

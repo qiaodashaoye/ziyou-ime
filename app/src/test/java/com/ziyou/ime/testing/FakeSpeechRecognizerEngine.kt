@@ -32,6 +32,8 @@ class FakeSpeechRecognizerEngine : SpeechRecognizerEngine {
 
     override val isModelLoaded: Boolean get() = loadedModelDir != null && loadModelError == null
 
+    override val isReleased: Boolean get() = released
+
     override fun isModelLoadedFor(modelDir: File): Boolean =
         isModelLoaded && loadedModelDir?.path == modelDir.path
 

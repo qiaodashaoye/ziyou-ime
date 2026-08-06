@@ -71,12 +71,15 @@ class VoiceSessionStateMachineTest {
     }
 
     @Test
-    fun `SPEAKING 态的 SilenceTimeout 被忽略`() {
-        // 说话过程中的短暂停顿不应打断会话（端点判定交给识别引擎）
+    fun `SPEAKING 态的 SilenceTimeout 也自动收尾`() {
+        // 回归：超时定时器会在 onPartial 后于 SPEAKING 态 arm；若到期被忽略且不再续期
+        // （端点未如期断句），会话将永久脱离超时保护，麦克风与解码无限运行导致持续发热
         fsm.onEvent(VoiceSessionEvent.Start)
         fsm.onEvent(VoiceSessionEvent.SpeechDetected)
-        assertEquals(VoicePhase.SPEAKING, fsm.onEvent(VoiceSessionEvent.SilenceTimeout))
-        assertFalse(fsm.autoStopped)
+        assertEquals(VoicePhase.SPEAKING, fsm.phase)
+        assertEquals(VoicePhase.IDLE, fsm.onEvent(VoiceSessionEvent.SilenceTimeout))
+        assertTrue(fsm.autoStopped)
+        assertFalse(fsm.isActive)
     }
 
     @Test
