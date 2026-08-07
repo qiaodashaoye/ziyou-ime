@@ -21,12 +21,16 @@ val releaseAbis = (project.findProperty("ziyou.abis") as String?)
 
 android {
     namespace = "com.ziyou.ime"
-    compileSdk = 35
+    // compileSdk 37 为 androidx.core 1.19 / lifecycle 2.11 / compose-bom 2026.06 的硬性要求；
+    // targetSdk 保持 35 不变，不改变运行时行为
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.ziyou.ime"
         minSdk = 24
-        targetSdk = 35
+        // targetSdk 36：Google Play 自 2026/8/31 起要求 target API 36+；
+        // 16KB 页面对齐已通过链接参数启用，满足 Android 16 对 target 36 应用的强制要求
+        targetSdk = 36
         // versionCode 变更会触发 AssetDeployer 重新部署（schema 变更/predict.db 需随升版生效）
         versionCode = 1
         versionName = "1.0.0"
@@ -71,6 +75,7 @@ android {
                 enable = false
             }
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -138,12 +143,16 @@ abstract class SyncDevDocTask : DefaultTask() {
 }
 
 val syncSkillDevGuide = tasks.register<SyncDevDocTask>("syncSkillDevGuide") {
+    description = "同步 docs/自定义技能开发教程.md 到 assets/docs/（App 内文档页展示）"
+    group = "ziyou"
     guideFile.set(rootProject.file("docs/自定义技能开发教程.md"))
     destName.set("skill_dev_guide.md")
     outputDir.set(layout.buildDirectory.dir("generated/skillDocsAssets"))
 }
 
 val syncSkinDevGuide = tasks.register<SyncDevDocTask>("syncSkinDevGuide") {
+    description = "同步 docs/自定义皮肤开发指南.md 到 assets/docs/（App 内文档页展示）"
+    group = "ziyou"
     guideFile.set(rootProject.file("docs/自定义皮肤开发指南.md"))
     destName.set("skin_dev_guide.md")
     outputDir.set(layout.buildDirectory.dir("generated/skinDocsAssets"))

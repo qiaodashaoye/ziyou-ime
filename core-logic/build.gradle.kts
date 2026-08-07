@@ -11,7 +11,8 @@ plugins {
  */
 android {
     namespace = "com.ziyou.ime.corelogic"
-    compileSdk = 35
+    // 与 :app 对齐：compileSdk 37（androidx 新库硬性要求），模块内仍为纯逻辑无 framework 依赖
+    compileSdk = 37
 
     defaultConfig {
         minSdk = 24
