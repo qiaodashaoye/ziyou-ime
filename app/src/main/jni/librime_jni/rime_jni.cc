@@ -8,6 +8,7 @@
 
 #include <android/log.h>
 #include <malloc.h>
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -45,7 +46,7 @@ static void declare_librime_module_dependencies() {
 // Rime引擎单例封装，管理会话生命周期和所有核心操作
 class Rime {
  public:
-  Rime() : rime(rime_get_api()), initialized_(false) {}
+  Rime() : rime(rime_get_api()), initialized_(false) {}  // NOLINT
   Rime(Rime const &) = delete;
   void operator=(Rime const &) = delete;
 
@@ -54,7 +55,7 @@ class Rime {
     return instance;
   }
 
-  bool isInitialized() const { return initialized_ && rime; }
+  bool isInitialized() const { return initialized_.load() && rime; }
 
   void startup(bool fullCheck,
                const RimeNotificationHandler &notificationHandler) {
@@ -82,7 +83,7 @@ class Rime {
     rime->initialize(&traits);
     rime->set_notification_handler(notificationHandler, GlobalRef->jvm);
     rime->start_maintenance(fullCheck);
-    initialized_ = true;
+    initialized_.store(true);
     __android_log_print(ANDROID_LOG_INFO, "RimeJNI",
                         "Rime engine started successfully");
   }
@@ -104,7 +105,7 @@ class Rime {
     auto input = rime->get_input(s);
     if (!input) return false;
     std::string str(input);
-    if (caretPos < 0 || caretPos + length > (int)str.size()) return false;
+    if (caretPos < 0 || caretPos + length > static_cast<int>(str.size())) return false;
     str.replace(caretPos, length, replacement);
     rime->set_input(s, str.c_str());
     rime->set_caret_pos(s, caretPos + strlen(replacement));
@@ -168,7 +169,7 @@ class Rime {
       result = SchemaItem::fromCList(list);
       rime->free_schema_list(&list);
     }
-    return std::move(result);
+    return result;
   }
 
   bool selectSchema(std::string_view schemaId) {
@@ -208,7 +209,7 @@ class Rime {
       }
       rime->candidate_list_end(&iter);
     }
-    return std::move(result);
+    return result;
   }
 
   std::tuple<int, int, std::vector<CandidateProto>> getBulkCandidates() {
@@ -229,7 +230,7 @@ class Rime {
   void exit() {
     session_.reset();
     rime->finalize();
-    initialized_ = false;
+    initialized_.store(false);
   }
 
   bool sync() {
@@ -239,7 +240,7 @@ class Rime {
 
  private:
   RimeApi *rime;
-  bool initialized_;
+  std::atomic<bool> initialized_;
   std::shared_ptr<SessionHolder> session_;
 
   RimeSessionId session(bool requestNewSession = true) {

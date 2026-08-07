@@ -8,7 +8,6 @@ import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.inputmethodservice.InputMethodService
 import android.os.Build
-import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
@@ -29,9 +28,7 @@ import com.ziyou.ime.core.RimeMessage
 import com.ziyou.ime.core.RimeNative
 import com.ziyou.ime.daemon.RimeEngine
 import com.ziyou.ime.core.t9.KeyRecordStack
-import com.ziyou.ime.data.AssociationManager
 import com.ziyou.ime.data.ClipboardHistoryRepository
-import com.ziyou.ime.data.SideSymbolRepository
 import com.ziyou.ime.data.SymbolRepository
 import com.ziyou.ime.di.AppContainer
 import com.ziyou.ime.level.LevelRepository
@@ -59,13 +56,6 @@ class ZiYouInputMethodService : InputMethodService() {
         // 键盘布局偏好持久化
         private const val PREF_NAME = "ziyou_keyboard"
         private const val KEY_KEYBOARD_TYPE = "keyboard_type"
-
-        /** 等待引擎就绪的轮询间隔（ms） */
-        private const val ENGINE_READY_POLL_MS = 50L
-        /** 视图同步类操作等待引擎就绪的超时（ms）：词库重部署可能耗时较长 */
-        private const val ENGINE_READY_TIMEOUT_MS = 10_000L
-        /** 按键处理等待引擎就绪的短超时（ms）：避免按键响应长时间挂起 */
-        private const val KEY_ENGINE_READY_TIMEOUT_MS = 3_000L
     }
 
     /** 服务协程作用域，生命周期跟随Service */
@@ -96,7 +86,44 @@ class ZiYouInputMethodService : InputMethodService() {
 
         override fun onModeSwitched(mode: DisplayMode) {
             setInputView(buildInputView(mode))
-            scheduleEngineSync()
+            engineSync.scheduleEngineSync()
+        }
+    }
+
+    /** 面板公共宿主：统一提供 5 个共享方法实现，各面板 Host 委托到此避免重复。 */
+    private val basePanelHost = object : BasePanelHost {
+        override fun contentLayout() = this@ZiYouInputMethodService.contentLayout
+        override fun keyboardContainer() = this@ZiYouInputMethodService.keyboardContainer
+        override fun candidatesContainer() = this@ZiYouInputMethodService.candidatesContainer
+        override fun keyboardView() = this@ZiYouInputMethodService.keyboardView
+        override fun onPanelWillOpen() = clearCompositionForPanel()
+    }
+
+    /** 引擎状态同步控制器（布局切换 → 方案/模式同步 → UI 刷新，从 Service 拆分） */
+    private val engineSync by lazy {
+        EngineSyncController(engineSyncHost)
+    }
+
+    /** 提供给 [EngineSyncController] 的回调：引擎访问、视图刷新与键盘管理。 */
+    private val engineSyncHost = object : EngineSyncController.Host {
+        override val rime: RimeEngine get() = this@ZiYouInputMethodService.rime
+        override val serviceScope get() = this@ZiYouInputMethodService.serviceScope
+        override val currentKeyboardType get() = this@ZiYouInputMethodService.currentKeyboardType
+        override val keyRecordStack get() = this@ZiYouInputMethodService.keyRecordStack
+        override val serviceContext get() = this@ZiYouInputMethodService
+        override fun installKeyboard(type: KeyboardType) =
+            this@ZiYouInputMethodService.installKeyboard(type)
+        override fun saveKeyboardType(type: KeyboardType) =
+            this@ZiYouInputMethodService.saveKeyboardType(type)
+        override fun clearPreeditPreview() {
+            this@ZiYouInputMethodService.preeditOverlay?.setText(null)
+        }
+        override suspend fun renderFromEngine() {
+            val ctx = this@ZiYouInputMethodService.rime.api.getContext()
+            this@ZiYouInputMethodService.renderContext(ctx)
+        }
+        override fun setKeyboardChineseMode(isChinese: Boolean) {
+            this@ZiYouInputMethodService.keyboardView?.isChineseMode = isChinese
         }
     }
 
@@ -107,28 +134,22 @@ class ZiYouInputMethodService : InputMethodService() {
 
     /** 提供给 [SkillPanelCoordinator] 的宿主能力：容器访问、上屏出口与输入路由切换。 */
     private val skillPanelHost = object : SkillPanelCoordinator.Host {
-        override fun contentLayout(): LinearLayout? = this@ZiYouInputMethodService.contentLayout
-
-        override fun keyboardContainer(): FrameLayout? =
-            this@ZiYouInputMethodService.keyboardContainer
-
-        override fun candidatesContainer(): LinearLayout? =
-            this@ZiYouInputMethodService.candidatesContainer
+        override fun contentLayout() = basePanelHost.contentLayout()
+        override fun keyboardContainer() = basePanelHost.keyboardContainer()
+        override fun candidatesContainer() = basePanelHost.candidatesContainer()
+        override fun keyboardView() = basePanelHost.keyboardView()
+        override fun onPanelWillOpen() = basePanelHost.onPanelWillOpen()
 
         override fun isFloatingMode(): Boolean =
             displayModeCtrl.currentMode == DisplayMode.FLOATING
 
         override fun currentEditorInfo(): EditorInfo? = currentInputEditorInfo
 
-        override fun keyboardView(): BaseKeyboardView? = this@ZiYouInputMethodService.keyboardView
-
         override fun commitText(text: String) = inputLogic.commitSideSymbol(text)
 
         override fun setCommitTarget(target: InputLogicController.CommitTarget?) {
             inputLogic.commitTarget = target
         }
-
-        override fun onPanelWillOpen() = clearCompositionForPanel()
 
         override fun editorAcceptsImage(): Boolean = inputLogic.acceptsImageContent()
 
@@ -149,15 +170,11 @@ class ZiYouInputMethodService : InputMethodService() {
 
     /** 提供给 [AiPanelCoordinator] 的宿主能力：容器访问与输入路由切换。 */
     private val aiPanelHost = object : AiPanelCoordinator.Host {
-        override fun contentLayout(): LinearLayout? = this@ZiYouInputMethodService.contentLayout
-
-        override fun keyboardContainer(): FrameLayout? =
-            this@ZiYouInputMethodService.keyboardContainer
-
-        override fun candidatesContainer(): LinearLayout? =
-            this@ZiYouInputMethodService.candidatesContainer
-
-        override fun keyboardView(): BaseKeyboardView? = this@ZiYouInputMethodService.keyboardView
+        override fun contentLayout() = basePanelHost.contentLayout()
+        override fun keyboardContainer() = basePanelHost.keyboardContainer()
+        override fun candidatesContainer() = basePanelHost.candidatesContainer()
+        override fun keyboardView() = basePanelHost.keyboardView()
+        override fun onPanelWillOpen() = basePanelHost.onPanelWillOpen()
 
         override fun setCommitTarget(target: InputLogicController.CommitTarget?) {
             inputLogic.commitTarget = target
@@ -168,8 +185,6 @@ class ZiYouInputMethodService : InputMethodService() {
         override fun commitAnswerImageToEditor(content: CharSequence) = submitAnswerImage(content)
 
         override fun editorAcceptsImage(): Boolean = inputLogic.acceptsImageContent()
-
-        override fun onPanelWillOpen() = clearCompositionForPanel()
     }
 
     /** 涂鸦画板面板协调器（面板生命周期与键盘收放编排，与 AI/技能面板同一拆分纪律） */
@@ -178,27 +193,21 @@ class ZiYouInputMethodService : InputMethodService() {
     }
 
     /** 提供给 [DoodlePanelCoordinator] 的宿主能力：容器访问与图片发送出口。 */
-    private val doodlePanelHost = object : DoodlePanelCoordinator.Host {
-        override fun contentLayout(): LinearLayout? = this@ZiYouInputMethodService.contentLayout
-
-        override fun keyboardContainer(): FrameLayout? =
-            this@ZiYouInputMethodService.keyboardContainer
-
-        override fun candidatesContainer(): LinearLayout? =
-            this@ZiYouInputMethodService.candidatesContainer
-
-        override fun keyboardView(): BaseKeyboardView? = this@ZiYouInputMethodService.keyboardView
+    private val doodlePanelHost by lazy { object : DoodlePanelCoordinator.Host {
+        override fun contentLayout() = basePanelHost.contentLayout()
+        override fun keyboardContainer() = basePanelHost.keyboardContainer()
+        override fun candidatesContainer() = basePanelHost.candidatesContainer()
+        override fun keyboardView() = basePanelHost.keyboardView()
+        override fun onPanelWillOpen() = basePanelHost.onPanelWillOpen()
 
         override fun sendDoodleImage(snapshot: Bitmap) =
-            sendDoodleAsImage(snapshot)
+            imageHelper.submitDoodle(snapshot)
 
         override fun saveDoodleImage(snapshot: Bitmap) =
-            saveDoodleAsImage(snapshot)
+            imageHelper.submitDoodle(snapshot)
 
         override fun imageSupportsSend(): Boolean = inputLogic.acceptsImageContent()
-
-        override fun onPanelWillOpen() = clearCompositionForPanel()
-    }
+    } }
 
     /** 粘贴板历史面板协调器（面板生命周期与键盘收放编排，与 AI/技能/涂鸦面板同一拆分纪律） */
     private val clipboardPanels by lazy {
@@ -207,22 +216,16 @@ class ZiYouInputMethodService : InputMethodService() {
 
     /** 提供给 [ClipboardPanelCoordinator] 的宿主能力：容器访问与粘贴出口。 */
     private val clipboardPanelHost = object : ClipboardPanelCoordinator.Host {
-        override fun contentLayout(): LinearLayout? = this@ZiYouInputMethodService.contentLayout
-
-        override fun keyboardContainer(): FrameLayout? =
-            this@ZiYouInputMethodService.keyboardContainer
-
-        override fun candidatesContainer(): LinearLayout? =
-            this@ZiYouInputMethodService.candidatesContainer
-
-        override fun keyboardView(): BaseKeyboardView? = this@ZiYouInputMethodService.keyboardView
+        override fun contentLayout() = basePanelHost.contentLayout()
+        override fun keyboardContainer() = basePanelHost.keyboardContainer()
+        override fun candidatesContainer() = basePanelHost.candidatesContainer()
+        override fun keyboardView() = basePanelHost.keyboardView()
+        override fun onPanelWillOpen() = basePanelHost.onPanelWillOpen()
 
         override fun isFloatingMode(): Boolean =
             displayModeCtrl.currentMode == DisplayMode.FLOATING
 
         override fun pasteToEditor(text: String) = inputLogic.commitDirectToEditor(text)
-
-        override fun onPanelWillOpen() = clearCompositionForPanel()
     }
 
     /** 工具面板协调器（Logo 键入口，面板生命周期与键盘收放编排，与其他面板同一拆分纪律） */
@@ -232,19 +235,13 @@ class ZiYouInputMethodService : InputMethodService() {
 
     /** 提供给 [ToolPanelCoordinator] 的宿主能力：容器访问与功能码分发出口。 */
     private val toolPanelHost = object : ToolPanelCoordinator.Host {
-        override fun contentLayout(): LinearLayout? = this@ZiYouInputMethodService.contentLayout
-
-        override fun keyboardContainer(): FrameLayout? =
-            this@ZiYouInputMethodService.keyboardContainer
-
-        override fun candidatesContainer(): LinearLayout? =
-            this@ZiYouInputMethodService.candidatesContainer
-
-        override fun keyboardView(): BaseKeyboardView? = this@ZiYouInputMethodService.keyboardView
+        override fun contentLayout() = basePanelHost.contentLayout()
+        override fun keyboardContainer() = basePanelHost.keyboardContainer()
+        override fun candidatesContainer() = basePanelHost.candidatesContainer()
+        override fun keyboardView() = basePanelHost.keyboardView()
+        override fun onPanelWillOpen() = basePanelHost.onPanelWillOpen()
 
         override fun dispatchToolKey(keyCode: Int) = handleSoftKeyPress(keyCode, 0)
-
-        override fun onPanelWillOpen() = clearCompositionForPanel()
     }
 
     /** 键盘选择面板协调器（功能栏「键盘切换」入口，与其他面板同一拆分纪律） */
@@ -254,23 +251,17 @@ class ZiYouInputMethodService : InputMethodService() {
 
     /** 提供给 [KeyboardPickerCoordinator] 的宿主能力：容器访问与布局切换出口。 */
     private val keyboardPickerHost = object : KeyboardPickerCoordinator.Host {
-        override fun contentLayout(): LinearLayout? = this@ZiYouInputMethodService.contentLayout
-
-        override fun keyboardContainer(): FrameLayout? =
-            this@ZiYouInputMethodService.keyboardContainer
-
-        override fun candidatesContainer(): LinearLayout? =
-            this@ZiYouInputMethodService.candidatesContainer
-
-        override fun keyboardView(): BaseKeyboardView? = this@ZiYouInputMethodService.keyboardView
+        override fun contentLayout() = basePanelHost.contentLayout()
+        override fun keyboardContainer() = basePanelHost.keyboardContainer()
+        override fun candidatesContainer() = basePanelHost.candidatesContainer()
+        override fun keyboardView() = basePanelHost.keyboardView()
+        override fun onPanelWillOpen() = basePanelHost.onPanelWillOpen()
 
         override fun currentKeyboardType(): KeyboardType =
             this@ZiYouInputMethodService.currentKeyboardType
 
         override fun switchKeyboard(type: KeyboardType) =
             this@ZiYouInputMethodService.switchKeyboard(type)
-
-        override fun onPanelWillOpen() = clearCompositionForPanel()
     }
 
     /** 语音输入面板协调器（会话编排与键盘收放，与其他面板同一拆分纪律） */
@@ -280,22 +271,16 @@ class ZiYouInputMethodService : InputMethodService() {
 
     /** 提供给 [VoicePanelCoordinator] 的宿主能力：容器访问与语音文本直达上屏出口。 */
     private val voicePanelHost = object : VoicePanelCoordinator.Host {
-        override fun contentLayout(): LinearLayout? = this@ZiYouInputMethodService.contentLayout
-
-        override fun keyboardContainer(): FrameLayout? =
-            this@ZiYouInputMethodService.keyboardContainer
-
-        override fun candidatesContainer(): LinearLayout? =
-            this@ZiYouInputMethodService.candidatesContainer
-
-        override fun keyboardView(): BaseKeyboardView? = this@ZiYouInputMethodService.keyboardView
+        override fun contentLayout() = basePanelHost.contentLayout()
+        override fun keyboardContainer() = basePanelHost.keyboardContainer()
+        override fun candidatesContainer() = basePanelHost.candidatesContainer()
+        override fun keyboardView() = basePanelHost.keyboardView()
+        override fun onPanelWillOpen() = basePanelHost.onPanelWillOpen()
 
         override fun isFloatingMode(): Boolean =
             displayModeCtrl.currentMode == DisplayMode.FLOATING
 
         override fun commitVoiceTextToEditor(text: String) = inputLogic.commitDirectToEditor(text)
-
-        override fun onPanelWillOpen() = clearCompositionForPanel()
 
         override fun openVoiceSettings(requestPermission: Boolean) {
             val intent = Intent(this@ZiYouInputMethodService, SettingsActivity::class.java).apply {
@@ -329,6 +314,21 @@ class ZiYouInputMethodService : InputMethodService() {
         }
     }
 
+    /**
+     * 关闭全部面板（技能 / AI / 涂鸦 / 粘贴板 / 工具 / 键盘选择 / 语音）。
+     * 各 close 均幂等，已关闭的面板不受影响。供面板互斥切换、视图重建、
+     * 内存回收与 Service 销毁等场景统一调用。
+     */
+    private fun closeAllPanels() {
+        skillPanels.close()
+        aiPanels.close()
+        doodlePanels.close()
+        clipboardPanels.close()
+        toolPanels.close()
+        keyboardPickers.close()
+        voicePanels.close()
+    }
+
     /** 输入视图内容根容器（技能面板/编码区/候选/键盘 自上而下堆叠） */
     private var contentLayout: LinearLayout? = null
 
@@ -340,10 +340,6 @@ class ZiYouInputMethodService : InputMethodService() {
 
     /** 进入数字键盘前的布局类型，用于「返回」键恢复（数字键盘为临时面板） */
     private var keyboardBeforeNumber: KeyboardType? = null
-
-    /** 九宫格“中→英”进入 QWERTY 英文前的布局，用于英→中返回原布局
-     *  （null 表示非九宫格中→英入口；任何手动布局切换都会清除，避免陈旧恢复） */
-    private var qwertyEnglishOrigin: KeyboardType? = null
 
     /** 候选词视图引用 */
     private var candidatesView: SimpleCandidatesView? = null
@@ -357,19 +353,8 @@ class ZiYouInputMethodService : InputMethodService() {
     /** 九宫格左侧拼音侧栏引用（仅九宫格布局下存在） */
     private var pinyinSideBar: PinyinSideBarView? = null
 
-    /**
-     * 九宫格“中→英”专用标志。
-     * 当为 true 时，applyEngineForKeyboard 强制设置 ascii_mode=true，
-     * handleSoftKeyPress 跳过 KEYCODE_SWITCH_LANGUAGE 的异步 toggle，避免竞态。
-     */
-    private var pendingEnglishMode = false
-
     /** 九宫格输入状态追踪栈（拼音消歧与智能回退） */
     private val keyRecordStack = KeyRecordStack()
-
-    /** 引擎状态同步任务（latest-wins 串行化：新同步请求到来时取消上一次，
-     *  避免快速切换键盘/部署完成/形态切换的并发同步交错导致迟到写入） */
-    private var engineSyncJob: Job? = null
 
     /** 输入逻辑控制器（与 Rime 交互、上屏、刷新 UI），经 DI 容器获取引擎与上屏监听。 */
     private val inputLogic by lazy {
@@ -388,6 +373,15 @@ class ZiYouInputMethodService : InputMethodService() {
 
         override fun renderContext(context: ContextProto?) =
             this@ZiYouInputMethodService.renderContext(context)
+    }
+
+    /** 图片发送/保存辅助类（AI 答案图 + 涂鸦快照，收敛 Service 内四个相似方法）。 */
+    private val imageHelper: ImageCommitHelper by lazy {
+        ImageCommitHelper(
+            this, serviceScope, inputLogic,
+            onDoodleSent = { doodlePanels.close() },
+            onDoodleSaved = { doodlePanels.close() }
+        )
     }
 
     // ===== 生命周期 =====
@@ -488,13 +482,8 @@ class ZiYouInputMethodService : InputMethodService() {
      * 形态切换（[switchDisplayMode]）时也经本方法重建，与 onCreateInputView 同源。
      */
     private fun buildInputView(mode: DisplayMode): View {
-        // 重建前释放技能/AI/涂鸦/粘贴板/工具/语音面板（旧容器即将废弃，WebView/进行中请求/录音会话必须显式释放）
-        skillPanels.close()
-        aiPanels.close()
-        doodlePanels.close()
-        clipboardPanels.close()
-        toolPanels.close()
-        voicePanels.close()
+        // 重建前释放全部面板（旧容器即将废弃，WebView/进行中请求/录音会话必须显式释放）
+        closeAllPanels()
         val skin = SkinManager.getCurrentSkin(this)
         // 悬浮形态下键盘/候选/编码区统一缩放，停靠形态保持 1.0 零影响
         val scale = if (mode == DisplayMode.FLOATING) DisplayModeManager.FLOATING_SCALE else 1f
@@ -664,163 +653,23 @@ class ZiYouInputMethodService : InputMethodService() {
     }
 
     /**
-     * 九宫格“中→英”专用切换：强制 ascii_mode=true 并切到 QWERTY。
+     * 九宫格"中→英"专用切换：强制 ascii_mode=true 并切到 QWERTY。
      * 不走 handleSoftKeyPress 异步路径，避免与 applyEngineForKeyboard 竞态。
      * 同时记录进入前布局，供 QWERTY 上英→中时返回原布局（如九宫格）。
      */
     private fun switchToQwertyEnglish() {
-        pendingEnglishMode = true
-        val origin = currentKeyboardType
-        switchKeyboard(KeyboardType.QWERTY)
-        // 在 switchKeyboard 之后记录（switchKeyboard 会统一清除该标记）
-        qwertyEnglishOrigin = origin
+        engineSync.switchToQwertyEnglish()
     }
 
     /**
      * 切换键盘布局，重建视图并同步方案 / 中英文模式 / 编码区。
+     * 委托 [EngineSyncController.switchKeyboard] 实现。
      */
     private fun switchKeyboard(type: KeyboardType) {
-        // 任何布局切换都使“中→英”的英→中返回标记失效（经其他路径手动切换后不再自动返回）
-        qwertyEnglishOrigin = null
-        if (type == currentKeyboardType && keyboardView != null) return
-        keyRecordStack.clear()
-        installKeyboard(type)
-        saveKeyboardType(type)
-        // 清除切换前残留的预览
-        preeditOverlay?.setText(null)
-        scheduleEngineSync()
+        engineSync.switchKeyboard(type)
     }
 
-    /**
-     * 等待 Rime 引擎就绪（初始化完成）。
-     *
-     * 词库下载/启用后 [com.ziyou.ime.daemon.RimeSession.redeploy] 会销毁并重建引擎，
-     * 窗口期内 `rime.api` 直接抛 IllegalStateException。所有非热路径的引擎访问
-     * （状态同步、模式切换）先经本方法等待，避免在重部署期间直接失败且无重试。
-     *
-     * @return true 表示引擎已就绪；false 表示等待超时（调用方应放弃本次操作，
-     *         由部署完成消息触发的重同步兑底）
-     */
-    private suspend fun awaitEngineReady(timeoutMs: Long): Boolean {
-        val deadline = SystemClock.elapsedRealtime() + timeoutMs
-        while (!rime.initialized) {
-            if (SystemClock.elapsedRealtime() >= deadline) return false
-            delay(ENGINE_READY_POLL_MS)
-        }
-        return true
-    }
-
-    /**
-     * 调度一次引擎状态同步（latest-wins）：取消进行中的旧任务，等引擎就绪后
-     * 按「执行时」的当前键盘类型执行 [applyEngineForKeyboard]。
-     * 所有入口（键盘切换 / 获焦 / 部署完成 / 形态与主题切换 / 方案一致性守护）
-     * 共用本方法，串行化消除并发同步交错导致的迟到写入（如快速
-     * 九宫格→全键盘切换时，滞后的九宫格同步把引擎切回 t9）。
-     *
-     * @param timeoutMs 等待引擎就绪的超时；超时放弃本次，由部署完成消息触发的重同步兑底
-     * @param beforeSync 引擎就绪后、同步前的前置操作（如 onStartInputView 清编码）
-     */
-    private fun scheduleEngineSync(
-        timeoutMs: Long = KEY_ENGINE_READY_TIMEOUT_MS,
-        beforeSync: (suspend () -> Unit)? = null
-    ) {
-        engineSyncJob?.cancel()
-        engineSyncJob = serviceScope.launch {
-            try {
-                if (!awaitEngineReady(timeoutMs)) {
-                    Log.w(TAG, "引擎状态同步放弃：Rime引擎未就绪（可能正在重新部署，待部署完成消息重同步）")
-                    return@launch
-                }
-                beforeSync?.invoke()
-                applyEngineForKeyboard(currentKeyboardType)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.w(TAG, "引擎状态同步异常: ${e.message}")
-                // 同步失败（如重部署窗口期 rime.api 抛异常）时清除中→英标志，
-                // 避免残留的 pendingEnglishMode 吞掉后续一次中英切换
-                pendingEnglishMode = false
-            }
-        }
-    }
-
-    /**
-     * 根据当前键盘类型同步 Rime 方案与状态（「布局 ↔ 方案」映射元数据见 [KeyboardType]）：
-     * - 九宫格：切到专用 T9 方案（[KeyboardType.forcedSchemaId]）并保证中文模式
-     *   （多击字母才能匹配拼音候选）
-     * - 全键盘：对齐到用户持久化的全键盘方案偏好（[SchemaPreference]，
-     *   替代早期易失的 schemeBeforeT9 内存记忆，进程重建后选择不丢）
-     * 所有 selectSchema 均检查返回值，失败时记日志不静默吞掉；最后把状态同步到 UI。
-     */
-    private suspend fun applyEngineForKeyboard(type: KeyboardType) {
-        when (type) {
-            KeyboardType.NINE_GRID -> {
-                val forced = requireNotNull(type.forcedSchemaId)
-                if (rime.api.getCurrentSchema() != forced) {
-                    if (!rime.api.selectSchema(forced)) {
-                        Log.e(TAG, "切换九宫格专用方案失败: $forced（方案可能未编译/部署异常，可尝试设置页重新部署）")
-                    }
-                }
-                if (rime.api.getOption("ascii_mode")) {
-                    rime.api.setOption("ascii_mode", false)
-                }
-            }
-            KeyboardType.QWERTY -> {
-                // 对齐到用户的全键盘方案偏好（覆盖 t9 残留与外部意外切换）；
-                // 偏好方案切换失败（如方案已移除）时回退默认方案兼底
-                val preferred = SchemaPreference.getQwertySchema(this)
-                if (rime.api.getCurrentSchema() != preferred) {
-                    if (!rime.api.selectSchema(preferred)) {
-                        Log.e(TAG, "恢复全键盘方案失败: $preferred，回退默认方案 ${SchemaPreference.DEFAULT_SCHEMA_ID}")
-                        if (preferred != SchemaPreference.DEFAULT_SCHEMA_ID &&
-                            !rime.api.selectSchema(SchemaPreference.DEFAULT_SCHEMA_ID)
-                        ) {
-                            Log.e(TAG, "回退默认方案也失败: ${SchemaPreference.DEFAULT_SCHEMA_ID}")
-                        }
-                    }
-                }
-                // 九宫格“中→英”触发：强制英文模式，避免与 handleSoftKeyPress 竞态
-                if (pendingEnglishMode) {
-                    rime.api.setOption("ascii_mode", true)
-                    pendingEnglishMode = false
-                }
-            }
-            KeyboardType.SYMBOL -> {
-                // 符号键盘为临时面板：清除活跃编码避免残留 preedit，
-                // 方案与 ascii_mode 保持不变，「返回」后无感恢复原键盘状态
-                rime.api.clearComposition()
-                keyRecordStack.clear()
-            }
-            KeyboardType.NUMBER -> {
-                // 数字键盘与符号键盘同模式：临时面板，清编码不动方案与 ascii_mode
-                rime.api.clearComposition()
-                keyRecordStack.clear()
-            }
-        }
-        val isAscii = rime.api.getOption("ascii_mode")
-        // 引擎级联想（librime-predict）选项联动：与应用层联想总开关同步。
-        // 当前预编译库未启用 predict 模块 / schema 未挂 predictor 时为无害 no-op，
-        // 启用后无需改动即可由同一开关控制引擎预测（选项名见 predictor 源码 "prediction"）
-        rime.api.setOption("prediction", AssociationManager.isEnabled(this))
-        val context = rime.api.getContext()
-        val pinyinHints = buildPinyinHints(context)
-        withContext(Dispatchers.Main) {
-            keyboardView?.isChineseMode = !isAscii
-            candidatesView?.updateCandidates(context)
-            updateToolbarVisibility(context)
-            // 编码区同源同步（仅候选栏悬浮层，键盘视图不绘制编码）：九宫格按候选
-            // 读音+实际击键还原预览；全键盘回退到 Rime 原始 preedit
-            val preview = buildPinyinPreview(context)
-            preeditOverlay?.setText(preview ?: context?.composition?.preedit)
-            // 刷新左侧拼音侧栏（拼音候选 + 自定义符号）
-            if (type == KeyboardType.NINE_GRID) {
-                pinyinSideBar?.setSideSymbols(
-                    SideSymbolRepository.getPinyinSideSymbols(this@ZiYouInputMethodService)
-                )
-                pinyinSideBar?.setPinyinCandidates(pinyinHints)
-            }
-        }
-    }
+    // [applyEngineForKeyboard] 已委托 [EngineSyncController]
 
     private fun loadKeyboardType(): KeyboardType {
         val name = getSharedPreferences(PREF_NAME, MODE_PRIVATE).getString(KEY_KEYBOARD_TYPE, null)
@@ -861,7 +710,7 @@ class ZiYouInputMethodService : InputMethodService() {
         // 词库下载后引擎可能正在重新部署，scheduleEngineSync 内部先等待就绪再同步，
         // 否则 rime.api 抛异常导致 t9 方案/ascii_mode 永不恢复，九宫格按键失效；
         // 同步前先清除之前的编码，再按当前键盘对齐方案与状态（九宫格会切到 T9 方案）
-        scheduleEngineSync(ENGINE_READY_TIMEOUT_MS) {
+        engineSync.scheduleEngineSync(EngineSyncController.ENGINE_READY_TIMEOUT_MS) {
             rime.api.clearComposition()
         }
 
@@ -888,13 +737,8 @@ class ZiYouInputMethodService : InputMethodService() {
         super.onFinishInputView(finishingInput)
         Log.d(TAG, "onFinishInputView")
 
-        // 强制关闭技能面板（销毁 WebView，避免后台常驻内存/定时器）与 AI/涂鸦/粘贴板/工具/语音面板
-        skillPanels.close()
-        aiPanels.close()
-        doodlePanels.close()
-        clipboardPanels.close()
-        toolPanels.close()
-        voicePanels.close()
+        // 关闭全部面板（技能面板 WebView、AI 请求、涂鸦、粘贴板、工具、语音），避免后台常驻
+        closeAllPanels()
 
         // 丢弃未提交的多击预览并清空编码区
         keyboardView?.resetInputState()
@@ -928,12 +772,7 @@ class ZiYouInputMethodService : InputMethodService() {
         super.onTrimMemory(level)
         if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
             Log.w(TAG, "onTrimMemory(level=$level)：关闭全部面板释放内存")
-            skillPanels.close()
-            aiPanels.close()
-            doodlePanels.close()
-            clipboardPanels.close()
-            toolPanels.close()
-            voicePanels.close()
+            closeAllPanels()
             // 同步归还 native 堆持留的空闲页（部署残留，真机实测 20~27MB）
             if (RimeNative.isLoaded) RimeNative.trimNativeHeap()
         }
@@ -982,13 +821,13 @@ class ZiYouInputMethodService : InputMethodService() {
             // 中英文切换：设置Rime选项
             KeyCode.KEYCODE_SWITCH_LANGUAGE -> {
                 // 九宫格“中→英”已通过 switchToQwertyEnglish 处理，跳过异步 toggle
-                if (pendingEnglishMode) {
-                    pendingEnglishMode = false
+                if (engineSync.pendingEnglishMode) {
+                    engineSync.pendingEnglishMode = false
                     return
                 }
                 serviceScope.launch {
                     try {
-                        if (!awaitEngineReady(KEY_ENGINE_READY_TIMEOUT_MS)) {
+                        if (!engineSync.awaitEngineReady(EngineSyncController.KEY_ENGINE_READY_TIMEOUT_MS)) {
                             Log.w(TAG, "切换中英文失败：Rime引擎未就绪（可能正在重新部署）")
                             return@launch
                         }
@@ -996,15 +835,15 @@ class ZiYouInputMethodService : InputMethodService() {
                         // 九宫格“中→英”返回：QWERTY 英文下按中英键时恢复进入前布局
                         // （applyEngineForKeyboard 保证切回 t9 方案并强制中文模式），
                         // 而非仅翻转 ascii_mode 停留在 QWERTY
-                        val origin = qwertyEnglishOrigin
+                        val origin = engineSync.qwertyEnglishOrigin
                         if (currentAscii && origin != null && currentKeyboardType == KeyboardType.QWERTY) {
-                            qwertyEnglishOrigin = null
+                            engineSync.qwertyEnglishOrigin = null
                             Log.d(TAG, "英→中返回进入前布局: $origin")
                             switchKeyboard(origin)
                             return@launch
                         }
                         // 其他翻转场景消费标记，避免后续切换被陈旧标记误恢复
-                        qwertyEnglishOrigin = null
+                        engineSync.qwertyEnglishOrigin = null
                         rime.api.setOption("ascii_mode", !currentAscii)
                         // 视图不再预翻转，统一在此按引擎结果回写
                         keyboardView?.isChineseMode = currentAscii // 反转
@@ -1022,23 +861,13 @@ class ZiYouInputMethodService : InputMethodService() {
 
             // 技能面板开关：覆盖/移除键盘区域上的技能面板（与其他面板互斥）
             KeyCode.KEYCODE_SKILL_PANEL -> {
-                aiPanels.close()
-                doodlePanels.close()
-                clipboardPanels.close()
-                toolPanels.close()
-                keyboardPickers.close()
-                voicePanels.close()
+                closeAllPanels()
                 skillPanels.toggle()
             }
             
             // AI 问答面板开关：编码区上方展示输入框/答案区（与其他面板互斥）
             KeyCode.KEYCODE_AI_ASSISTANT -> {
-                skillPanels.close()
-                doodlePanels.close()
-                clipboardPanels.close()
-                toolPanels.close()
-                keyboardPickers.close()
-                voicePanels.close()
+                closeAllPanels()
                 aiPanels.toggle()
             }
             
@@ -1050,12 +879,7 @@ class ZiYouInputMethodService : InputMethodService() {
                     !GalleryImageSaver.isSupported) {
                     Toast.makeText(this, "当前输入框不支持发送图片", Toast.LENGTH_SHORT).show()
                 } else {
-                    skillPanels.close()
-                    aiPanels.close()
-                    clipboardPanels.close()
-                    toolPanels.close()
-                    keyboardPickers.close()
-                    voicePanels.close()
+                    closeAllPanels()
                     doodlePanels.toggle()
                 }
             }
@@ -1063,24 +887,14 @@ class ZiYouInputMethodService : InputMethodService() {
             // 粘贴板历史面板开关：收起键盘展示历史列表（与其他面板互斥）；
             // 点击条目经 commitDirectToEditor 直达宿主输入框，不接管 commitTarget
             KeyCode.KEYCODE_CLIPBOARD_PANEL -> {
-                skillPanels.close()
-                aiPanels.close()
-                doodlePanels.close()
-                toolPanels.close()
-                keyboardPickers.close()
-                voicePanels.close()
+                closeAllPanels()
                 clipboardPanels.toggle()
             }
 
             // 工具面板开关（候选区按钮栏 Logo 键）：收起键盘网格展示全部工具项
             //（与其他面板互斥）；选中工具后先关面板再回到本方法统一路由
             KeyCode.KEYCODE_TOOL_PANEL -> {
-                skillPanels.close()
-                aiPanels.close()
-                doodlePanels.close()
-                clipboardPanels.close()
-                keyboardPickers.close()
-                voicePanels.close()
+                closeAllPanels()
                 toolPanels.toggle()
             }
 
@@ -1088,12 +902,7 @@ class ZiYouInputMethodService : InputMethodService() {
             // 可选主键盘布局（与其他面板互斥）；选中后先关面板再走
             // switchKeyboard 统一切换路径，不触碰编辑器文本与光标
             KeyCode.KEYCODE_KEYBOARD_PICKER -> {
-                skillPanels.close()
-                aiPanels.close()
-                doodlePanels.close()
-                clipboardPanels.close()
-                toolPanels.close()
-                voicePanels.close()
+                closeAllPanels()
                 keyboardPickers.toggle()
             }
 
@@ -1101,12 +910,7 @@ class ZiYouInputMethodService : InputMethodService() {
             // 识别文本经 commitDirectToEditor 直达宿主输入框，不接管 commitTarget；
             // 权限/模型未就绪时面板内展示引导态，跳转设置页语音入口
             KeyCode.KEYCODE_VOICE_PANEL -> {
-                skillPanels.close()
-                aiPanels.close()
-                doodlePanels.close()
-                clipboardPanels.close()
-                toolPanels.close()
-                keyboardPickers.close()
+                closeAllPanels()
                 voicePanels.toggle()
             }
 
@@ -1234,160 +1038,18 @@ class ZiYouInputMethodService : InputMethodService() {
     // ===== UI 渲染 =====
 
     /**
-     * AI 面板「发图/存图」统一入口：点击时按当前编辑器图片能力实时路由——
-     * 可收图走 commitContent 直发（[sendAnswerAsImage]），否则保存到相册
-     * （[saveAnswerAsImage]）。气泡按钮标签为创建时快照，滞后也不会误发。
+     * AI 面板「发图/存图」统一入口（委托 [ImageCommitHelper]）。
+     * 气泡按钮标签为创建时快照，滞后也不会误发。
      */
-    private fun submitAnswerImage(content: CharSequence) {
-        if (inputLogic.acceptsImageContent()) {
-            sendAnswerAsImage(content)
-        } else {
-            saveAnswerAsImage(content)
-        }
-    }
-
-    /**
-     * 将 AI 答案渲染为主题卡片图并经 commitContent 发送到当前输入框（AI 面板「发图」入口）。
-     * 渲染/PNG 压缩在后台线程执行，提交与 Toast 反馈回主线程；面板打开期间
-     * commitTarget 被占用，故经 [InputLogicController.commitImageToEditor] 绕过面板路由直达宿主编辑器。
-     */
-    private fun sendAnswerAsImage(content: CharSequence) {
-        if (!inputLogic.acceptsImageContent()) {
-            Toast.makeText(this, "当前输入框不支持发送图片", Toast.LENGTH_SHORT).show()
-            return
-        }
-        Toast.makeText(this, "正在生成图片…", Toast.LENGTH_SHORT).show()
-        val skin = SkinManager.getCurrentSkin(this)
-        serviceScope.launch {
-            try {
-                val file = withContext(Dispatchers.Default) {
-                    TextImageRenderer.renderToPng(applicationContext, content, skin)
-                }
-                val uri = FileProvider.getUriForFile(
-                    this@ZiYouInputMethodService, "$packageName.imecontent", file)
-                val ok = inputLogic.commitImageToEditor(uri, "image/png", "AI 答案图片")
-                if (!ok) {
-                    Toast.makeText(this@ZiYouInputMethodService,
-                        "发送图片失败或当前输入框不支持", Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "AI 答案转图片失败: ${e.message}", e)
-                Toast.makeText(this@ZiYouInputMethodService, "图片生成失败", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    /**
-     * 将 AI 答案渲染为主题卡片图并保存到系统相册（AI 面板「存图」路径，
-     * 编辑器不收图片时的兜底出口）。渲染/PNG 压缩在后台线程执行，相册写入在
-     * IO 线程，Toast 反馈回主线程；Android 10 以下 MediaStore 免权限写入不可用，直接提示。
-     */
-    private fun saveAnswerAsImage(content: CharSequence) {
-        if (!GalleryImageSaver.isSupported) {
-            Toast.makeText(this, "保存到相册需要 Android 10 及以上系统", Toast.LENGTH_SHORT).show()
-            return
-        }
-        Toast.makeText(this, "正在生成图片…", Toast.LENGTH_SHORT).show()
-        val skin = SkinManager.getCurrentSkin(this)
-        serviceScope.launch {
-            try {
-                val file = withContext(Dispatchers.Default) {
-                    TextImageRenderer.renderToPng(applicationContext, content, skin)
-                }
-                val ok = withContext(Dispatchers.IO) {
-                    GalleryImageSaver.savePng(applicationContext, file.readBytes(), "ziyou_ai")
-                }
-                Toast.makeText(this@ZiYouInputMethodService,
-                    if (ok) "已保存到相册" else "保存到相册失败", Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                Log.e(TAG, "AI 答案存图失败: ${e.message}", e)
-                Toast.makeText(this@ZiYouInputMethodService, "图片生成失败", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    /**
-     * 将涂鸦快照导出为 PNG 并经 commitContent 发送到当前输入框（涂鸦面板「发送」入口）。
-     * 合成/PNG 压缩在后台线程执行，提交与 Toast 反馈回主线程；遵循面板期间直达宿主
-     * 编辑器的路由纪律，经 [InputLogicController.commitImageToEditor] 提交；
-     * 快照所有权在本方法，导出完成后 recycle；发送成功后自动关闭面板。
-     */
-    private fun sendDoodleAsImage(snapshot: Bitmap) {
-        if (!inputLogic.acceptsImageContent()) {
-            // 按钮态滞后兜底：点击瞬间编辑器已不收图则转存相册
-            saveDoodleAsImage(snapshot)
-            return
-        }
-        Toast.makeText(this, "正在生成图片…", Toast.LENGTH_SHORT).show()
-        serviceScope.launch {
-            try {
-                val file = withContext(Dispatchers.Default) {
-                    try {
-                        DoodleImageExporter.exportToPng(applicationContext, snapshot)
-                    } finally {
-                        snapshot.recycle()
-                    }
-                }
-                val uri = FileProvider.getUriForFile(
-                    this@ZiYouInputMethodService, "$packageName.imecontent", file)
-                val ok = inputLogic.commitImageToEditor(uri, "image/png", "涂鸦图片")
-                if (ok) {
-                    doodlePanels.close()
-                } else {
-                    Toast.makeText(this@ZiYouInputMethodService,
-                        "发送图片失败或当前输入框不支持", Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "涂鸦转图片失败: ${e.message}", e)
-                Toast.makeText(this@ZiYouInputMethodService, "图片生成失败", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    /**
-     * 将涂鸦快照导出为 PNG 并保存到系统相册（涂鸦面板「保存」入口，
-     * 编辑器不收图片时的兜底出口）。合成/PNG 压缩在后台线程执行，相册写入在
-     * IO 线程，Toast 反馈回主线程；快照所有权在本方法，导出完成后 recycle；
-     * 保存成功后自动关闭面板（与发送路径同一交互节奏）。
-     */
-    private fun saveDoodleAsImage(snapshot: Bitmap) {
-        if (!GalleryImageSaver.isSupported) {
-            snapshot.recycle()
-            Toast.makeText(this, "保存到相册需要 Android 10 及以上系统", Toast.LENGTH_SHORT).show()
-            return
-        }
-        Toast.makeText(this, "正在生成图片…", Toast.LENGTH_SHORT).show()
-        serviceScope.launch {
-            try {
-                val file = withContext(Dispatchers.Default) {
-                    try {
-                        DoodleImageExporter.exportToPng(applicationContext, snapshot)
-                    } finally {
-                        snapshot.recycle()
-                    }
-                }
-                val ok = withContext(Dispatchers.IO) {
-                    GalleryImageSaver.savePng(applicationContext, file.readBytes(), "ziyou_doodle")
-                }
-                if (ok) {
-                    Toast.makeText(this@ZiYouInputMethodService, "已保存到相册", Toast.LENGTH_SHORT).show()
-                    doodlePanels.close()
-                } else {
-                    Toast.makeText(this@ZiYouInputMethodService, "保存到相册失败", Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "涂鸦存图失败: ${e.message}", e)
-                Toast.makeText(this@ZiYouInputMethodService, "图片生成失败", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
+    private fun submitAnswerImage(content: CharSequence) = imageHelper.submitAnswer(content)
 
     /**
      * 根据最新 Rime 上下文刷新候选词、编码区与拼音侧栏（在主线程调用）。
      * 供 [InputLogicController] 通过回调驱动。
      */
     private fun renderContext(context: ContextProto?) {
-        val pinyinHints = buildPinyinHints(context)
+        val pinyinHints = if (currentKeyboardType != KeyboardType.NINE_GRID) null
+            else PinyinHintProvider.buildHints(context, keyRecordStack.confirmedRawLength())
         // 更新候选词视图；预测态（引擎在 commit 后产生 prediction 候选：菜单非空且
         // 编码串为空）复用联想强调色，与普通候选词区分；未启用 predict 模块时该分支休眠
         val predictionMode = context?.menu?.candidates?.isNotEmpty() == true && context.input.isEmpty()
@@ -1396,7 +1058,8 @@ class ZiYouInputMethodService : InputMethodService() {
         updateToolbarVisibility(context)
         // 编码区同源同步（仅候选栏悬浮层，键盘视图不绘制编码）：九宫格按候选
         // 读音+实际击键还原预览，确保编码区与候选区拼音一致；全键盘回退到 Rime 原始 preedit
-        val preview = buildPinyinPreview(context)
+        val preview = if (currentKeyboardType != KeyboardType.NINE_GRID) null
+            else PinyinHintProvider.buildPreview(context, keyRecordStack.confirmedRawLength())
         preeditOverlay?.setText(preview ?: context?.composition?.preedit)
         // 左侧拼音侧栏：有候选拼音则展示拼音，否则展示自定义符号
         // 仅在九宫格模式下更新拼音候选；数字键盘侧栏始终为符号模式
@@ -1463,7 +1126,7 @@ class ZiYouInputMethodService : InputMethodService() {
             } else {
                 keyboardView?.resetInputState()
                 setInputView(buildInputView(displayModeCtrl.currentMode))
-                scheduleEngineSync()
+                engineSync.scheduleEngineSync()
             }
         }
     }
@@ -1490,7 +1153,7 @@ class ZiYouInputMethodService : InputMethodService() {
         }
         serviceScope.launch {
             try {
-                if (!awaitEngineReady(KEY_ENGINE_READY_TIMEOUT_MS)) {
+                if (!engineSync.awaitEngineReady(EngineSyncController.KEY_ENGINE_READY_TIMEOUT_MS)) {
                     Toast.makeText(this@ZiYouInputMethodService,
                         "引擎正在部署，请稍后再试", Toast.LENGTH_SHORT).show()
                     return@launch
@@ -1515,7 +1178,7 @@ class ZiYouInputMethodService : InputMethodService() {
                 Toast.makeText(this@ZiYouInputMethodService,
                     "已切换到: ${next.name}", Toast.LENGTH_SHORT).show()
                 // 重同步引擎状态到 UI（新方案与偏好已一致，仅刷新中英态/候选区）
-                scheduleEngineSync()
+                engineSync.scheduleEngineSync()
             } catch (e: Exception) {
                 Log.e(TAG, "循环切换方案异常: ${e.message}", e)
             }
@@ -1534,25 +1197,6 @@ class ZiYouInputMethodService : InputMethodService() {
         startActivity(intent)
     }
 
-    /**
-     * 生成九宫格拼音候选列表（委托 [PinyinHintProvider]）。
-     * 仅九宫格布局有效，其余布局返回 null。
-     */
-    private fun buildPinyinHints(context: ContextProto?): List<String>? {
-        if (currentKeyboardType != KeyboardType.NINE_GRID) return null
-        return PinyinHintProvider.buildHints(context, keyRecordStack.confirmedRawLength())
-    }
-
-    /**
-     * 生成顶部编码区的"当前拼音"单串预览（委托 [PinyinHintProvider]，
-     * 以高亮候选读音为消歧依据、以实际击键数为长度约束；
-     * 分段确认后已确认前缀以汉字展示，未确认部分按状态机确认偏移切分）。
-     * 非九宫格返回 null，由候选视图沿用 Rime 原始 preedit。
-     */
-    private fun buildPinyinPreview(context: ContextProto?): String? {
-        if (currentKeyboardType != KeyboardType.NINE_GRID) return null
-        return PinyinHintProvider.buildPreview(context, keyRecordStack.confirmedRawLength())
-    }
 
     // ===== Rime消息处理 =====
 
@@ -1588,7 +1232,7 @@ class ZiYouInputMethodService : InputMethodService() {
                 val forced = currentKeyboardType.forcedSchemaId
                 if (forced != null && message.schemaId != forced) {
                     Log.w(TAG, "方案与键盘布局不一致（收到 ${message.schemaId}，需要 $forced），触发重同步")
-                    scheduleEngineSync()
+                    engineSync.scheduleEngineSync()
                 }
             }
             is RimeMessage.DeployMessage -> {
@@ -1601,7 +1245,7 @@ class ZiYouInputMethodService : InputMethodService() {
                 // 词库下载/启用后 RimeSession.redeploy 会整体重建引擎，方案与选项全部复位。
                 // 待引擎就绪后重新同步当前键盘的方案与中英文状态（latest-wins 统一调度），
                 // 否则九宫格停留在默认方案上，中/数切换等按键表现为“失效”。
-                scheduleEngineSync(ENGINE_READY_TIMEOUT_MS)
+                engineSync.scheduleEngineSync(EngineSyncController.ENGINE_READY_TIMEOUT_MS)
             }
             is RimeMessage.UnknownMessage -> {
                 Log.d(TAG, "Rime未知消息: type=${message.type}, value=${message.value}")
@@ -1622,11 +1266,8 @@ class ZiYouInputMethodService : InputMethodService() {
         } catch (e: Exception) {
             Log.w(TAG, "注销剪贴板监听失败: ${e.message}")
         }
-        // 释放技能面板（销毁 WebView）与 AI 面板（取消进行中请求）
-        skillPanels.close()
-        aiPanels.close()
-        // 释放语音面板（停止录音会话）并归还语音识别引擎全部 native 资源
-        voicePanels.close()
+        // 释放全部面板（技能 WebView / AI 请求 / 涂鸦 / 粘贴板 / 工具 / 键盘选择 / 语音）
+        closeAllPanels()
         AppContainer.speechEngine.release()
         // 服务销毁前落盘剩余的上屏计分
         LevelStats.flush()

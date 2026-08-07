@@ -19,7 +19,7 @@ import com.ziyou.ime.skin.SkinManager
  * 面板接管二者实测高度之和（IME 窗口总高严格不变，同一高度守恒策略），
  * 不接管输入路由——选中布局经 [Host.switchKeyboard] 回到 Service 的
  * switchKeyboard 统一切换路径（与键盘内切换键同源，先关面板再切换，
- * 关面板恢复键盘可见后由 switchKeyboard 重建为目标布局）。
+ * 关面板恢复键盘可见后由 switchKeyboard 重建键盘视图）。
  *
  * 切换不触碰编辑器文本与光标：面板打开前经 [Host.onPanelWillOpen] 清除
  * 活跃编码（与其他面板一致），switchKeyboard 仅重建键盘视图并同步引擎
@@ -42,27 +42,12 @@ class KeyboardPickerCoordinator(
     }
 
     /** 协调器需要 Service 提供的能力：视图容器访问与布局切换出口。 */
-    interface Host {
-        /** 输入视图内容根容器（面板挂载目标，重建后引用会变化） */
-        fun contentLayout(): LinearLayout?
-
-        /** 键盘容器（打开面板时整体收回/关闭时恢复） */
-        fun keyboardContainer(): FrameLayout?
-
-        /** 候选区容器（编码区 + 候选词列表，随键盘一并收回/恢复） */
-        fun candidatesContainer(): LinearLayout?
-
-        /** 键盘视图（震动反馈载体） */
-        fun keyboardView(): BaseKeyboardView?
-
+    interface Host : BasePanelHost {
         /** 当前键盘布局类型（面板高亮标记「当前」项） */
         fun currentKeyboardType(): KeyboardType
 
         /** 切换到目标布局（Service.switchKeyboard 统一路径，幂等） */
         fun switchKeyboard(type: KeyboardType)
-
-        /** 面板即将打开：清除活跃编码与候选/编码区展示（键盘状态零丢失） */
-        fun onPanelWillOpen()
     }
 
     /** 键盘选择面板（仅打开时非空）。 */

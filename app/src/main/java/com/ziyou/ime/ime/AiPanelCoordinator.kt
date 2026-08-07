@@ -31,19 +31,7 @@ class AiPanelCoordinator(
 ) {
 
     /** 协调器需要 Service 提供的能力：视图容器访问与输入路由切换。 */
-    interface Host {
-        /** 输入视图内容根容器（面板挂载目标，重建后引用会变化） */
-        fun contentLayout(): LinearLayout?
-
-        /** 键盘容器（答案态整体收回/恢复） */
-        fun keyboardContainer(): FrameLayout?
-
-        /** 候选区容器（编码区 + 候选词列表，答案态整体收回/恢复） */
-        fun candidatesContainer(): LinearLayout?
-
-        /** 键盘视图（震动反馈载体） */
-        fun keyboardView(): BaseKeyboardView?
-
+    interface Host : BasePanelHost {
         /** 输入路由切换：非空时键盘上屏文本改道注入面板输入框 */
         fun setCommitTarget(target: InputLogicController.CommitTarget?)
 
@@ -56,9 +44,6 @@ class AiPanelCoordinator(
 
         /** 当前编辑器是否可直接接收图片（答案操作按钮呈现「发图」或「存图」） */
         fun editorAcceptsImage(): Boolean
-
-        /** 面板即将打开：清除活跃编码与候选/编码区展示（键盘状态零丢失） */
-        fun onPanelWillOpen()
     }
 
     /** AI 面板（仅打开时非空）。 */

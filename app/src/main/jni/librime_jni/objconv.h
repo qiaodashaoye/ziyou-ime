@@ -36,11 +36,11 @@ inline std::vector<std::string> stringArrayToStringVector(JNIEnv* env,
   std::vector<std::string> result;
   result.reserve(length);
   for (int i = 0; i < length; ++i) {
-    CString cstr(
-        env, reinterpret_cast<jstring>(env->GetObjectArrayElement(array, i)));
+    auto elem = JRef(env, env->GetObjectArrayElement(array, i));
+    CString cstr(env, reinterpret_cast<jstring>(jobject(elem)));
     result.emplace_back(cstr);
   }
-  return std::move(result);
+  return result;
 }
 
 inline jobjectArray stringVectorToJStringArray(
@@ -49,7 +49,8 @@ inline jobjectArray stringVectorToJStringArray(
                                            GlobalRef->String, nullptr);
   int i = 0;
   for (const auto& s : strings) {
-    env->SetObjectArrayElement(array, i++, JString(env, s));
+    auto js = JString(env, s);
+    env->SetObjectArrayElement(array, i++, js);
   }
   return array;
 }

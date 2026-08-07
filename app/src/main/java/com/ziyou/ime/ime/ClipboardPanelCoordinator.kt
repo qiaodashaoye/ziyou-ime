@@ -39,27 +39,12 @@ class ClipboardPanelCoordinator(
     }
 
     /** 协调器需要 Service 提供的能力：视图容器访问与粘贴出口。 */
-    interface Host {
-        /** 输入视图内容根容器（面板挂载目标，重建后引用会变化） */
-        fun contentLayout(): LinearLayout?
-
-        /** 键盘容器（打开面板时整体收回/关闭时恢复） */
-        fun keyboardContainer(): FrameLayout?
-
-        /** 候选区容器（编码区 + 候选词列表，随键盘一并收回/恢复） */
-        fun candidatesContainer(): LinearLayout?
-
-        /** 键盘视图（震动反馈载体） */
-        fun keyboardView(): BaseKeyboardView?
-
+    interface Host : BasePanelHost {
         /** 当前是否悬浮键盘模式（悬浮下不开放粘贴板面板，与技能面板同一约束） */
         fun isFloatingMode(): Boolean
 
         /** 将条目文本直接粘贴到宿主输入框（commitDirectToEditor，绕过面板路由） */
         fun pasteToEditor(text: String)
-
-        /** 面板即将打开：清除活跃编码与候选/编码区展示（键盘状态零丢失） */
-        fun onPanelWillOpen()
     }
 
     /** 粘贴板面板（仅打开时非空）。 */

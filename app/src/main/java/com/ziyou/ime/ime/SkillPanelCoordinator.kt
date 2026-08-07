@@ -34,33 +34,18 @@ class SkillPanelCoordinator(
 ) {
 
     /** 协调器需要 Service 提供的能力：视图容器访问、上屏出口与输入路由切换。 */
-    interface Host {
-        /** 输入视图内容根容器（技能面板提升挂载的目标，重建后引用会变化） */
-        fun contentLayout(): LinearLayout?
-
-        /** 键盘容器（技能面板键盘叠层挂载的目标） */
-        fun keyboardContainer(): FrameLayout?
-
-        /** 候选区容器（编码区 + 候选词列表，收缩态整体隐藏/恢复） */
-        fun candidatesContainer(): LinearLayout?
-
+    interface Host : BasePanelHost {
         /** 当前是否悬浮形态（悬浮窄面板下 WebView 不可用，暂不开放技能面板） */
         fun isFloatingMode(): Boolean
 
         /** 当前编辑器信息（低敏：getContext 仅暴露包名与输入框类型） */
         fun currentEditorInfo(): EditorInfo?
 
-        /** 键盘视图（震动反馈载体） */
-        fun keyboardView(): BaseKeyboardView?
-
         /** 文本上屏（走 InputLogicController 统一出口） */
         fun commitText(text: String)
 
         /** 输入路由切换：非空时键盘上屏文本改道注入面板（Phase 3） */
         fun setCommitTarget(target: InputLogicController.CommitTarget?)
-
-        /** 面板即将打开：清除活跃编码与候选/编码区展示（键盘状态零丢失） */
-        fun onPanelWillOpen()
 
         /** 当前编辑器是否接受图片富媒体（技能 image.send 前置检查） */
         fun editorAcceptsImage(): Boolean

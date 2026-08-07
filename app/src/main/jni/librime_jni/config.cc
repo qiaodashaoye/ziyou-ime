@@ -50,6 +50,7 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_ziyou_ime_core_RimeConfig_closeRimeConfig(JNIEnv* env,
                                                             jclass /* thiz */,
                                                             jlong peer) {
+  if (!peer) return;
   auto api = rime_get_api();
   auto config = reinterpret_cast<RimeConfig*>(peer);
   api->config_close(config);
@@ -61,6 +62,7 @@ Java_com_ziyou_ime_core_RimeConfig_getRimeConfigInt(JNIEnv* env,
                                                              jclass /* thiz */,
                                                              jlong peer,
                                                              jstring key) {
+  if (!peer) return nullptr;
   auto api = rime_get_api();
   int value;
   if (!api->config_get_int(reinterpret_cast<RimeConfig*>(peer),
@@ -73,6 +75,7 @@ Java_com_ziyou_ime_core_RimeConfig_getRimeConfigInt(JNIEnv* env,
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_ziyou_ime_core_RimeConfig_getRimeConfigString(
     JNIEnv* env, jclass /* thiz */, jlong peer, jstring key) {
+  if (!peer) return nullptr;
   auto api = rime_get_api();
   const char* value = api->config_get_cstring(
       reinterpret_cast<RimeConfig*>(peer), CString(env, key));
@@ -83,6 +86,7 @@ Java_com_ziyou_ime_core_RimeConfig_getRimeConfigString(
 extern "C" JNIEXPORT jobjectArray JNICALL
 Java_com_ziyou_ime_core_RimeConfig_getRimeConfigListItemPath(
     JNIEnv* env, jclass /* thiz */, jlong peer, jstring key) {
+  if (!peer) return env->NewObjectArray(0, GlobalRef->String, nullptr);
   auto api = rime_get_api();
   auto config = reinterpret_cast<RimeConfig*>(peer);
   auto cKey = CString(env, key);
@@ -104,6 +108,7 @@ Java_com_ziyou_ime_core_RimeConfig_setRimeConfigBool(JNIEnv* env,
                                                               jlong peer,
                                                               jstring key,
                                                               jboolean value) {
+  if (!peer) return;
   auto api = rime_get_api();
   api->config_set_bool(reinterpret_cast<RimeConfig*>(peer), CString(env, key),
                        value);

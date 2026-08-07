@@ -28,7 +28,7 @@ class SchemaItem {
       const SchemaItem item{list.list[i]};
       result.emplace_back(item);
     }
-    return std::move(result);
+    return result;
   }
 };
 

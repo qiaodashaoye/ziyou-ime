@@ -1,7 +1,5 @@
 package com.ziyou.ime.core
 
-import android.util.Log
-
 /**
  * Rime配置文件JNI接口声明
  * 所有native方法对应config.cc中的JNI导出函数
@@ -15,14 +13,12 @@ import android.util.Log
  *       使用完毕后必须调用closeRimeConfig释放资源
  */
 object RimeConfig {
-    private const val TAG = "RimeConfig"
 
     init {
-        // 确保native库已加载（依赖RimeNative的init块）
-        try {
-            System.loadLibrary("rime_jni")
-        } catch (e: UnsatisfiedLinkError) {
-            Log.w(TAG, "rime_jni 库可能已由RimeNative加载: ${e.message}")
+        // 依赖 RimeNative 的 init 块加载 native 库（JVM 类加载顺序保证 RimeConfig
+        // 的 external fun 被调用前 RimeNative 已初始化）；不再重复 loadLibrary
+        check(RimeNative.isLoaded) {
+            "rime_jni 库未加载，RimeConfig 不可用。"
         }
     }
 
