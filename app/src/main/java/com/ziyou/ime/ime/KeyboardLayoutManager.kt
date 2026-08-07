@@ -79,6 +79,10 @@ class KeyboardLayoutManager(
         if (view is NumberKeyboardView) {
             view.onNumberInput = { value -> callbacks.onSideSymbolInput(value) }
         }
+        // QWERTY 全键盘：Shift 激活态大写字母绕过 Rime 编码，经同一 commit 出口直上屏
+        if (view is QwertyKeyboardView) {
+            view.onShiftedLetterInput = { letter -> callbacks.onSideSymbolInput(letter) }
+        }
         container.removeAllViews()
 
         // 悬浮形态（九宫格/数字键盘）：无左侧栏，视图独立渲染

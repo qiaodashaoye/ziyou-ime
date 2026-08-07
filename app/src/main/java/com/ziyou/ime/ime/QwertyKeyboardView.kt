@@ -9,7 +9,8 @@ import android.util.AttributeSet
  *
  * 继承 [BaseKeyboardView]，仅负责 QWERTY 特有部分：
  * - 标准 QWERTY 4 行布局
- * - Shift 大小写切换（OFF / ONCE / LOCKED）
+ * - Shift 大小写切换（OFF / ONCE / LOCKED）：激活态下字母大写直上屏
+ *   （绕过 Rime 编码，不进编码区），ONCE 输入一个字母后自动复位
  * - 中英文切换、数字键盘
  *
  * 布局（基于基类的 10 列网格，见 [gridColumns]）：
@@ -31,6 +32,13 @@ class QwertyKeyboardView @JvmOverloads constructor(
     /** 当前 Shift 状态 */
     var shiftState: ShiftState = ShiftState.OFF
         private set
+
+    /**
+     * Shift 激活态（ONCE / LOCKED）下字母键的大写直上屏回调：绕过 Rime 编码链路，
+     * 经 Service 统一 commit 出口直达上屏目标（与符号/数字键盘直上屏同源）。
+     * 未绑定（如独立构造的测试视图）时字母退回 sendKey 路径。
+     */
+    var onShiftedLetterInput: ((letter: String) -> Unit)? = null
 
     // ===== 间距收窄：10 列窄键布局下收紧间距与留白，把让出的宽度还给键面 =====
     // （皮肤级 keyGapDp / keyboardPaddingDp 为全体键盘共用，九宫格大键距是
@@ -127,17 +135,22 @@ class QwertyKeyboardView @JvmOverloads constructor(
                 // 中英文切换 / 符号键盘等共用逻辑
                 if (handleCommonKey(key)) return
 
-                // 普通按键：字母根据 Shift 状态大小写
-                val isShifted = shiftState != ShiftState.OFF
-                val actualKeyCode =
-                    if (key.code in 'a'.code..'z'.code && isShifted) key.code - 32 else key.code
-                sendKey(actualKeyCode, 0)
-
-                // ONCE 状态输入一个字母后恢复
-                if (shiftState == ShiftState.ONCE && key.code in 'a'.code..'z'.code) {
-                    shiftState = ShiftState.OFF
-                    invalidate()
+                // 字母键 + Shift 激活（ONCE / LOCKED）：大写字母直上屏，绕过 Rime
+                // 避免进入编码区；ONCE 输入一个字母后自动复位 OFF。
+                // 仅影响英文字母，符号 / 数字 / 功能键保持原路径不变。
+                if (key.code in 'a'.code..'z'.code && shiftState != ShiftState.OFF) {
+                    onShiftedLetterInput?.let { commit ->
+                        commit(key.label.uppercase())
+                        if (shiftState == ShiftState.ONCE) {
+                            shiftState = ShiftState.OFF
+                        }
+                        invalidate()
+                        return
+                    }
                 }
+
+                // 普通按键（未激活 Shift 的字母、空格、标点等）：原样发给 Rime
+                sendKey(key.code, 0)
             }
         }
     }
