@@ -169,7 +169,7 @@ private fun CategoryTabRow(
         else -> DictCategory.entries.indexOf(selectedCategory) + 1
     }
 
-    ScrollableTabRow(
+    PrimaryScrollableTabRow(
         selectedTabIndex = selectedIndex,
         edgePadding = 12.dp,
         containerColor = MaterialTheme.colorScheme.surface

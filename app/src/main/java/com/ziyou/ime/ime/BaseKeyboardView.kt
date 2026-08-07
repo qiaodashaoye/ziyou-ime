@@ -666,7 +666,7 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
 
     // 单位换算已叠加缩放因子：悬浮模式下基类与子类的所有 dp/sp 尺寸统一缩放
     protected fun dp2px(dp: Float): Float = dp * resources.displayMetrics.density * scaleFactor
-    protected fun sp2px(sp: Float): Float = sp * resources.displayMetrics.scaledDensity * scaleFactor
+    protected fun sp2px(sp: Float): Float = sp * resources.displayMetrics.density * resources.configuration.fontScale * scaleFactor
 
     private fun fillPaint() = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
 

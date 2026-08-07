@@ -474,5 +474,5 @@ class SimpleCandidatesView @JvmOverloads constructor(
 
     private fun dp2px(dp: Float): Float = dp * resources.displayMetrics.density * scaleFactor
 
-    private fun sp2px(sp: Float): Float = sp * resources.displayMetrics.scaledDensity * scaleFactor
+    private fun sp2px(sp: Float): Float = sp * resources.displayMetrics.density * resources.configuration.fontScale * scaleFactor
 }

@@ -272,7 +272,7 @@ class CandidateToolbarView @JvmOverloads constructor(
             if (!isFixedIndex(virtualViewId) && items.getOrNull(virtualViewId) == null) {
                 // 配置刷新与无障碍遍历竞态时的兜底：给出合法空节点
                 node.contentDescription = ""
-                node.setBoundsInParent(Rect(0, 0, 1, 1))
+                node.setBoundsInScreen(Rect(0, 0, 1, 1))
                 return
             }
             node.className = Button::class.java.name
@@ -283,7 +283,7 @@ class CandidateToolbarView @JvmOverloads constructor(
                 node.addAction(AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_SHOW_ON_SCREEN)
             }
             val rect = cellRect(virtualViewId)
-            node.setBoundsInParent(
+            node.setBoundsInScreen(
                 Rect(rect.left.toInt(), rect.top.toInt(), rect.right.toInt(), rect.bottom.toInt())
             )
         }

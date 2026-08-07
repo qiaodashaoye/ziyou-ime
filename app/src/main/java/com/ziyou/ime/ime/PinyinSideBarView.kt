@@ -392,5 +392,5 @@ class PinyinSideBarView @JvmOverloads constructor(
     // ===== 单位转换 =====
 
     private fun dp2px(dp: Float): Float = dp * resources.displayMetrics.density
-    private fun sp2px(sp: Float): Float = sp * resources.displayMetrics.scaledDensity
+    private fun sp2px(sp: Float): Float = sp * resources.displayMetrics.density * resources.configuration.fontScale
 }

@@ -19,6 +19,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.lifecycle.lifecycleScope
 import com.ziyou.ime.R
 import com.ziyou.ime.ai.AiConfig
@@ -1454,7 +1455,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun getVersionInfo(): String {
         return try {
             val packageInfo = packageManager.getPackageInfo(packageName, 0)
-            "v${packageInfo.versionName}(${packageInfo.versionCode})"
+            "v${packageInfo.versionName}(${PackageInfoCompat.getLongVersionCode(packageInfo)})"
         } catch (e: Exception) {
             "未知版本"
         }
