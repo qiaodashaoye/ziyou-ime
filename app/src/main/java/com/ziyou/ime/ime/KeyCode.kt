@@ -92,10 +92,9 @@ object KeyCode {
     const val KEYCODE_SKILL_PANEL = -105
     /** 用于内部标识收起键盘（候选区按钮栏） */
     const val KEYCODE_HIDE_KEYBOARD = -106
-    /** 用于内部标识打开设置页（候选区按钮栏） */
+    /** 用于内部标识打开设置页（工具面板标题栏「设置」按钮） */
     const val KEYCODE_OPEN_SETTINGS = -107
-    /** 用于内部标识循环切换主题（候选区按钮栏） */
-    const val KEYCODE_SWITCH_THEME = -108
+    // -108 曾为循环切换主题（功能栏「切换主题」按钮），已移除，编号保留不复用
     // -109 曾为发送图片（图片选择工具），已移除，编号保留不复用
     /** 用于内部标识 AI 问答面板开关（候选区按钮栏） */
     const val KEYCODE_AI_ASSISTANT = -110
@@ -103,13 +102,12 @@ object KeyCode {
     const val KEYCODE_DOODLE_PANEL = -111
     /** 用于内部标识粘贴板历史面板开关（候选区按钮栏） */
     const val KEYCODE_CLIPBOARD_PANEL = -112
-    /** 用于内部标识循环切换全键盘输入方案（候选区按钮栏，仅 QWERTY 布局生效） */
-    const val KEYCODE_SWITCH_SCHEMA = -113
+    // -113 曾为循环切换全键盘输入方案（功能栏「切换输入方案」按钮），已移除，编号保留不复用
     /** 用于内部标识数字键盘开关（临时面板，与符号键盘同模式） */
     const val KEYCODE_NUMBER_KEYBOARD = -114
     /** 用于内部标识工具面板开关（候选区按钮栏 Logo 键，展示全部工具项） */
     const val KEYCODE_TOOL_PANEL = -115
-    /** 用于内部标识键盘选择面板开关（候选区按钮栏，列表选择主键盘布局） */
+    /** 用于内部标识键盘选择面板开关（功能栏「键盘切换」按钮，列表选择主键盘布局） */
     const val KEYCODE_KEYBOARD_PICKER = -116
     /** 用于内部标识语音输入面板开关（候选区按钮栏，流式语音转文字） */
     const val KEYCODE_VOICE_PANEL = -117

@@ -38,7 +38,7 @@ import com.ziyou.ime.data.ToolbarConfigRepository
  * 目录见 [ToolbarItem]；本视图注册 SharedPreferences 监听（观察者模式），
  * 设置页保存后无需重启输入法即时刷新。左侧固定按钮为极简「字」字标 Logo
  * （矢量绘制，随皮肤染色），点击打开工具面板（全量工具目录见
- * [ToolPanelCatalog]，设置入口已移入其中）。
+ * [ToolPanelCatalog]，设置入口位于面板标题栏「编辑」按钮左侧）。
  *
  * 遵循本项目「数据-皮肤-绘制」分离与 Canvas 纯绘制的既有风格
  * （见 [BaseKeyboardView] / [SimpleCandidatesView]）：按钮绘制为主题化胶囊，

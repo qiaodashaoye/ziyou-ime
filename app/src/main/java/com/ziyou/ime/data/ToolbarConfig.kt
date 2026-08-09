@@ -26,27 +26,27 @@ object ToolbarConfigRepository {
     private const val KEY_ITEMS = "toolbar_items"
 
     /** 默认配置：仅三核心按钮（技能 / 粘贴板 / AI 问答；功能栏从右往左排列，
-     *  视觉左起为 AI→粘贴板→技能）。设置与收起键盘为常驻固定按钮，不入配置；
-     *  其余按钮（主题/方案/涂鸦/悬浮）由用户在设置页或键盘内工具面板编辑模式自行添加；
+     *  视觉左起为 AI→粘贴板→技能）。收起键盘为常驻固定按钮，不入配置；
+     *  其余按钮（涂鸦/悬浮/语音/键盘切换）由用户在设置页或键盘内工具面板编辑模式自行添加；
      *  已自定义配置的存量用户不受默认值变更影响（仅未配置时回退本列表） */
     val DEFAULT_IDS = listOf("skill", "clipboard", "ai")
 
     /** 全量按钮配置（「全功能」预设，历史默认顺序 + 新增按钮追加在后） */
     private val FULL_IDS = listOf(
-        "theme", "schema", "doodle", "skill", "ai", "clipboard", "floating", "keyboard", "voice"
+        "doodle", "skill", "ai", "clipboard", "floating", "voice", "keyboard"
     )
 
-    /** 预设模板（设置页「预设模板」入口展示；设置/收起键盘常驻，不在模板内） */
+    /** 预设模板（设置页「预设模板」入口展示；收起键盘常驻，不在模板内） */
     val PRESETS = listOf(
         ToolbarPreset("核心", "问AI、粘贴板、技能（默认）", DEFAULT_IDS),
         ToolbarPreset("全功能", "全部功能按钮", FULL_IDS),
         ToolbarPreset(
             "创作", "偏重涂鸦与 AI 创作场景",
-            listOf("doodle", "ai", "skill", "theme")
+            listOf("doodle", "ai", "skill")
         ),
         ToolbarPreset(
             "效率", "偏重粘贴板、悬浮切换与快捷操作",
-            listOf("clipboard", "floating", "theme")
+            listOf("clipboard", "floating", "voice")
         )
     )
 

@@ -12,7 +12,7 @@ package com.ziyou.ime.ime
  * - [forcedSchemaId] 非空表示该布局强制绑定专用方案（如九宫格绑定 t9），
  *   由 ZiYouInputMethodService.applyEngineForKeyboard 负责同步；
  * - [allowsSchemaChoice] 表示该布局下是否允许用户自选方案，
- *   设置页与功能栏的方案选择均按此过滤/限制；
+ *   设置页的方案选择按此过滤/限制；
  * - [pickerLabel] 非空表示该布局是可持久化的主键盘，入功能栏
  *   「键盘切换」选择面板（[PICKER_TYPES]）；临时面板（符号/数字）
  *   为 null 不入选单，新增主键盘（如手写）声明本字段即自动进选单。
@@ -41,7 +41,7 @@ enum class KeyboardType(
         /** 九宫格键盘专用的 T9 方案 id */
         const val T9_SCHEMA_ID = "t9"
 
-        /** 全部布局专用方案 id（设置页/功能栏方案选择时过滤，不作为用户选项暴露） */
+        /** 全部布局专用方案 id（设置页方案选择时过滤，不作为用户选项暴露） */
         val FORCED_SCHEMA_IDS: Set<String> = entries.mapNotNull { it.forcedSchemaId }.toSet()
 
         /** 键盘选择面板的候选布局（声明了 [pickerLabel] 的可持久化主键盘） */

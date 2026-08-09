@@ -11,10 +11,11 @@ package com.ziyou.ime.ime
  * 新增功能按钮：在此追加枚举项即可被功能栏与设置页定制列表自动识别；
  * 预设模板见 [com.ziyou.ime.data.ToolbarConfigRepository.PRESETS]。
  *
- * 注：设置与收起键盘为功能栏常驻固定按钮（见 [CandidateToolbarView]，
- * 分居最左/最右侧），不入本目录、不参与用户自定义；中英切换与符号键盘
- * 已从功能栏移除（仍由键盘按键提供），历史配置中的这些 id 由
- * ToolbarConfigLogic 清洗剔除。
+ * 注：收起键盘为功能栏常驻固定按钮（见 [CandidateToolbarView]，
+ * 居最右侧），不入本目录、不参与用户自定义；设置入口移至工具面板
+ * 标题栏（见 [ToolPanelView]）；中英切换与符号键盘已从功能栏移除
+ * （仍由键盘按键提供），切换输入方案与切换主题按钮已下线，
+ * 历史配置中的这些 id 由 ToolbarConfigLogic 清洗剔除。
  */
 enum class ToolbarItem(
     /** 持久化 id（写入 SharedPreferences，跨版本保持稳定） */
@@ -28,8 +29,6 @@ enum class ToolbarItem(
     /** [KeyCode] 自定义功能码 */
     val keyCode: Int
 ) {
-    THEME("theme", "肤", "切换主题", ToolbarIconDrawer.Icon.THEME, KeyCode.KEYCODE_SWITCH_THEME),
-    SCHEMA("schema", "方", "切换输入方案", ToolbarIconDrawer.Icon.SCHEMA, KeyCode.KEYCODE_SWITCH_SCHEMA),
     DOODLE("doodle", "画", "涂鸦画板", ToolbarIconDrawer.Icon.DOODLE, KeyCode.KEYCODE_DOODLE_PANEL),
     SKILL("skill", "技", "技能面板", ToolbarIconDrawer.Icon.SKILL, KeyCode.KEYCODE_SKILL_PANEL),
     AI("ai", "AI", "AI 问答", ToolbarIconDrawer.Icon.AI, KeyCode.KEYCODE_AI_ASSISTANT),

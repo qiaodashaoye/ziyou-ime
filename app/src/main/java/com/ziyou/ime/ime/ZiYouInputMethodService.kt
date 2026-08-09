@@ -919,19 +919,9 @@ class ZiYouInputMethodService : InputMethodService() {
                 requestHideSelf(0)
             }
 
-            // 打开设置页（工具面板「设置」项，原功能栏固定设置按钮已替换为 Logo）
+            // 打开设置页（工具面板标题栏「设置」按钮，原功能栏固定设置按钮已替换为 Logo）
             KeyCode.KEYCODE_OPEN_SETTINGS -> {
                 openSettings()
-            }
-
-            // 循环切换皮肤（候选区按钮栏）：在已解锁皮肤间依次切换
-            KeyCode.KEYCODE_SWITCH_THEME -> {
-                cycleSkin()
-            }
-
-            // 循环切换全键盘输入方案（候选区按钮栏）：仅允许自选方案的布局生效
-            KeyCode.KEYCODE_SWITCH_SCHEMA -> {
-                cycleSchema()
             }
 
             // 符号键盘开关：记录进入前布局，再次触发（面板内「返回」键）时恢复
@@ -1090,22 +1080,6 @@ class ZiYouInputMethodService : InputMethodService() {
     }
 
     /**
-     * 在已解锁皮肤间循环切换（候选区按钮栏入口）。
-     * setSkin 成功后皮肤快照在 IO 线程重建，就绪后经 [skinChangeListener]
-     * 重建输入视图套用新皮肤并重同步引擎状态；引擎编码/方案不受影响。
-     */
-    private fun cycleSkin() {
-        val unlocked = SkinManager.getUnlockedSkinIds(this)
-        if (unlocked.size < 2) {
-            Toast.makeText(this, "暂无其他已解锁皮肤", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val current = SkinManager.getCurrentSkinId(this)
-        val next = unlocked[(unlocked.indexOf(current) + 1) % unlocked.size]
-        SkinManager.setSkin(this, next)
-    }
-
-    /**
      * 皮肤快照就绪/变更回调（主线程）：
      * - STYLE_ONLY（仅颜色/字号/圆角等样式变化，背景图/字体/布局尺寸不变）：
      *   对现有视图原地 applySkin，跳过全量重建，保留输入状态；
@@ -1138,51 +1112,6 @@ class ZiYouInputMethodService : InputMethodService() {
         candidatesView?.applySkin(skin)
         candidateToolbar?.applySkin(skin)
         preeditOverlay?.applySkin(skin)
-    }
-
-    /**
-     * 在可选方案间循环切换全键盘输入方案（候选区按钮栏「方」键入口）。
-     * 仅允许自选方案的布局（[KeyboardType.allowsSchemaChoice]）生效；
-     * 布局专用方案（如 t9）不入循环候选。切换成功后写入 [SchemaPreference]
-     * 偏好并重同步引擎状态，与设置页选择同一持久化链路。
-     */
-    private fun cycleSchema() {
-        if (!currentKeyboardType.allowsSchemaChoice) {
-            Toast.makeText(this, "当前键盘使用专用方案，请切换到全键盘后选择", Toast.LENGTH_SHORT).show()
-            return
-        }
-        serviceScope.launch {
-            try {
-                if (!engineSync.awaitEngineReady(EngineSyncController.KEY_ENGINE_READY_TIMEOUT_MS)) {
-                    Toast.makeText(this@ZiYouInputMethodService,
-                        "引擎正在部署，请稍后再试", Toast.LENGTH_SHORT).show()
-                    return@launch
-                }
-                // 布局专用方案（如 t9）是实现细节，不作为用户选项
-                val schemas = rime.api.getSchemaList()
-                    .filter { it.schemaId !in KeyboardType.FORCED_SCHEMA_IDS }
-                if (schemas.size < 2) {
-                    Toast.makeText(this@ZiYouInputMethodService,
-                        "暂无其他可选方案", Toast.LENGTH_SHORT).show()
-                    return@launch
-                }
-                val current = rime.api.getCurrentSchema()
-                val next = schemas[(schemas.indexOfFirst { it.schemaId == current } + 1) % schemas.size]
-                if (!rime.api.selectSchema(next.schemaId)) {
-                    Log.e(TAG, "循环切换方案失败: ${next.schemaId}")
-                    Toast.makeText(this@ZiYouInputMethodService,
-                        "切换方案失败", Toast.LENGTH_SHORT).show()
-                    return@launch
-                }
-                SchemaPreference.setQwertySchema(this@ZiYouInputMethodService, next.schemaId)
-                Toast.makeText(this@ZiYouInputMethodService,
-                    "已切换到: ${next.name}", Toast.LENGTH_SHORT).show()
-                // 重同步引擎状态到 UI（新方案与偏好已一致，仅刷新中英态/候选区）
-                engineSync.scheduleEngineSync()
-            } catch (e: Exception) {
-                Log.e(TAG, "循环切换方案异常: ${e.message}", e)
-            }
-        }
     }
 
     /**

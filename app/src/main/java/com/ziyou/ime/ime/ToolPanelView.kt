@@ -23,7 +23,8 @@ import com.ziyou.ime.skin.SkinTheme
  * 高度守恒策略。面板无文字输入需求，不接管输入路由——点击工具项经宿主
  * 回调功能码，由 Service 的 handleSoftKeyPress 统一路由（与功能栏按钮同源）。
  *
- * 标题栏：标题 + 编辑 + 关闭 ✕；网格区：每行 [GRID_COLUMNS] 个工具格
+ * 标题栏：标题 + 设置 + 编辑 + 关闭 ✕（设置入口自工具网格移入标题栏，
+ *  居「编辑」按钮左侧）；网格区：每行 [GRID_COLUMNS] 个工具格
  * （圆角图标位 + 名称），ScrollView 纵向滚动兜底小屏/横屏空间不足。
  * 图标位绘矢量图标（[ToolbarIconDrawer]，与功能栏 [CandidateToolbarView]
  * 同一目录与视觉规格，图标色跟随皮肤 toolbarTextColor）。
@@ -35,7 +36,6 @@ import com.ziyou.ime.skin.SkinTheme
  * [Host.onToolbarIdsChanged] 落盘），功能栏视图的配置监听实时刷新，
  * 无「保存」步骤。id 列表变换复用 :core-logic 的 [ToolbarConfigLogic]
  * 纯函数（add/remove/move），删空由纯函数拒绝（功能栏永不为空）。
- * 面板专属追加项（设置，toolbarId 为 null）不参与自定义，编辑态不展示。
  *
  * 无障碍：每个工具格为原生 View，contentDescription 取工具名称
  * （编辑态为「添加/移除/左移/右移 xx」动作描述），TalkBack 焦点导航
@@ -98,6 +98,7 @@ class ToolPanelView(
     private fun dp(value: Float): Int = (value * density + 0.5f).toInt()
 
     private val titleView: TextView
+    private val settingsButton: TextView
     private val editButton: TextView
     private val gridLayout: LinearLayout
 
@@ -121,13 +122,27 @@ class ToolPanelView(
         isClickable = true
         badgeSymbolPaint.strokeWidth = dp(1.6f).toFloat()
 
-        // ── 标题栏：标题 + 编辑 + 关闭 ✕ ──
+        // ── 标题栏：标题 + 设置 + 编辑 + 关闭 ✕ ──
         titleView = TextView(context).apply {
             text = "全部工具"
             textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(theme.keyTextColor)
             gravity = Gravity.CENTER_VERTICAL
+        }
+        settingsButton = TextView(context).apply {
+            text = "设置"
+            textSize = 12f
+            setTextColor(theme.keyTextColor)
+            gravity = Gravity.CENTER
+            setPadding(dp(10f), 0, dp(10f), 0)
+            background = roundedBg(theme.keyBackground, 8f, theme.borderColor)
+            contentDescription = "打开设置"
+            setOnClickListener {
+                host.performHaptic()
+                // 与网格工具项同路由：宿主先关面板再经 handleSoftKeyPress 打开设置页
+                host.onToolSelected(KeyCode.KEYCODE_OPEN_SETTINGS)
+            }
         }
         editButton = TextView(context).apply {
             text = "编辑"
@@ -160,8 +175,11 @@ class ToolPanelView(
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12f), dp(8f), dp(10f), dp(8f))
             addView(titleView, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
-            // 弹性占位：标题靠左，编辑/关闭钮靠右
+            // 弹性占位：标题靠左，设置/编辑/关闭钮靠右
             addView(View(context), LayoutParams(0, 0, 1f))
+            addView(settingsButton, LayoutParams(LayoutParams.WRAP_CONTENT, dp(32f)).apply {
+                rightMargin = dp(8f)
+            })
             addView(editButton, LayoutParams(LayoutParams.WRAP_CONTENT, dp(32f)).apply {
                 rightMargin = dp(8f)
             })
@@ -246,7 +264,7 @@ class ToolPanelView(
             })
             return
         }
-        // 可自定义工具索引（面板专属项 toolbarId 为 null，不参与编辑）
+        // 可自定义工具索引（目录项 toolbarId 回指功能栏 id）
         val byId = tools.filter { it.toolbarId != null }.associateBy { it.toolbarId!! }
         // 已显示区：按功能栏视觉顺序（左→右）= 配置列表反转
         val displayIds = enabledIds.reversed()

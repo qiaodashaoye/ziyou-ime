@@ -82,9 +82,10 @@ class ToolbarConfigTest {
 
     @Test
     fun `已移除按钮不在目录中`() {
-        // settings/hide 常驻固定、language/symbol/image 已下线：目录与配置均不得再出现，
+        // settings/hide 常驻固定、language/symbol/image 已下线、schema/theme
+        // （切换输入方案/切换主题）已下线：目录与配置均不得再出现，
         // 历史配置中的这些 id 由 ToolbarConfigLogic.sanitize 自动清洗
-        for (id in listOf("settings", "hide", "language", "symbol", "image")) {
+        for (id in listOf("settings", "hide", "language", "symbol", "image", "schema", "theme")) {
             assertEquals("已移除按钮仍在目录: $id", null, ToolbarItem.fromId(id))
             assertTrue("默认配置仍含已移除按钮: $id", id !in ToolbarConfigRepository.DEFAULT_IDS)
             for (preset in ToolbarConfigRepository.PRESETS) {

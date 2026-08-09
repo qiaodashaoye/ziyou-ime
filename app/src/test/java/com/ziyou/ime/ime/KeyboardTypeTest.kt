@@ -8,7 +8,7 @@ import org.junit.Test
 
 /**
  * 「键盘布局 ↔ 输入方案」映射元数据的回归防线：
- * applyEngineForKeyboard 的方案同步、设置页/功能栏的方案过滤均以
+ * applyEngineForKeyboard 的方案同步、设置页的方案过滤均以
  * [KeyboardType.forcedSchemaId] / [KeyboardType.allowsSchemaChoice] 为单一来源，
  * 由本测试锁定映射关系，防止新增布局或改动枚举时静默破坏既有约定。
  */
@@ -34,7 +34,7 @@ class KeyboardTypeTest {
 
     @Test
     fun `专用方案id集合与各布局声明一致`() {
-        // 设置页与功能栏按此集合过滤，不作为用户选项暴露
+        // 设置页按此集合过滤，不作为用户选项暴露
         assertEquals(setOf(KeyboardType.T9_SCHEMA_ID), KeyboardType.FORCED_SCHEMA_IDS)
     }
 

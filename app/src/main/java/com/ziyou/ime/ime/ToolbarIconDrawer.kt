@@ -22,8 +22,8 @@ import android.graphics.RectF
 class ToolbarIconDrawer {
 
     /** 图标目录：动态按钮（对应 [ToolbarItem]）+ 固定收起/Logo 按钮 +
-     *  工具面板专属设置项（[ToolPanelCatalog]） */
-    enum class Icon { THEME, SCHEMA, DOODLE, SKILL, AI, CLIPBOARD, FLOATING, KEYBOARD, VOICE, HIDE, SETTINGS, LOGO }
+     *  工具面板标题栏设置按钮（[ToolPanelView]） */
+    enum class Icon { DOODLE, SKILL, AI, CLIPBOARD, FLOATING, KEYBOARD, VOICE, HIDE, SETTINGS, LOGO }
 
     /** 单个图标的绘制规格：描边主体 + 可选填充细节（如颜料点/键帽） */
     private class Spec(val stroke: Path, val fill: Path? = null)
@@ -48,8 +48,6 @@ class ToolbarIconDrawer {
     }
 
     private val specs: Map<Icon, Spec> = mapOf(
-        Icon.THEME to theme(),
-        Icon.SCHEMA to schema(),
         Icon.DOODLE to doodle(),
         Icon.SKILL to skill(),
         Icon.AI to ai(),
@@ -79,49 +77,6 @@ class ToolbarIconDrawer {
     }
 
     // ===== 图标路径定义（坐标均为 24×24 网格） =====
-
-    /** 主题：调色盘（圆弧主体 + 拇指凹口）+ 三颗填充颜料点 */
-    private fun theme(): Spec {
-        val stroke = Path().apply {
-            // 主体圆弧：右侧留缺口（30° → 330°）
-            addArc(RectF(4f, 4.5f, 20f, 20.5f), 30f, 300f)
-            // 拇指凹口：连接缺口两端、向盘心深凹
-            moveTo(18.93f, 8.5f)
-            quadTo(13.2f, 12.5f, 18.93f, 16.5f)
-        }
-        val fill = Path().apply {
-            addCircle(8.6f, 9.2f, 1.35f, Path.Direction.CW)
-            addCircle(12.8f, 7.6f, 1.35f, Path.Direction.CW)
-            addCircle(7.4f, 13.4f, 1.35f, Path.Direction.CW)
-        }
-        return Spec(stroke, fill)
-    }
-
-    /** 方案：环形双箭头（切换语义）环绕简笔「文」（输入方案语义） */
-    private fun schema(): Spec {
-        val stroke = Path().apply {
-            // 上弧（顺时针）+ 末端箭头
-            addArc(RectF(3f, 3f, 21f, 21f), 205f, 105f)
-            moveTo(16.63f, 1.91f)
-            lineTo(17.79f, 5.11f)
-            lineTo(14.44f, 4.52f)
-            // 下弧（中心对称）+ 末端箭头
-            addArc(RectF(3f, 3f, 21f, 21f), 25f, 105f)
-            moveTo(7.37f, 22.09f)
-            lineTo(6.21f, 18.89f)
-            lineTo(9.56f, 19.48f)
-            // 简笔「文」：点、横、撇、捺
-            moveTo(12f, 6.6f)
-            lineTo(12f, 7.8f)
-            moveTo(8.2f, 10.2f)
-            lineTo(15.8f, 10.2f)
-            moveTo(14.2f, 10.2f)
-            quadTo(12.6f, 13.8f, 8.4f, 16.6f)
-            moveTo(9.8f, 12.2f)
-            quadTo(12.4f, 14.4f, 15.6f, 16.6f)
-        }
-        return Spec(stroke)
-    }
 
     /** 涂鸦：45° 铅笔轮廓 + 笔下波浪线 */
     private fun doodle(): Spec {

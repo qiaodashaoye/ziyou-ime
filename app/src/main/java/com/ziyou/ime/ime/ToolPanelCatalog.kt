@@ -5,8 +5,8 @@ package com.ziyou.ime.ime
  *
  * 候选区按钮栏 Logo 键（[KeyCode.KEYCODE_TOOL_PANEL]）打开的工具面板
  * 展示**全部可用工具**：完整的 [ToolbarItem] 目录（不受用户功能栏
- * 自定义配置影响，面板始终全量展示）+ 面板专属追加项（如「设置」——
- * 原功能栏固定设置按钮被 Logo 取代后，设置入口移入本面板）。
+ * 自定义配置影响，面板始终全量展示）。「设置」入口不在网格内，
+ * 移至面板标题栏「编辑」按钮左侧（见 [ToolPanelView]）。
  *
  * 面板条目的功能码与功能栏同源，统一由 Service 的 handleSoftKeyPress 路由，
  * 目录本身不含行为逻辑（与 [ToolbarItem] 同一设计纪律）。
@@ -24,16 +24,11 @@ object ToolPanelCatalog {
         val icon: ToolbarIconDrawer.Icon,
         /** [KeyCode] 自定义功能码 */
         val keyCode: Int,
-        /** 对应的 [ToolbarItem] 持久化 id（面板编辑模式的增删排序目标）；
-         *  面板专属追加项（如设置）为 null，不参与功能栏自定义 */
+        /** 对应的 [ToolbarItem] 持久化 id（面板编辑模式的增删排序目标） */
         val toolbarId: String? = null
     )
 
-    /** 面板专属追加项：打开设置页（不入 [ToolbarItem] 功能栏目录） */
-    private val SETTINGS_TOOL =
-        Tool("设", "设置", ToolbarIconDrawer.Icon.SETTINGS, KeyCode.KEYCODE_OPEN_SETTINGS)
-
-    /** 面板展示的全部工具项（顺序：完整功能栏目录 → 面板专属项） */
+    /** 面板展示的全部工具项（完整功能栏目录，顺序一致） */
     fun allTools(): List<Tool> =
-        ToolbarItem.entries.map { Tool(it.label, it.description, it.icon, it.keyCode, it.id) } + SETTINGS_TOOL
+        ToolbarItem.entries.map { Tool(it.label, it.description, it.icon, it.keyCode, it.id) }
 }

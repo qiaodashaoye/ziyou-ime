@@ -3,7 +3,6 @@ package com.ziyou.ime.ime
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewGroup
-import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.annotation.MainThread
 import com.ziyou.ime.skin.SkinManager
