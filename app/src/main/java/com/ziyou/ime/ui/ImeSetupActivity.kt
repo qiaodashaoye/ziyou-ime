@@ -21,6 +21,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.ziyou.ime.core.routing.StartupRouteLogic
 import com.ziyou.ime.data.UserPreferenceRepository
+import com.ziyou.ime.update.AppUpdateManager
 
 /**
  * 字由输入法 启用引导页（应用启动页 / Launcher Activity）
@@ -143,6 +144,10 @@ class ImeSetupActivity : AppCompatActivity() {
 
         // 启动器根页面：上层无可返回的页面，故不展示返回键
         setContentViewWithTitleBar("设置字由输入法", buildView(), showBack = false)
+
+        // 应用启动时后台检测到的新版本在此弹窗（每进程最多一次；
+        // 已就绪时本页直达设置页，弹窗由设置页承接）
+        window.decorView.post { AppUpdateManager.showPendingUpdateIfNeeded(this) }
     }
 
     override fun onResume() {

@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- 语音输入：仅本地离线识别，音频不落盘不上传（见 docs/实时语音输入可行性方案.md） -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 应用内更新：Android 8.0+ 运行时还需用户在系统设置授予「安装未知应用」（见 update/ApkInstaller） -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!--
       allowBackup=false：输入法的用户词典（rime_user/）会随使用积累已输入词汇，属敏感数据。
@@ -111,6 +113,21 @@
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/ime_file_paths" />
+        </provider>
+
+        <!--
+          应用内更新：把 cache/update_apk/ 下的新版 APK 暴露为 content:// URI，
+          经 ACTION_VIEW + FLAG_GRANT_READ_URI_PERMISSION 临时授权给系统安装器。
+          与图片用的 imecontent Provider 隔离，仅开放更新目录、不扩大敏感面。
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updateprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_apk_paths" />
         </provider>
 
     </application>

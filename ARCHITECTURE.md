@@ -48,6 +48,7 @@
 │  core/level/LevelEngine(等级计分纯引擎)                                 │
 │  core/skill/*(manifest 校验 · Zip 安全 · 版本比较 · 权限定义)            │
 │  core/floating/FloatingPanelGeometry(悬浮几何) · core/markdown(轻渲染)   │
+│  util/AppVersionUtils(版本名逐段比较，应用内更新用)                     │
 └──────────────────────────────────────────────────────────────────────┘
 
       横向业务域（:app 内，复用引擎栈，通过 IME 层与 UI 层接入）
@@ -343,6 +344,26 @@ DictManagerViewModel / DictManagerActivity  Compose 管理界面：分类浏览�
   键入数字追加 `T9Key`；选定拼音用 `PinyinKey` **原地替换**首个 T9Key 段（使已锁定拼音始终排在剩余数字之前）；
   智能退格解锁尾部拼音还原为数字段。返回 `ReplaceCommand(caretPos, length, replacement)` 供 `RimeApi.replaceKey`。
 - **SideSymbolRepository**（:app，`com.ziyou.ime.data`）：拼音侧栏自定义符号（SharedPreferences + JSON 持久化，默认常用标点）。
+
+#### 应用更新 (update/ + :core-logic/util)
+基于蒲公英（Pgyer）应用分发平台的 in-app 更新（API 2.0，文档见 https://www.pgyer.com/doc/view/api）：
+```
+UpdateConfig        接入配置（API Key/App Key，未配置时更新功能整体关闭）与频控/限流常量
+PgyerUpdateChecker  检测更新（POST /apiv2/app/check，HttpURLConnection，IO 线程，响应限大小）
+AppUpdateManager    总控：主进程守卫、24h 频控、版本对比、下载与安装编排
+UpdateApkDownloader APK 下载：仅 HTTPS + 逐跳受控重定向 + 体积上限 + .part 原子就位
+UpdateSettings      频控时间戳 / 忽略版本 / 待更新快照持久化（SharedPreferences）
+ApkInstaller        REQUEST_INSTALL_PACKAGES 权限引导 + 独立 FileProvider URI 唤起安装器
+UpdateDialogHelper  纯代码弹窗：新版本提示 / 下载进度 / 安装权限引导
+```
+- **检测时机**：仅 `ZiyouApplication.onCreate` 在**主进程**触发静默检测（24h 最多一次，启动延时 3s
+  避免抢占启动期资源）；结果暂存为待更新快照，由前台 Activity（设置页/引导页）弹窗，
+  每进程最多一次；键盘输入法服务不参与任何更新逻辑，不干扰输入热路径；
+- **版本对比**：优先数字版本号（远端 buildVersionNo vs 本地 versionCode），缺失时回退
+  versionName 逐段比较（:core-logic `AppVersionUtils`，含单测）；
+- **失败处理**：检测失败计入频控避免反复重试；下载失败清理 .part 半成品并提示重试；
+  「忽略该版本」仅屏蔽自动提示，手动检查仍展示；
+- 下载地址不经固定白名单（蒲公英 CDN 域名动态），以鉴权 API 响应为信任源，仅卡 HTTPS 协议。
 
 #### 联想输入（引擎级，librime-predict）
 联想能力由 **librime-predict** 插件提供（基于 predict.db 的下一词预测）：启用后引擎在 commit 后

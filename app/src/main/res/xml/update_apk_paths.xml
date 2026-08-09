@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  应用内更新 FileProvider 暴露路径：仅开放 cache/update_apk/ 子目录，
+  用于把下载的更新 APK 以 content:// URI 授权给系统安装器读取。
+  不暴露用户词库（rime_user/）等敏感目录，与 allowBackup=false 的隐私优先基线一致。
+-->
+<paths>
+    <cache-path
+        name="update_apk"
+        path="update_apk/" />
+</paths>

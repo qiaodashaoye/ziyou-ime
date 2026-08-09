@@ -41,6 +41,7 @@ import com.ziyou.ime.ime.ToolbarItem
 import com.ziyou.ime.core.toolbar.ToolbarConfigLogic
 import com.ziyou.ime.core.level.LevelEngine
 import com.ziyou.ime.level.LevelRepository
+import com.ziyou.ime.update.AppUpdateManager
 import com.ziyou.ime.voice.VoiceModelCatalog
 import com.ziyou.ime.voice.VoiceModelManager
 import com.ziyou.ime.voice.VoiceModelManager.VoiceCommitMode
@@ -135,6 +136,9 @@ class SettingsActivity : AppCompatActivity() {
                 if (forPermission) requestAudioPermission() else showVoiceModelManager()
             }
         }
+
+        // 应用启动时后台检测到的新版本在此弹窗（每进程最多一次，不重复打扰）
+        window.decorView.post { AppUpdateManager.showPendingUpdateIfNeeded(this) }
     }
 
     override fun onResume() {
@@ -314,7 +318,10 @@ class SettingsActivity : AppCompatActivity() {
         // ===== 关于 =====
         column.addView(createSectionHeader("关于"))
         column.addView(createCard(
-            createSettingItem("ℹ️", "版本", getVersionInfo())
+            createSettingItem("ℹ️", "版本", getVersionInfo()),
+            createSettingItem("📥", "检查更新", "自动检测每日最多一次，也可点击立即检查新版本") {
+                AppUpdateManager.checkUpdateManually(this)
+            }
         ))
 
         // 宽屏下内容列被限宽后由 FrameLayout 水平居中

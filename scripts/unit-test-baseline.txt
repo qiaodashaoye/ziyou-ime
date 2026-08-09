@@ -8,7 +8,6 @@
 #   ./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest
 #   把实测总数写到下面（首个纯数字行即基线，其余行为注释）。
 #
-# 当前实测：:core-logic 216 + :app 201（2026-08-06，全绿、0 跳过；
-# 语音模块资源回收修复：SPEAKING 态静默超时自动收尾（状态机用例改写）、
-# release 后经 AppContainer 懒获取重建全新引擎实例的回归用例 ×2）
-417
+# 当前实测：:core-logic 226 + :app 201（2026-08-07，全绿、0 跳过；
+# 应用内更新（蒲公英分发）：新增 AppVersionUtilsTest 版本名对比用例 ×10）
+427
