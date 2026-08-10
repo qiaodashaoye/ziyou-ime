@@ -4,7 +4,7 @@
 schema:
   schema_id: luna_pinyin
   name: 朙月拼音·简体
-  version: "2026-08-04.1"
+  version: "2026-08-10.3"
   author:
     - 佛振 <chen.sst@gmail.com>
   description: |
@@ -80,11 +80,29 @@ speller:
     - derive/un$/uen/correction
     - derive/ui$/uei/correction
     - derive/iu$/iou/correction
-    - derive/([aeiou])ng$/$1gn/correction
+    - derive/([aeiou])ng$/$1gn   # ng→gn 换位（zhogn）：派生拼写不与真实拼音冲突，正常权重保证纠错候选靠前
     - derive/([dtngkhrzcs])o(u|ng)$/$1o/correction
     - derive/ong$/on/correction
     - derive/ao$/oa/correction
     - derive/([iu])a(o|ng?)$/a$1$2/correction
+    # ── 模糊音（常开；仅高频对，控制候选噪声）──
+    - derive/^([zcs])h/$1/                # 平翘舌：zh→z ch→c sh→s
+    - derive/([ei])n$/$1ng/               # 前后鼻音：en→eng in→ing
+    - derive/([ei])ng$/$1n/               # 前后鼻音：eng→en ing→in
+    # ── 错拼容错补充（correction 低权重，不与精确匹配竞争）──
+    - derive/ie$/ei/correction            # ie/ei 颠倒（jie↔jei 手误）
+    - derive/ei$/ie/correction
+    - derive/an$/ang/correction           # 前后鼻音手误：an↔ang（降权，区别于常开模糊音）
+    - derive/ang$/an/correction
+    # ── 字母顺序颠倒容错（对标主流输入法错拼纠正）──
+    # 派生拼写（zhnog/bna/jain…）不与任何真实拼音冲突，用正常权重（无 correction 标签），
+    # 保证纠错候选（中/种/钟）排在 zh'n'o'g 简拼句之前；
+    # ou/uo 等与真实音节双向冲突的对保留 correction 标签降权，避免候选互串
+    - derive/([aeiou])ng$/n$1g            # 元音与 n 换位：zhong→zhnog
+    - derive/([aeiou])n$/n$1              # 元音与 n 换位（无尾 g）：ban→bna, lin→lni
+    - derive/([iu])an$/a$1n               # 介母与元音换位：jian→jain, tuan→taun
+    - derive/ou$/uo/correction            # ou/uo 换位：dou↔duo（均为真实音节，必须降权）
+    - derive/uo$/ou/correction
     # ── 内置英文词/表情标记码（0 前缀）去标记与降级 ──
     # 英文词编码以 0 作标记前缀（如 0ok），去标记后降级为简拼(abbrev)拼写，
     # 避免英文整码以 normal 拼写触发 Syllabifier 剪枝挤掉中文候选；
@@ -94,6 +112,9 @@ speller:
 
 translator:
   dictionary: luna_pinyin
+  # 邻键误触纠正：引擎内置 QWERTY 邻键表（NearSearchCorrector）对输入做
+  # 容错搜索，纠错候选低权重且限量产出，不影响精确匹配排序
+  enable_correction: true
   preedit_format:
     - xform/([nljqxy])v/$1ü/
 

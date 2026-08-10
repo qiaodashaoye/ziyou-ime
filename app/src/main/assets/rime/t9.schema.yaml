@@ -13,7 +13,7 @@
 schema:
   schema_id: t9
   name: 中文九键
-  version: "2.3"
+  version: "2.8"
   author:
     - 字由输入法
   description: |
@@ -77,12 +77,37 @@ speller:
     # 超级简拼（首字母），zh/ch/sh 视为整体
     - abbrev/^([a-z]).+$/$1/
     - abbrev/^([zcs]h).+$/$1/
-    # 常见容错
-    - derive/^([nl])ve$/$1ue/
-    - derive/^([jqxy])u/$1v/
-    - derive/un$/uen/
-    - derive/ui$/uei/
-    - derive/iu$/iou/
+    # 常见容错（correction 低权重，与 luna_pinyin.schema.yaml 同名规则保持同步）
+    # 注：^([nl])ve$/$1ue 与 ^([jqxy])u/$1v 两条在九键下可证明冗余（u/v 同属 8 键，
+    # lve=lue=583、ju=jv=58，数字编码完全相同，九键消歧天然覆盖），已于 2.8 移除
+    # 以降低棱镜/音节图边数；全键盘方案保留
+    - derive/un$/uen/correction
+    - derive/ui$/uei/correction
+    - derive/iu$/iou/correction
+    - derive/([aeiou])ng$/$1gn   # ng→gn 换位（zhogn）：派生拼写不与真实拼音冲突，正常权重保证纠错候选靠前
+    - derive/([dtngkhrzcs])o(u|ng)$/$1o/correction
+    - derive/ong$/on/correction
+    - derive/ao$/oa/correction
+    - derive/([iu])a(o|ng?)$/a$1$2/correction
+    # ── 模糊音（常开；仅高频对，控制候选噪声）──
+    - derive/^([zcs])h/$1/                # 平翘舌：zh→z ch→c sh→s
+    - derive/([ei])n$/$1ng/               # 前后鼻音：en→eng in→ing
+    - derive/([ei])ng$/$1n/               # 前后鼻音：eng→en ing→in
+    # ── 错拼容错补充（correction 低权重，不与精确匹配竞争）──
+    - derive/ie$/ei/correction            # ie/ei 颠倒（jie↔jei 手误）
+    - derive/ei$/ie/correction
+    - derive/an$/ang/correction           # 前后鼻音手误：an↔ang（降权，区别于常开模糊音）
+    - derive/ang$/an/correction
+    # ── 字母顺序颠倒容错（对标主流输入法错拼纠正）──
+    # 注意：九键下多数换位（如 zhong/zhnog 同为 94664）本就被数字消歧覆盖，
+    # 此规则组主要补盖跨数字键的换位（如 ing→ign：464→446）。
+    # 派生拼写不与真实拼音冲突，用正常权重（无 correction 标签）保证纠错候选靠前；
+    # ou/uo 等与真实音节双向冲突的对保留 correction 标签降权
+    - derive/([aeiou])ng$/n$1g            # 元音与 n 换位：zhong→zhnog
+    - derive/([aeiou])n$/n$1              # 元音与 n 换位（无尾 g）：ban→bna, lin→lni
+    - derive/([iu])an$/a$1n               # 介母与元音换位：jian→jain, tuan→taun
+    - derive/ou$/uo/correction            # ou/uo 换位：dou↔duo（均为真实音节，必须降权）
+    - derive/uo$/ou/correction
     # ── 九宫格数字映射（保留字母写法，额外派生数字写法）──
     # 每个字母既保留原始字母编码，又新增对应数字编码，
     # 引擎同时匹配字母拼音和数字编码，从而实现智能消歧。
@@ -107,6 +132,12 @@ translator:
   dictionary: luna_pinyin
   enable_user_dict: true
   enable_sentence: true
+  # 性能红线：此处刻意不开启 enable_correction。九键编码经 derive 映射后棱镜
+  # 数字节点极稠密，而 NearSearchCorrector::ToleranceSearch（容错度硬编码 5）在
+  # BuildSyllableGraph 中对每个顶点做邻键替换 BFS：数字键的邻键（keyboard_map）
+  # 替换结果几乎都能命中稠密棱镜，剪枝失效导致路径组合爆炸，单键耗时随编码
+  # 长度超线性增长（InputLogicController 慢按键日志可复现）。九键本身一码多音
+  # 的消歧已覆盖绝大多数相邻键误触，故全键盘（luna_pinyin）保留、九键关闭。
   # 让候选携带真实拼音读音（作为 comment），供客户端拼音候选区展示
   spelling_hints: 32
   preedit_format:
