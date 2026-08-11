@@ -4,7 +4,7 @@
 schema:
   schema_id: luna_pinyin
   name: 朙月拼音·简体
-  version: "2026-08-10.3"
+  version: "2026-08-10.4"
   author:
     - 佛振 <chen.sst@gmail.com>
   description: |
@@ -86,9 +86,13 @@ speller:
     - derive/ao$/oa/correction
     - derive/([iu])a(o|ng?)$/a$1$2/correction
     # ── 模糊音（常开；仅高频对，控制候选噪声）──
-    - derive/^([zcs])h/$1/                # 平翘舌：zh→z ch→c sh→s
-    - derive/([ei])n$/$1ng/               # 前后鼻音：en→eng in→ing
-    - derive/([ei])ng$/$1n/               # 前后鼻音：eng→en ing→in
+    # fuzz 标签使模糊拼写带 log(0.5) 半权惩罚：候选仍正常展示（syllabifier
+    # 剪枝对 fuzzy 拼写豁免），但排序让位于精确匹配。此前用无标签 derive 导致
+    # 模糊匹配与精确匹配同权重，出现如九键下“求职经历”（经模糊音节“职”）
+    # 排在“数字经济”（全精确匹配）之前的错误排序
+    - derive/^([zcs])h/$1/fuzz            # 平翘舌：zh→z ch→c sh→s
+    - derive/([ei])n$/$1ng/fuzz           # 前后鼻音：en→eng in→ing
+    - derive/([ei])ng$/$1n/fuzz           # 前后鼻音：eng→en ing→in
     # ── 错拼容错补充（correction 低权重，不与精确匹配竞争）──
     - derive/ie$/ei/correction            # ie/ei 颠倒（jie↔jei 手误）
     - derive/ei$/ie/correction
