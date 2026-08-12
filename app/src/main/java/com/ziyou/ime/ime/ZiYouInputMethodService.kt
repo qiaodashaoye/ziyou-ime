@@ -26,6 +26,8 @@ import com.ziyou.ime.core.CandidateProto
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.core.RimeMessage
 import com.ziyou.ime.core.RimeNative
+import com.ziyou.ime.core.prediction.AutoPunctPolicy
+import com.ziyou.ime.core.prediction.CandidateFusion
 import com.ziyou.ime.daemon.RimeEngine
 import com.ziyou.ime.core.t9.KeyRecordStack
 import com.ziyou.ime.data.ClipboardHistoryRepository
@@ -356,11 +358,34 @@ class ZiYouInputMethodService : InputMethodService() {
     /** 九宫格输入状态追踪栈（拼音消歧与智能回退） */
     private val keyRecordStack = KeyRecordStack()
 
+    /**
+     * 最近一次 renderContext 是否处于「无活跃编码」态（input 为空）。
+     * LLM 续写的追加窗口以此为准而非「预测态」（menu 非空且 input 为空）：
+     * 句末标点上屏时引擎会主动清预测、predict.db 未收录的词 menu 也为空，
+     * 这两种 menu 空的时刻恰是 LLM 续写最有价值的场景，不得拒绝。
+     * 结果回调时二次校验：仅在仍无活跃编码时追加渲染，否则丢弃。
+     */
+    private var llmAppendAllowed = false
+
+    /**
+     * 最近一次 renderContext 是否为引擎预测态（menu 非空且 input 为空）。
+     * 候选点击时据此判定是否属于「采纳引擎预测词」，触发自动补标点
+     *（AutoPunctPolicy）——仅预测态候选享有此行为，普通组句候选不插标点。
+     */
+    private var lastEnginePredictionMode = false
+
+    /** 当前已追加展示的 LLM 续写词（与 [llmCandidatesStartIndex] 配套，点击分段路由用） */
+    private var llmCandidates: List<String> = emptyList()
+
+    /** LLM 追加词在候选流中的起始 index（= 追加时刻的引擎候选总数） */
+    private var llmCandidatesStartIndex = 0
+
     /** 输入逻辑控制器（与 Rime 交互、上屏、刷新 UI），经 DI 容器获取引擎与上屏监听。 */
     private val inputLogic by lazy {
         InputLogicController(
             AppContainer.rimeEngine, serviceScope, keyRecordStack,
-            inputLogicCallbacks, AppContainer.commitListeners
+            inputLogicCallbacks, AppContainer.commitListeners,
+            AppContainer.commitTextObservers
         )
     }
 
@@ -392,6 +417,30 @@ class ZiYouInputMethodService : InputMethodService() {
 
         // 初始化等级计分（热路径仅做内存自增，此处仅注入 applicationContext）
         LevelStats.init(applicationContext)
+
+        // LLM 智能续写结果回调（主线程）：仍处于「无活跃编码」态才追加渲染，
+        // 否则丢弃——迟到的词不允许挂到新一轮编码的候选栏上（epoch 守卫的
+        // 视图层第二道防线）。追加前经 CandidateFusion 双重去重：与引擎候选
+        // 重复时保留引擎身份；与上下文词（最近上屏词，含刚采纳的续写词）
+        // 重复时丢弃——防模型复读把刚上屏的词再次推回候选栏
+        AppContainer.llmPredictionCoordinator.onResult = { _, candidates, contextWords ->
+            val view = candidatesView
+            if (llmAppendAllowed && view != null && candidates.isNotEmpty()) {
+                val engineTexts = view.engineCandidateTexts()
+                val fused = CandidateFusion.fuse(
+                    engineTexts, candidates, engineTexts.size + 5, exclude = contextWords
+                )
+                val llmPart = fused.subList(engineTexts.size.coerceAtMost(fused.size), fused.size)
+                if (llmPart.isNotEmpty()) {
+                    llmCandidatesStartIndex = view.engineCandidateCount()
+                    llmCandidates = llmPart
+                    view.appendLlmCandidates(llmPart)
+                    // 引擎 menu 为空时功能按钮栏可见（updateToolbarVisibility），
+                    // 追加 LLM 候选后隐藏避免两栏重叠；menu 非空时已隐藏，幂等无害
+                    candidateToolbar?.visibility = View.GONE
+                }
+            }
+        }
 
         // 预热符号键盘的 YAML 分类缓存（后台线程，首次切到数学/序号等分类时零 IO）
         serviceScope.launch(Dispatchers.IO) {
@@ -685,6 +734,19 @@ class ZiYouInputMethodService : InputMethodService() {
     }
 
     /**
+     * 输入会话开始（含同一 App 内切换输入框）。
+     *
+     * LLM 智能续写：同 App 内切换输入框时键盘视图不收起，只回调本方法而
+     * 不再回调 [onStartInputView]，必须在此清空词窗口/缓存，否则 A 输入框的
+     * 上下文会泄漏进 B 的会话并随之发往第三方服务（隐私红线，设计文档 §4.6）。
+     * 纯内存操作，零 IO；与 onStartInputView/onFinishInputView 的 reset 幂等重复无害。
+     */
+    override fun onStartInput(info: EditorInfo?, restarting: Boolean) {
+        super.onStartInput(info, restarting)
+        AppContainer.llmPredictionCoordinator.reset()
+    }
+
+    /**
      * 开始输入时调用
      * 清除之前的编码状态，准备新的输入会话
      */
@@ -706,6 +768,10 @@ class ZiYouInputMethodService : InputMethodService() {
 
         // 兜底同步当前剪贴板（服务重启期间漏听的复制在此补收；去重逻辑保证幂等零 IO）
         captureClipboardToHistory()
+
+        // LLM 智能续写：新输入会话开始，清空词窗口/缓存并作废 in-flight 请求
+        //（防跨输入框上下文泄漏；纯内存操作，零 IO）
+        AppContainer.llmPredictionCoordinator.reset()
 
         // 词库下载后引擎可能正在重新部署，scheduleEngineSync 内部先等待就绪再同步，
         // 否则 rime.api 抛异常导致 t9 方案/ascii_mode 永不恢复，九宫格按键失效；
@@ -746,6 +812,9 @@ class ZiYouInputMethodService : InputMethodService() {
 
         // 输入视图隐藏，主动落盘累计的上屏计分，避免尾部数据丢失
         LevelStats.flush()
+
+        // LLM 智能续写：输入视图收起即会话结束，清空上下文（与 onStartInputView 对称）
+        AppContainer.llmPredictionCoordinator.reset()
 
         serviceScope.launch {
             try {
@@ -994,10 +1063,49 @@ class ZiYouInputMethodService : InputMethodService() {
 
     // ===== 候选词操作（委托 InputLogicController）=====
 
-    /** 处理候选词点击（含引擎预测词，均经 Rime 选词路径）；
+    /** 处理候选词点击（含引擎预测词与 LLM 续写词，按 index 分段路由）；
      *  携带被点候选本体供分段确认同步（跨页时引擎当前页 menu 查不到其注音）。 */
-    private fun handleCandidateClick(index: Int, candidate: CandidateProto) =
+    private fun handleCandidateClick(index: Int, candidate: CandidateProto) {
+        val llmOffset = index - llmCandidatesStartIndex
+        if (llmCandidates.isNotEmpty() && llmOffset in llmCandidates.indices) {
+            // LLM 续写词（index ≥ 引擎候选总数）：不走 Rime 选词，直达宿主编辑器。
+            // 绕过 commitTarget 是有意为之——预测态宿主必为真实编辑器；
+            // commitDirectToEditor 已回调 commitTextObservers，被采纳的续写词进入
+            // 下一轮上下文，续写链自然延续。
+            val adopted = llmCandidates[llmOffset]
+            val hadEnginePrediction = llmCandidatesStartIndex > 0
+            // 自动补标点：前文与续写词之间无标点时前置逗号（单次 commit 同落，
+            // 顺序天然保证）；候选自带前导标点/前文已带标点时策略返回空串
+            val prefix = AutoPunctPolicy.decidePrefix(
+                AppContainer.llmPredictionCoordinator.contextWords(), adopted
+            )
+            // 采纳后先清候选栏残留：被采纳的词不得继续挂在候选栏上（视图 LLM
+            // 尾部与 Service 路由记录同步清零；新一轮请求的结果到达后会重建）
+            llmCandidates = emptyList()
+            candidatesView?.clearLlmCandidates()
+            inputLogic.commitDirectToEditor(prefix + adopted)
+            // 直达上屏绕过了 Rime：若候选栏里曾有引擎预测词，引擎内部残留的
+            // prediction 占位段会令陈旧预测候选留在 menu（含刚被采纳的同形词）。
+            // 发 Escape 让 predictor 清预测与占位段（predictor.cc ProcessKeyEvent）
+            // 并重新渲染，终止陈旧预测态；仅在确有引擎预测候选时发，避免误触
+            if (hadEnginePrediction) {
+                inputLogic.clearStalePrediction()
+            }
+            return
+        }
+        // 引擎预测候选采纳：自动补标点。标点必须先于预测词落编辑器——
+        // 主线程同步提交标点后 selectCandidate 协程才入队（Main FIFO 保序）；
+        // 非预测态（普通组句候选）不插标点，策略内部另有防叠加规则
+        if (lastEnginePredictionMode) {
+            val prefix = AutoPunctPolicy.decidePrefix(
+                AppContainer.llmPredictionCoordinator.contextWords(), candidate.text
+            )
+            if (prefix.isNotEmpty()) {
+                inputLogic.commitAutoPunctuation(prefix)
+            }
+        }
         inputLogic.selectCandidate(index, candidate)
+    }
 
     /** 处理翻页。@param forward true=下一页, false=上一页 */
     private fun handlePageChange(forward: Boolean) = inputLogic.changePage(forward)
@@ -1044,6 +1152,20 @@ class ZiYouInputMethodService : InputMethodService() {
         // 编码串为空）复用联想强调色，与普通候选词区分；未启用 predict 模块时该分支休眠
         val predictionMode = context?.menu?.candidates?.isNotEmpty() == true && context.input.isEmpty()
         candidatesView?.updateCandidates(context, predictionMode)
+        lastEnginePredictionMode = predictionMode
+        // LLM 追加窗口以「无活跃编码」为准：句末标点上屏引擎清预测（menu 空）、
+        // predict.db 未收录的上屏词 menu 也为空——若以预测态为门控，这两种 LLM
+        // 续写最有价值的场景会被 invalidate/结果丢弃误杀（新编码开始才是真正作废时刻）
+        val idle = context?.input.isNullOrEmpty() != false
+        llmAppendAllowed = idle
+        // 引擎新渲染已作废视图侧 LLM 追加尾部（updateCandidates 内清空），
+        // Service 侧路由记录同步清零，防陈旧分段误路由
+        llmCandidates = emptyList()
+        if (!idle) {
+            // 用户开始新编码：作废待发射/in-flight 的 LLM 请求。
+            // renderContext 在主线程，invalidate 只做 epoch++ 与 cancel job，足够轻量
+            AppContainer.llmPredictionCoordinator.invalidate()
+        }
         // 无候选词且无活跃编码时显示候选区功能按钮栏
         updateToolbarVisibility(context)
         // 编码区同源同步（仅候选栏悬浮层，键盘视图不绘制编码）：九宫格按候选
@@ -1197,6 +1319,8 @@ class ZiYouInputMethodService : InputMethodService() {
         }
         // 释放全部面板（技能 WebView / AI 请求 / 涂鸦 / 粘贴板 / 工具 / 键盘选择 / 语音）
         closeAllPanels()
+        // 解绑 LLM 续写结果回调（协调器为进程级单例，持回调会泄漏已销毁 Service）
+        AppContainer.llmPredictionCoordinator.onResult = null
         AppContainer.speechEngine.release()
         // 服务销毁前落盘剩余的上屏计分
         LevelStats.flush()

@@ -36,6 +36,8 @@ import kotlinx.coroutines.withContext
  * - [callbacks]：向 Service 反向获取 [InputConnection] 与执行主线程 UI 渲染。
  * - [commitListeners]：编辑器路径上屏后的横切监听（如等级计分），由组合根装配注入，
  *   本类不再硬编码依赖具体业务单例；回调参数为脱敏的 Unicode 码点数。
+ * - [commitTextObservers]：编辑器路径上屏后的文本观察者（如 LLM 智能续写），
+ *   与脱敏的 [commitListeners] 语义隔离——等级链路永远不见内容，文本仅供续写上下文。
  *
  * 线程模型与原实现一致：`engine.api.*` 为挂起调用（自动切到 Rime 线程），
  * UI 渲染经 [Callbacks.renderContext] 在主线程执行。
@@ -45,7 +47,8 @@ class InputLogicController(
     private val scope: CoroutineScope,
     private val keyRecordStack: KeyRecordStack,
     private val callbacks: Callbacks,
-    private val commitListeners: List<(codePoints: Int) -> Unit> = emptyList()
+    private val commitListeners: List<(codePoints: Int) -> Unit> = emptyList(),
+    private val commitTextObservers: List<(String) -> Unit> = emptyList()
 ) {
 
     companion object {
@@ -240,7 +243,9 @@ class InputLogicController(
                         val text = commit?.text
                         if (text != null) {
                             commitAndCount(text)
-                            Log.d(TAG, "候选词提交: $text")
+                            // 日志脱敏：只记长度不记内容（功能开启后这些词属于用户已明示
+                            // 外发的敏感内容，不允许流入 logcat，见可行性方案 §4.6）
+                            Log.d(TAG, "候选词提交: ${text.length} 字")
                             keyRecordStack.clear()
                         } else {
                             // 分段确认后立即补发 End：Navigator 消费后调用 BeginEditing 给已选段
@@ -506,6 +511,43 @@ class InputLogicController(
         callbacks.currentInputConnection()?.commitText(text, 1)
         val codePoints = Character.codePointCount(text, 0, text.length)
         commitListeners.forEach { it(codePoints) }
+        // 文本观察者仅供 LLM 续写，语义与脱敏 commitListeners 隔离（热路径内存遍历）
+        commitTextObservers.forEach { it(text.toString()) }
+    }
+
+    /**
+     * 自动补标点提交（预测候选采纳流程，见 AutoPunctPolicy）：走与普通上屏
+     * 相同的 [commitAndCount] 出口（commitTarget 路由 + 计分 + 文本观察者）。
+     * 调用方（Service）必须在主线程**同步**先于 selectCandidate 协程入队前调用，
+     * 由 Main 队列 FIFO 保证标点先于预测词落编辑器。
+     */
+    fun commitAutoPunctuation(punct: String) = commitAndCount(punct)
+
+    /**
+     * 清理引擎残留的预测态（采纳 LLM 续写词后调用）。
+     *
+     * LLM 词经 [commitDirectToEditor] 直达编辑器、完全绕过 Rime，引擎对此一无所知：
+     * 若此前存在引擎预测（composition 中的 prediction 占位段），陈旧预测候选会
+     * 一直留在 menu（含刚被采纳的同形词，用户观感即「预测没有结束」）。
+     * 向引擎发 Escape：librime-predict 的 predictor 在 ProcessKeyEvent 中对
+     * BackSpace/Escape 会 Clear 预测引擎并在末段带 prediction 标签时清空 composition，
+     * 从而终止预测态；随后按新引擎上下文刷新 UI（menu 空 → 候选栏清空回到空闲态）。
+     *
+     * 不走 [processKey]：Escape 若未被引擎消费，processKey 的非消费分支会删编辑器
+     * 字符（调用方已保证仅在确有引擎预测候选时调用，消费概率极高，但仍不复用
+     * 带删字兼退路的入口）；本方法对 consumed 结果不作任何副作用处理。
+     */
+    fun clearStalePrediction() {
+        scope.launch {
+            inputMutex.withLock {
+                try {
+                    engine.api.processKey(KeyCode.XK_Escape, 0)
+                    updateUI()
+                } catch (e: Exception) {
+                    Log.e(TAG, "清理预测态异常: ${e.message}", e)
+                }
+            }
+        }
     }
 
     /**
@@ -571,6 +613,9 @@ class InputLogicController(
         if (text.isNotEmpty()) {
             val codePoints = Character.codePointCount(text, 0, text.length)
             commitListeners.forEach { it(codePoints) }
+            // 文本观察者仅供 LLM 续写，语义与脱敏 commitListeners 隔离（热路径内存遍历）；
+            // 面板路径（上方 commitTarget 分支）不回调——文本未真正进入应用编辑器
+            commitTextObservers.forEach { it(text.toString()) }
         }
     }
 

@@ -24,6 +24,7 @@ import androidx.lifecycle.lifecycleScope
 import com.ziyou.ime.R
 import com.ziyou.ime.ai.AiConfig
 import com.ziyou.ime.ai.AiPersona
+import com.ziyou.ime.ai.prediction.LlmPredictionConfig
 import com.ziyou.ime.ai.PersonaRepository
 import com.ziyou.ime.ai.knowledge.KnowledgeRepository
 import com.ziyou.ime.config.AssetDeployer
@@ -284,7 +285,8 @@ class SettingsActivity : AppCompatActivity() {
                 showAiConfigDialog()
             },
             personaItem,
-            knowledgeItem
+            knowledgeItem,
+            createLlmPredictionItem()
         ))
 
         // ===== 成长与技能 =====
@@ -347,6 +349,59 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     // ===== 功能方法 =====
+
+    /**
+     * LLM 智能续写开关项（实验性）：数据外发功能，每次从关到开都弹明示确认，
+     * 确认才置位、取消回滚开关（与 [createSwitchItem] 同构，但需持有开关引用回滚，
+     * 故独立构建）。端点/Key/模型复用 AI 服务配置，本项只管启用状态。
+     */
+    private fun createLlmPredictionItem(): LinearLayout {
+        val switch = SwitchCompat(this).apply {
+            isChecked = LlmPredictionConfig.isEnabled(this@SettingsActivity)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginStart = dp(12) }
+        }
+        switch.setOnCheckedChangeListener { _, isChecked ->
+            onLlmPredictionToggle(switch, isChecked)
+        }
+        return createItemRow(onClick = { switch.toggle() }).apply {
+            addView(createIconBadge("✨"))
+            addView(createTextColumn("LLM 智能续写（实验性）",
+                "开启后，将把您最近上屏的若干词语发送至您配置的 AI 服务以生成续写建议" +
+                    "（需先在 AI 设置中配置服务）"))
+            addView(switch)
+        }
+    }
+
+    /** LLM 智能续写开关切换：关即落盘；开须先经明示确认（词语内容会离开本设备）。
+     *  弹窗展示期间禁用开关，防确认前重复点按造成视觉状态与落盘值不一致。 */
+    private fun onLlmPredictionToggle(switch: SwitchCompat, isChecked: Boolean) {
+        if (!isChecked) {
+            LlmPredictionConfig.setEnabled(this, false)
+            return
+        }
+        switch.isEnabled = false
+        AlertDialog.Builder(this)
+            .setTitle("开启 LLM 智能续写？")
+            .setMessage("开启后，将把您最近上屏的若干词语发送至您配置的 AI 服务以生成续写建议。" +
+                "词语内容会离开本设备发送至您在「AI 服务配置」中设置的服务，请确认已知悉并同意。")
+            .setPositiveButton("确认开启") { _, _ ->
+                LlmPredictionConfig.setEnabled(this@SettingsActivity, true)
+                switch.isEnabled = true
+            }
+            .setNegativeButton("取消") { _, _ ->
+                // 回滚开关（触发的 onCheckedChangeListener 为关闭分支，幂等无副作用）
+                switch.isChecked = false
+                switch.isEnabled = true
+            }
+            .setOnCancelListener {
+                switch.isChecked = false
+                switch.isEnabled = true
+            }
+            .show()
+    }
 
     private fun openInputMethodSettings() {
         try {

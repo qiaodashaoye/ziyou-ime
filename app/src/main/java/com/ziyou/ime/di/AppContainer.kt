@@ -1,5 +1,8 @@
 package com.ziyou.ime.di
 
+import com.ziyou.ime.ZiyouApplication
+import com.ziyou.ime.ai.prediction.LlmPredictionConfig
+import com.ziyou.ime.ai.prediction.LlmPredictionCoordinator
 import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.daemon.RimeDeployStep
 import com.ziyou.ime.daemon.RimeEngine
@@ -21,6 +24,8 @@ import com.ziyou.ime.voice.SpeechRecognizerEngine
  *   使 daemon 层不直接依赖 config / dict 业务模块（依赖方向经此反转）。
  * - [commitListeners]：编辑器路径上屏后的横切监听（等级计分），
  *   使输入热路径（InputLogicController）不硬编码业务单例。
+ * - [commitTextObservers]：编辑器路径上屏后的文本观察者（LLM 智能续写），
+ *   与脱敏的 [commitListeners] 语义隔离，由组合根统一装配。
  *
  * 后续可平滑迁移到 Hilt/Koin。
  */
@@ -86,6 +91,32 @@ object AppContainer {
     val commitListeners: List<(codePoints: Int) -> Unit> = listOf(
         { codePoints -> LevelStats.onCommit(codePoints) }
     )
+
+    /**
+     * LLM 智能续写协调器（懒装配：首次访问才构造）。注意 Service 生命周期回调
+     * （onStartInput/onStartInputView/renderContext 等）无条件访问本属性，故首次
+     * 进入输入即触发构造；构造成本极低（空词窗口 + 空 LRU），关闭功能时运行期
+     * 每次上屏仅一次 SharedPreferences 内存布尔读。构造需 app context，
+     * 取 [ZiyouApplication] 实例。
+     */
+    val llmPredictionCoordinator: LlmPredictionCoordinator by lazy {
+        LlmPredictionCoordinator(ZiyouApplication.instance.applicationContext)
+    }
+
+    /**
+     * 编辑器路径上屏文本观察者（注入 InputLogicController）：
+     * 当前仅 LLM 智能续写。lambda 内先查开关——关闭时热路径只有一次
+     * SharedPreferences 内存缓存布尔读，保证零额外开销；文本观察者与
+     * 脱敏的 [commitListeners] 是两个列表，语义隔离（等级链路不见内容）。
+     */
+    val commitTextObservers: List<(String) -> Unit> by lazy {
+        listOf { text ->
+            val context = ZiyouApplication.instance.applicationContext
+            if (LlmPredictionConfig.isEnabled(context)) {
+                llmPredictionCoordinator.onCommitText(text)
+            }
+        }
+    }
 
     /** 测试注入点：用 fake 引擎替换默认实现。 */
     fun overrideRimeEngine(engine: RimeEngine?) {

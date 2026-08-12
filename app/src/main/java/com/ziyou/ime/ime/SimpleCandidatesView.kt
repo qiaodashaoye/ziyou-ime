@@ -44,6 +44,9 @@ class SimpleCandidatesView @JvmOverloads constructor(
         /** 候选词水平内边距（dp） */
         private const val CANDIDATE_PADDING_H_DP = 12
 
+        /** LLM 续写候选绘制前缀：视觉标记其不走 Rime 选词路径 */
+        private const val LLM_CANDIDATE_PREFIX = "✦ "
+
         /**
          * 将累积缓冲中的索引转换为 Rime 当前页的局部索引。
          *
@@ -179,6 +182,16 @@ class SimpleCandidatesView @JvmOverloads constructor(
         typeface = Typeface.DEFAULT
     }
 
+    /**
+     * LLM 续写候选画笔：与 predictionPaint 区别——取皮肤 preeditTextColor
+     * （预测态下引擎词整栏为强调色，LLM 词用编码区色 + ✦ 前缀双重区分）。
+     */
+    private val llmCandidatePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp2px(CANDIDATE_TEXT_SIZE_SP)
+        color = Color.GRAY
+        typeface = Typeface.DEFAULT
+    }
+
     private val bgPaint = Paint().apply {
         color = Color.parseColor("#F5F5F5")
         style = Paint.Style.FILL
@@ -216,6 +229,14 @@ class SimpleCandidatesView @JvmOverloads constructor(
     /** 翻页加载中标记 */
     private var isPageLoading = false
 
+    /**
+     * LLM 续写追加候选（仅预测态）：拼接在引擎累积缓冲尾部参与绘制，
+     * 不进入分页状态机（accumulatedCandidates/页码/高亮均不感知）；
+     * 任何一次引擎渲染（[updateCandidates]）都会将其清空——引擎状态一变，
+     * 旧上下文的 LLM 词必然过期。点击路由由 Service 按 [engineCandidateCount] 分段。
+     */
+    private var llmCandidates: Array<CandidateProto> = emptyArray()
+
     // 手势检测器
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent): Boolean = true
@@ -226,9 +247,15 @@ class SimpleCandidatesView @JvmOverloads constructor(
             // 查找点击的候选词（rects 为内容坐标，点击 x 已补偿 scrollOffset）
             for (i in candidateRects.indices) {
                 if (candidateRects[i].contains(x, y)) {
-                    // 累积索引 → Rime 全局候选索引（跨页可见候选均可选中）
-                    val globalIndex = toGlobalIndex(i, accumulatedPageStart, currentPageSize)
-                    onCandidateClick?.invoke(globalIndex, candidates[i])
+                    if (i < accumulatedCandidates.size) {
+                        // 引擎候选：累积索引 → Rime 全局候选索引（跨页可见候选均可选中）
+                        val globalIndex = toGlobalIndex(i, accumulatedPageStart, currentPageSize)
+                        onCandidateClick?.invoke(globalIndex, candidates[i])
+                    } else {
+                        // LLM 追加项：直传累积位置（≥ 引擎候选数），
+                        // Service 据此分段路由到 commitDirectToEditor（不经 Rime 选词）
+                        onCandidateClick?.invoke(i, candidates[i])
+                    }
                     return true
                 }
             }
@@ -291,9 +318,12 @@ class SimpleCandidatesView @JvmOverloads constructor(
         highlightedCandidatePaint.color = skin.candidateHighlightColor
         // 预测词与高亮项同色但不加粗，整栏统一强调色即代表预测态
         predictionPaint.color = skin.candidateHighlightColor
+        // LLM 续写词用编码区文字色 + ✦ 前缀，与预测态强调色的引擎词区分
+        llmCandidatePaint.color = skin.preeditTextColor
         candidatePaint.typeface = skin.textTypeface
         highlightedCandidatePaint.typeface = Typeface.create(skin.textTypeface, Typeface.BOLD)
         predictionPaint.typeface = skin.textTypeface
+        llmCandidatePaint.typeface = skin.textTypeface
         textSizeSp = skin.candidateTextSizeSp
         applyTextSizes()
         recalculateLayout()
@@ -305,6 +335,7 @@ class SimpleCandidatesView @JvmOverloads constructor(
         candidatePaint.textSize = sp2px(textSizeSp)
         highlightedCandidatePaint.textSize = sp2px(textSizeSp)
         predictionPaint.textSize = sp2px(textSizeSp)
+        llmCandidatePaint.textSize = sp2px(textSizeSp)
     }
 
     /**
@@ -316,6 +347,9 @@ class SimpleCandidatesView @JvmOverloads constructor(
      */
     fun updateCandidates(context: ContextProto?, predictionMode: Boolean = false) {
         isPageLoading = false
+        // 引擎新渲染即作废 LLM 追加尾部（旧上下文的词必然过期），随后由
+        // Service 的 onResult 回调按需重新追加
+        llmCandidates = emptyArray()
         if (context == null) {
             accumulatedCandidates.clear()
             candidates = emptyArray()
@@ -388,10 +422,12 @@ class SimpleCandidatesView @JvmOverloads constructor(
         val paddingH = dp2px(CANDIDATE_PADDING_H_DP.toFloat())
         var x = paddingH
 
-        for (candidate in candidates) {
-            val text = candidate.text
-            val textWidth = candidatePaint.measureText(text)
-            val itemWidth = textWidth + paddingH * 2
+        for (i in candidates.indices) {
+            // LLM 追加项按「✦ 前缀 + 文本」测宽，与 onDraw 绘制内容一致
+            val isLlm = i >= accumulatedCandidates.size
+            val text = if (isLlm) LLM_CANDIDATE_PREFIX + candidates[i].text else candidates[i].text
+            val paint = if (isLlm) llmCandidatePaint else candidatePaint
+            val itemWidth = paint.measureText(text) + paddingH * 2
             candidateRects.add(RectF(x, 0f, x + itemWidth, height.toFloat()))
             x += itemWidth
         }
@@ -431,13 +467,16 @@ class SimpleCandidatesView @JvmOverloads constructor(
 
             // 选中项仅改变字体颜色（高亮色 + 加粗），不绘制边框/背景；候选词之间也不再绘制竖线分隔符；
             // 预测态下整栏使用强调色常规字重，与普通候选词区分
+            val isLlm = i >= accumulatedCandidates.size
             val paint = when {
+                isLlm -> llmCandidatePaint
                 isPredictionMode -> predictionPaint
                 i == highlightAccumulatedIndex -> highlightedCandidatePaint
                 else -> candidatePaint
             }
             val textX = rect.left + dp2px(CANDIDATE_PADDING_H_DP.toFloat())
-            canvas.drawText(candidates[i].text, textX, textBaseline, paint)
+            val text = if (isLlm) LLM_CANDIDATE_PREFIX + candidates[i].text else candidates[i].text
+            canvas.drawText(text, textX, textBaseline, paint)
         }
 
         canvas.restore()
@@ -468,6 +507,35 @@ class SimpleCandidatesView @JvmOverloads constructor(
             }
             invalidate()
         }
+    }
+
+    // ===== LLM 续写候选追加（仅预测态，Service 编排） =====
+
+    /** 引擎候选计数（累积缓冲长度，不含 LLM 追加项）：供 Service 点击分段路由 */
+    fun engineCandidateCount(): Int = accumulatedCandidates.size
+
+    /** 引擎候选文本序列（累积缓冲，展示序）：供 Service 追加前经 CandidateFusion 去重 */
+    fun engineCandidateTexts(): List<String> = accumulatedCandidates.map { it.text }
+
+    /**
+     * 在引擎候选尾部追加 LLM 续写候选并重绘。追加项仅参与绘制与点击，
+     * 不进入分页/高亮状态机；重复调用整体替换上一次追加内容。
+     */
+    fun appendLlmCandidates(words: List<String>) {
+        if (words.isEmpty()) return
+        llmCandidates = Array(words.size) { i -> CandidateProto(words[i], "llm", "") }
+        candidates = accumulatedCandidates.toTypedArray() + llmCandidates
+        recalculateLayout()
+        invalidate()
+    }
+
+    /** 清除 LLM 追加候选并重绘（离开预测态/视图重建时幂等调用） */
+    fun clearLlmCandidates() {
+        if (llmCandidates.isEmpty()) return
+        llmCandidates = emptyArray()
+        candidates = accumulatedCandidates.toTypedArray()
+        recalculateLayout()
+        invalidate()
     }
 
     // ===== 单位转换工具（已叠加缩放因子，悬浮模式下尺寸统一缩放） =====
