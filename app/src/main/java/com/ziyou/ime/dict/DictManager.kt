@@ -27,13 +27,16 @@ object DictManager {
     /** 主词库文件名 */
     private const val MAIN_DICT_FILE = "luna_pinyin.dict.yaml"
 
-    /** 基础 import_tables（始终包含） */
+    /**
+     * 基础 import_tables（始终包含）。
+     *
+     * ext / tencent / others 三个大词库自 2026-08 起移出主程序包，改为扩展词库
+     * 由用户按需下载（见远程 catalog 的 BASE 分类条目）；下载后走 ext_dicts/
+     * 注入通道，与其他扩展词库一致。
+     */
     private val BASE_IMPORT_TABLES = listOf(
         "cn_dicts/8105",
         "cn_dicts/base",
-        "cn_dicts/ext",
-        "cn_dicts/tencent",
-        "cn_dicts/others",
         "en_dicts/base"
     )
 
@@ -254,11 +257,9 @@ object DictManager {
         sb.appendLine("#")
         sb.appendLine("# 词库组成：")
         sb.appendLine("#   - 《通用规范汉字表》8105 字字表")
-        sb.appendLine("#   - 基础词库（华宇野风、清华开源词库、现代汉语常用词表、腾讯词向量）")
-        sb.appendLine("#   - 扩展词库（多音字注音）")
-        sb.appendLine("#   - 腾讯词向量大词库")
-        sb.appendLine("#   - 其他杂项补充")
+        sb.appendLine("#   - 基础词库（华宇野风、清华开源词库、现代汉语常用词表）")
         sb.appendLine("#   - 内置英文词与表情映射表")
+        sb.appendLine("#   - 扩展/腾讯词向量/杂项等大词库已改为按需下载（词库管理页安装后自动注入）")
         if (enabledDicts.isNotEmpty()) {
             sb.appendLine("#   - 扩展词库：${enabledDicts.joinToString("、") { it.id }}")
         }
@@ -268,7 +269,7 @@ object DictManager {
         // YAML 头部 + import_tables
         sb.appendLine("---")
         sb.appendLine("name: luna_pinyin")
-        sb.appendLine("version: \"2026-08-04\"")
+        sb.appendLine("version: \"2026-08-12\"")
         sb.appendLine("sort: by_weight")
         sb.appendLine("import_tables:")
         for (table in BASE_IMPORT_TABLES) {

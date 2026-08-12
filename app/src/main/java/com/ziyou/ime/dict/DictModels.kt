@@ -6,6 +6,8 @@ package com.ziyou.ime.dict
 
 /** 词库分类 */
 enum class DictCategory(val displayName: String) {
+    /** 基础词库扩展包：原内置的大词库（ext/tencent/others）移出主包后按需下载 */
+    BASE("基础词库"),
     CLASSICAL("古典文学"),
     PROFESSIONAL("专业行业"),
     DIALECT("地方方言"),

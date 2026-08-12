@@ -17,7 +17,7 @@ import java.util.Locale
 
 /**
  * 词库下载器
- * 负责从 GitHub 仓库下载词库索引和词库文件
+ * 负责从 Gitee 仓库下载词库索引和词库文件
  */
 object DictDownloader {
 
@@ -32,8 +32,10 @@ object DictDownloader {
     /** 下载源域名白名单：catalog 中的 url 与每一跳重定向都必须命中，
      *  防目录被篡改后外链投毒（与技能 fetch 代理的白名单基线对齐）。
      *  注意：gitee.com 的 raw 路径会 302 跳到 raw.giteeusercontent.com（真正的文件 CDN），
-     *  两者都必须在白名单内，否则受控重定向会在第一跳就被拒绝。 */
-    private val ALLOWED_HOSTS = setOf("gitee.com", "raw.giteeusercontent.com")
+     *  两者都必须在白名单内，否则受控重定向会在第一跳就被拒绝。
+     *  Release 附件（releases/download/，用于分发超过 raw 匿名大小限制的大词库）
+     *  会 302 跳到 foruda.gitee.com 附件 CDN，同样需在白名单内。 */
+    private val ALLOWED_HOSTS = setOf("gitee.com", "raw.giteeusercontent.com", "foruda.gitee.com")
 
     /** catalog.json 响应上限（字节），超出即拒绝（目录必须完整才能解析） */
     private const val MAX_CATALOG_BYTES = 1L * 1024 * 1024
