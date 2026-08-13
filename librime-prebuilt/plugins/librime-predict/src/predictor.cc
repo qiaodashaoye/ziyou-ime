@@ -59,7 +59,9 @@ void Predictor::OnContextUpdate(Context* ctx) {
       last_action_ == kDelete) {
     return;
   }
-  LOG(INFO) << "Predictor::OnContextUpdate";
+  // S5：高频路径日志降为 DLOG（release 构建剥离），避免每次上屏后的
+  // 上下文更新都打 INFO 造成日志噪音与微量开销
+  DLOG(INFO) << "Predictor::OnContextUpdate";
   if (ctx->commit_history().empty()) {
     PredictAndUpdate(ctx, "$");
     return;
