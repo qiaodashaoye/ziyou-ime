@@ -157,6 +157,31 @@ prepare_source() {
 prepare_source
 
 # ---------------------------------------------------------------------------
+# 插件接入：librime 子模块保持纯净上游（不携带任何字由定制提交），
+# predict 插件以相对路径符号链接注入 librime/plugins/，供宿主直连
+# librime/CMakeLists 的构建路径发现（交叉编译走 superbuild，由其
+# file(CREATE_LINK) 自动建链，两条路径均无需手工维护链接）。
+# ---------------------------------------------------------------------------
+ensure_predict_plugin() {
+  if [ "${WITH_PREDICT}" != "ON" ]; then
+    return
+  fi
+  local link_path="${LIBRIME_SOURCE_DIR}/plugins/librime-predict"
+  local target="../../plugins/librime-predict"
+  if [ -e "${link_path}" ] || [ -L "${link_path}" ]; then
+    # 已存在：相对链接直接复用；历史遗留的绝对路径/实体目录先清除重建
+    if [ -L "${link_path}" ] && [ "$(readlink "${link_path}")" = "${target}" ]; then
+      return
+    fi
+    rm -rf "${link_path}"
+  fi
+  ln -s "${target}" "${link_path}"
+  echo ">> 已注入 predict 插件链接: ${link_path} -> ${target}"
+}
+
+ensure_predict_plugin
+
+# ---------------------------------------------------------------------------
 # 逐 ABI 构建
 # ---------------------------------------------------------------------------
 JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"

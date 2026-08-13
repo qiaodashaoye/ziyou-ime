@@ -32,8 +32,11 @@
 
 ## 构建集成要点
 
-- Android 交叉编译：superbuild `WITH_PREDICT=ON` 时经
-  `librime/plugins/librime-predict` 符号链接引到本目录（该符号链接当前为
-  绝对路径，换机器需重建为相对路径 `../../plugins/librime-predict`）；
-- 宿主工具链（build_predict / query_predict）：`librime-prebuilt/librime`
-  下 `make deps && make`，插件 `BUILD_TOOLS` 默认 ON。
+- librime 子模块保持**纯净上游**（指针 = 上游 tag latest，不携带字由定制
+  提交）；本插件经符号链接注入 `librime/plugins/`，两条构建路径均自动建链：
+  交叉编译由 superbuild `file(CREATE_LINK)` 处理，宿主构建由
+  `build.sh` 的 `ensure_predict_plugin` 处理（相对路径，幂等）；
+- 宿主工具链（build_predict / query_predict）：先建相对链接再构建——
+  `ln -s ../../plugins/librime-predict librime/plugins/librime-predict`，
+  然后 `cd librime-prebuilt/librime && make deps && make`（插件
+  `BUILD_TOOLS` 默认 ON）。
