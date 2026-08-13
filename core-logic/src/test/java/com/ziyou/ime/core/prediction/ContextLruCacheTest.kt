@@ -73,4 +73,76 @@ class ContextLruCacheTest {
         assertEquals(0, cache.size())
         assertNull(cache.get(listOf("你好")))
     }
+
+    @Test
+    fun `扩容后容量为256且淘汰语义不变`() {
+        assertEquals(256, ContextLruCache.CAPACITY)
+        val cache = ContextLruCache()
+        repeat(ContextLruCache.CAPACITY + 10) { cache.put(listOf("词$it"), listOf("候选$it")) }
+        assertEquals(ContextLruCache.CAPACITY, cache.size())
+        assertNull(cache.get(listOf("词0")))
+        assertEquals(listOf("候选265"), cache.get(listOf("词265")))
+    }
+
+    @Test
+    fun `snapshot按访问序导出且restore往返一致`() {
+        val cache = ContextLruCache()
+        cache.put(listOf("甲"), listOf("候选甲"))
+        cache.put(listOf("乙"), listOf("候选乙"))
+        cache.get(listOf("甲")) // 刷新「甲」访问序：导出应为 乙(最旧) 在前
+        val snapshot = cache.snapshot()
+        assertEquals(listOf("乙"), snapshot.first().words)
+        assertEquals(listOf("甲"), snapshot.last().words)
+
+        val restored = ContextLruCache()
+        restored.restore(snapshot)
+        assertEquals(2, restored.size())
+        assertEquals(listOf("候选甲"), restored.get(listOf("甲")))
+        assertEquals(listOf("候选乙"), restored.get(listOf("乙")))
+    }
+
+    @Test
+    fun `restore超容量快照时自然淘汰最旧项`() {
+        // 构造一份超出容量的手工快照（最旧在前）
+        val entries = (0 until ContextLruCache.CAPACITY + 5).map {
+            ContextLruCache.Entry(listOf("词$it"), listOf("候选$it"))
+        }
+        val cache = ContextLruCache()
+        cache.restore(entries)
+        assertEquals(ContextLruCache.CAPACITY, cache.size())
+        assertNull(cache.get(listOf("词0")))
+        assertEquals(listOf("候选260"), cache.get(listOf("词260")))
+    }
+
+    @Test
+    fun `restore跳过空条目脏数据`() {
+        val cache = ContextLruCache()
+        cache.restore(
+            listOf(
+                ContextLruCache.Entry(emptyList(), listOf("候选")),
+                ContextLruCache.Entry(listOf("词"), emptyList()),
+                ContextLruCache.Entry(listOf("好词"), listOf("好候选"))
+            )
+        )
+        assertEquals(1, cache.size())
+        assertEquals(listOf("好候选"), cache.get(listOf("好词")))
+    }
+
+    @Test
+    fun `recentKeys按最近访问倒序返回且不足时返回全部`() {
+        val cache = ContextLruCache()
+        cache.put(listOf("一"), listOf("候选1"))
+        cache.put(listOf("二"), listOf("候选2"))
+        cache.get(listOf("一")) // 「一」变最近访问
+        val recent = cache.recentKeys(3)
+        assertEquals(listOf(listOf("一"), listOf("二")), recent)
+        assertEquals(listOf(listOf("一")), cache.recentKeys(1))
+    }
+
+    @Test
+    fun `keyOf与wordsOf互逆`() {
+        val words = listOf("今天", "天气", "。")
+        assertEquals(words, ContextLruCache.wordsOf(ContextLruCache.keyOf(words)))
+        assertEquals(emptyList<String>(), ContextLruCache.wordsOf(""))
+    }
 }

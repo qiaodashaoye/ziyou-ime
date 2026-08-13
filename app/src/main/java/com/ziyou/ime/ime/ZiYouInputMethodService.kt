@@ -22,10 +22,12 @@ import com.ziyou.ime.config.DisplayModeManager
 import com.ziyou.ime.config.SchemaPreference
 import com.ziyou.ime.skin.SkinManager
 import com.ziyou.ime.skin.SkinTheme
+import com.ziyou.ime.ai.prediction.LlmPredictionConfig
 import com.ziyou.ime.core.CandidateProto
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.core.RimeMessage
 import com.ziyou.ime.core.RimeNative
+import com.ziyou.ime.core.prediction.AdoptionRecord
 import com.ziyou.ime.core.prediction.AutoPunctPolicy
 import com.ziyou.ime.core.prediction.CandidateFusion
 import com.ziyou.ime.daemon.RimeEngine
@@ -769,9 +771,14 @@ class ZiYouInputMethodService : InputMethodService() {
         // 兜底同步当前剪贴板（服务重启期间漏听的复制在此补收；去重逻辑保证幂等零 IO）
         captureClipboardToHistory()
 
-        // LLM 智能续写：新输入会话开始，清空词窗口/缓存并作废 in-flight 请求
-        //（防跨输入框上下文泄漏；纯内存操作，零 IO）
+        // LLM 智能续写：新输入会话开始，清空词窗口并作废 in-flight 请求
+        //（防跨输入框上下文泄漏；纯内存操作，零 IO；LRU 缓存跨会话保留，
+        // 重复语境的命中价值正在于此，内容仅候选词无泄漏面）
         AppContainer.llmPredictionCoordinator.reset()
+
+        // 词窗口预热（联想优化方案 §4.4）：协调器内部延迟到缓存装载后按热度
+        // 静默保温，开关关闭时零成本返回；不阻塞输入视图启动
+        AppContainer.llmPredictionCoordinator.prewarm()
 
         // 词库下载后引擎可能正在重新部署，scheduleEngineSync 内部先等待就绪再同步，
         // 否则 rime.api 抛异常导致 t9 方案/ascii_mode 永不恢复，九宫格按键失效；
@@ -812,6 +819,9 @@ class ZiYouInputMethodService : InputMethodService() {
 
         // 输入视图隐藏，主动落盘累计的上屏计分，避免尾部数据丢失
         LevelStats.flush()
+
+        // LLM 智能续写：同点位落盘候选缓存快照与采纳攒批（异步 IO，不阻塞）
+        AppContainer.llmPredictionCoordinator.flush()
 
         // LLM 智能续写：输入视图收起即会话结束，清空上下文（与 onStartInputView 对称）
         AppContainer.llmPredictionCoordinator.reset()
@@ -1074,6 +1084,11 @@ class ZiYouInputMethodService : InputMethodService() {
             // 下一轮上下文，续写链自然延续。
             val adopted = llmCandidates[llmOffset]
             val hadEnginePrediction = llmCandidatesStartIndex > 0
+            // 采纳词对攒批（联想优化方案 §4.6 形态 B）：主线程 O(1) 计数，
+            // 构建期固化进自建 predict.db，运行时不参与排序
+            AppContainer.llmPredictionCoordinator.recordAdoption(
+                lastLearnableWord(AppContainer.llmPredictionCoordinator.contextWords()), adopted
+            )
             // 自动补标点：前文与续写词之间无标点时前置逗号（单次 commit 同落，
             // 顺序天然保证）；候选自带前导标点/前文已带标点时策略返回空串
             val prefix = AutoPunctPolicy.decidePrefix(
@@ -1097,6 +1112,10 @@ class ZiYouInputMethodService : InputMethodService() {
         // 主线程同步提交标点后 selectCandidate 协程才入队（Main FIFO 保序）；
         // 非预测态（普通组句候选）不插标点，策略内部另有防叠加规则
         if (lastEnginePredictionMode) {
+            // 引擎预测词采纳同样计入攒批（预测采纳才记，普通组句候选不计）
+            AppContainer.llmPredictionCoordinator.recordAdoption(
+                lastLearnableWord(AppContainer.llmPredictionCoordinator.contextWords()), candidate.text
+            )
             val prefix = AutoPunctPolicy.decidePrefix(
                 AppContainer.llmPredictionCoordinator.contextWords(), candidate.text
             )
@@ -1109,6 +1128,13 @@ class ZiYouInputMethodService : InputMethodService() {
 
     /** 处理翻页。@param forward true=下一页, false=上一页 */
     private fun handlePageChange(forward: Boolean) = inputLogic.changePage(forward)
+
+    /**
+     * 取词窗口末位的可学习词（采纳词对的 prev）；窗口无 1~4 字纯汉字词时
+     * 返回空串，[AdoptionRecord] 会静默忽略（不产出非法词对）。
+     */
+    private fun lastLearnableWord(words: List<String>): String =
+        words.lastOrNull { AdoptionRecord.isLearnableWord(it) } ?: ""
 
     /**
      * 处理用户在拼音候选区点击选择拼音。
@@ -1153,6 +1179,15 @@ class ZiYouInputMethodService : InputMethodService() {
         val predictionMode = context?.menu?.candidates?.isNotEmpty() == true && context.input.isEmpty()
         candidatesView?.updateCandidates(context, predictionMode)
         lastEnginePredictionMode = predictionMode
+        // 预测式预取（联想优化方案 §4.5）：引擎预测渲染后预热首个预测词的
+        // 下一轮 LLM 缓存，采纳后链式第二轮零等待；开关关闭/限流/有 in-flight
+        // 请求时协调器内部静默返回，渲染热路径仅一次布尔判断成本
+        if (predictionMode && LlmPredictionConfig.isEnabled(applicationContext)) {
+            val texts = context.menu.candidates.take(3).map { it.text }.filter { it.isNotEmpty() }
+            if (texts.isNotEmpty()) {
+                AppContainer.llmPredictionCoordinator.prefetch(texts)
+            }
+        }
         // LLM 追加窗口以「无活跃编码」为准：句末标点上屏引擎清预测（menu 空）、
         // predict.db 未收录的上屏词 menu 也为空——若以预测态为门控，这两种 LLM
         // 续写最有价值的场景会被 invalidate/结果丢弃误杀（新编码开始才是真正作废时刻）
@@ -1321,6 +1356,8 @@ class ZiYouInputMethodService : InputMethodService() {
         closeAllPanels()
         // 解绑 LLM 续写结果回调（协调器为进程级单例，持回调会泄漏已销毁 Service）
         AppContainer.llmPredictionCoordinator.onResult = null
+        // 服务销毁前落盘候选缓存快照与采纳攒批（内部异步 IO）
+        AppContainer.llmPredictionCoordinator.flush()
         AppContainer.speechEngine.release()
         // 服务销毁前落盘剩余的上屏计分
         LevelStats.flush()

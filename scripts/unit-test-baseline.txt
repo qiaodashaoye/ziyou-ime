@@ -17,4 +17,14 @@
 # 生僻字）、ContextLruCacheTest ×7 LRU 淘汰/访问序、CandidateFusionTest ×12 引擎词
 # 在前/去重/截断/exclude 防复读/标点变体归一去重、AutoPunctPolicyTest ×8 预测
 # 采纳自动补标点四规则全分支）
-477
+# 当前实测：:core-logic 297 + :app 215（2026-08-13，全绿、0 跳过；
+# 联想优化 Phase 0~3 新增 ×35：ContextLruCacheTest +6 扩容 256/snapshot-restore
+# 往返/超容量淘汰/recentKeys 热度键、StreamCandidateTextTest ×11 流式增量解析
+# （任意截断分片等价整包/仅换行切分保句读/序号与前导标点剥离/条数上限）、
+# AdoptionRecordTest ×10 采纳攒批（1~4 字纯汉字词对隐私边界/双层容量淘汰/
+# 往返与脏数据过滤/drain 导出）、PredictionPersistenceTest ×8 缓存与攒批的
+# JSON 往返/损坏降级/原子落盘无残留）
+# 当前实测：:core-logic 297 + :app 221（2026-08-13，全绿、0 跳过；
+# 新增 LlmPredictionStatsTest ×6：验收指标打点结算（命中率/链式轮次/
+# 预取计数/首条延迟 p50/dump 清零），支撑 §7.7 真机验证）
+518
