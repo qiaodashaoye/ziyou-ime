@@ -1,0 +1,15 @@
+# predict.db 官方基线副本 manifest（自建替代官方方案的验收锚点）
+#
+# predict_official_baseline.db 是官方 rime-data data-1.0 predict.db 的
+# 永久基线副本：召回率 A/B 验收的「基线组」恒以此为准，不随
+# app/src/main/assets/predict.db 被自建库替换而漂移。
+#
+# 纪律：
+# 1. 本文件与基线 db 永不覆盖、永不删除（回滚与验收双重锚点）；
+# 2. assets/predict.db 被自建库替换后，--verify 的基线仍为本副本；
+# 3. 任何重新部署官方包的操作须先校验下方 sha256 一致。
+
+sha256: 2a5a2b7c77f8f3d7c0836dfc8fd8b791ac2574d8bd93a3a2baaae1ee4861f5be
+source: rime-data data-1.0 predict.db（7,529,528 字节）
+copied_at: 2026-08-13
+copied_from: app/src/main/assets/predict.db（替换发生前的线上版本）

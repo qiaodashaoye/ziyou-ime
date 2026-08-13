@@ -102,7 +102,7 @@ def valid_entry(key, text):
     return True
 
 
-def load_tsv_corpus(path, data, source_name):
+def load_tsv_corpus(path, data, source_name, default_weight=DEFAULT_WEIGHT):
     """读入 TSV 语料（prev \\t next [\\t weight]），合并进 data[key] = {text: weight}。"""
     added = 0
     with open(path, encoding="utf-8") as f:
@@ -115,7 +115,7 @@ def load_tsv_corpus(path, data, source_name):
                 print(f"  [warn] {source_name}:{lineno} 列数不足，跳过", file=sys.stderr)
                 continue
             key, text = clean_text(parts[0]), clean_text(parts[1])
-            weight = float(parts[2]) if len(parts) >= 3 and parts[2] else DEFAULT_WEIGHT
+            weight = float(parts[2]) if len(parts) >= 3 and parts[2] else default_weight
             if not valid_entry(key, text) or weight <= 0:
                 continue
             tails = data.setdefault(key, {})
@@ -125,7 +125,8 @@ def load_tsv_corpus(path, data, source_name):
     return added
 
 
-def load_adoptions(path, data):
+def load_adoptions(path, data, weight_full=ADOPTION_WEIGHT_FULL,
+                   count_full=ADOPTION_COUNT_FULL):
     """读入设备导出的采纳词对 JSON（§4.6 形态 B），count 归一化为权重。"""
     with open(path, encoding="utf-8") as f:
         raw = json.load(f)
@@ -140,14 +141,58 @@ def load_adoptions(path, data):
                 continue
             if count <= 0 or not valid_entry(prev, text):
                 continue
-            weight = ADOPTION_WEIGHT_FULL * min(count, ADOPTION_COUNT_FULL) / ADOPTION_COUNT_FULL
+            weight = weight_full * min(count, count_full) / count_full
             bucket = data.setdefault(prev, {})
             bucket[text] = max(bucket.get(text, 0.0), weight)
             added += 1
     return added
 
 
-def distill_missing_keys(data, probe_words, limit):
+def load_word_set(path, label):
+    """读入过滤词表（每行一词，# 注释与空行跳过），返回词集合。"""
+    words = set()
+    if not path:
+        return words
+    if not os.path.isfile(path):
+        print(f"  [warn] {label}不存在: {path}", file=sys.stderr)
+        return words
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            w = clean_text(line)
+            if w and not w.startswith("#"):
+                words.add(w)
+    return words
+
+
+def apply_filters(data, blocklist, exclude):
+    """构建期内容过滤（在双键扩展之前执行，防被剔除条目扩散到尾键）。
+
+    - exclude（策划性剔除）：键或候选**精确匹配**即剔除；
+    - blocklist（内容安全）：键精确匹配即剔除整键；候选**包含**敏感词
+      即剔除该候选（包含匹配防变体绕过，误伤可经词表收敛）。
+    返回 (剔除键数, 剔除候选数)。
+    """
+    if not blocklist and not exclude:
+        return 0, 0
+    dropped_keys = 0
+    dropped_cands = 0
+    for key in list(data.keys()):
+        if key in exclude or key in blocklist:
+            dropped_keys += 1
+            del data[key]
+            continue
+        tails = data[key]
+        for text in list(tails.keys()):
+            if text in exclude or any(b in text for b in blocklist):
+                del tails[text]
+                dropped_cands += 1
+        if not tails:
+            del data[key]
+            dropped_keys += 1
+    return dropped_keys, dropped_cands
+
+
+def distill_missing_keys(data, probe_words, limit, distill_weight=DISTILL_WEIGHT):
     """对探针词表中无覆盖的键做 LLM 离线蒸馏（OpenAI 兼容 chat/completions）。
 
     离线批处理无延迟约束；每次请求批量问 8 个键以摊薄开销。
@@ -206,12 +251,12 @@ def distill_missing_keys(data, probe_words, limit):
                 if not valid_entry(key, text):
                     continue
                 bucket = data.setdefault(key, {})
-                bucket[text] = max(bucket.get(text, 0.0), DISTILL_WEIGHT)
+                bucket[text] = max(bucket.get(text, 0.0), distill_weight)
                 added += 1
     return added
 
 
-def expand_tail_keys(data):
+def expand_tail_keys(data, tail_decay=TAIL_DECAY):
     """双键扩展：为长度 ≥3 的键生成 2~4 字尾后缀键（权重逐级衰减）。
 
     返回新增尾键数。已存在的键不覆盖（整词键优先），只补缺。
@@ -223,7 +268,7 @@ def expand_tail_keys(data):
             suffix = key[-tail_len:]
             if suffix == key or suffix in data:
                 continue
-            decay = TAIL_DECAY ** (len(key) - tail_len)
+            decay = tail_decay ** (len(key) - tail_len)
             data[suffix] = {text: weight * decay for text, weight in candidates.items()}
             added += 1
     return added
@@ -292,6 +337,18 @@ def main():
     parser.add_argument("--distill", action="store_true", help="对探针缺失键做 LLM 蒸馏补全")
     parser.add_argument("--distill-limit", type=int, default=200, help="蒸馏键数上限（默认 200）")
     parser.add_argument("--no-tail-keys", action="store_true", help="关闭双键（尾后缀键）扩展")
+    parser.add_argument("--blocklist", metavar="FILE",
+                        help="内容安全词表（每行一词）：键精确命中剔整键，候选包含命中剔该条；防敏感/低俗词条随 APK 分发")
+    parser.add_argument("--exclude", metavar="FILE",
+                        help="排除词表（每行一词）：键或候选精确匹配即剔除（策划性剔除，与 blocklist 的包含匹配互补）")
+    parser.add_argument("--default-weight", type=float, default=DEFAULT_WEIGHT,
+                        help=f"种子/外部语料默认权重（默认 {DEFAULT_WEIGHT}）")
+    parser.add_argument("--adoption-weight", type=float, default=ADOPTION_WEIGHT_FULL,
+                        help=f"采纳词对满分权重（默认 {ADOPTION_WEIGHT_FULL}）")
+    parser.add_argument("--distill-weight", type=float, default=DISTILL_WEIGHT,
+                        help=f"蒸馏候选权重（默认 {DISTILL_WEIGHT}）")
+    parser.add_argument("--tail-decay", type=float, default=TAIL_DECAY,
+                        help=f"尾键权重衰减系数（默认 {TAIL_DECAY}）")
     parser.add_argument("--probe", default=PROBE_WORDS, help="覆盖率探针词表（每行一词）")
     parser.add_argument("--out", default=os.path.join(REPO_ROOT, "dist", "predict.db"),
                         help="输出 predict.db 路径（默认 dist/predict.db）")
@@ -312,26 +369,39 @@ def main():
 
     data = {}
     if not args.no_seed:
-        n = load_tsv_corpus(SEED_CORPUS, data, "seed")
-        print(f"[1/5] 种子语料: {n} 条")
+        n = load_tsv_corpus(SEED_CORPUS, data, "seed", default_weight=args.default_weight)
+        print(f"[1/6] 种子语料: {n} 条")
     for corpus in args.corpus:
-        n = load_tsv_corpus(corpus, data, os.path.basename(corpus))
-        print(f"[1/5] 外部语料 {os.path.basename(corpus)}: {n} 条")
+        n = load_tsv_corpus(corpus, data, os.path.basename(corpus),
+                            default_weight=args.default_weight)
+        print(f"[1/6] 外部语料 {os.path.basename(corpus)}: {n} 条")
     if args.adoptions:
-        n = load_adoptions(args.adoptions, data)
-        print(f"[2/5] 采纳固化: {n} 条（个性化，权重提升）")
+        n = load_adoptions(args.adoptions, data, weight_full=args.adoption_weight)
+        print(f"[2/6] 采纳固化: {n} 条（个性化，权重提升）")
     else:
-        print("[2/5] 采纳固化: 未提供 --adoptions，跳过")
+        print("[2/6] 采纳固化: 未提供 --adoptions，跳过")
     if args.distill:
-        n = distill_missing_keys(data, probe_words, args.distill_limit)
-        print(f"[3/5] LLM 蒸馏: {n} 条")
+        n = distill_missing_keys(data, probe_words, args.distill_limit,
+                                 distill_weight=args.distill_weight)
+        print(f"[3/6] LLM 蒸馏: {n} 条")
     else:
-        print("[3/5] LLM 蒸馏: 未启用 --distill，跳过")
+        print("[3/6] LLM 蒸馏: 未启用 --distill，跳过")
 
-    tail_added = 0 if args.no_tail_keys else expand_tail_keys(data)
+    # 内容过滤在双键扩展之前：防被剔除条目扩散到尾后缀键
+    blocklist = load_word_set(args.blocklist, "blocklist")
+    exclude = load_word_set(args.exclude, "exclude")
+    dropped_keys, dropped_cands = apply_filters(data, blocklist, exclude)
+    if blocklist or exclude:
+        print(f"[4/6] 内容过滤: 剔除键 {dropped_keys} 个、候选 {dropped_cands} 条"
+              f"（blocklist {len(blocklist)} 词 / exclude {len(exclude)} 词）")
+    else:
+        print("[4/6] 内容过滤: 未提供 --blocklist/--exclude，跳过"
+              "（替换官方包分发全量用户前强烈建议配置内容安全词表）")
+
+    tail_added = 0 if args.no_tail_keys else expand_tail_keys(data, tail_decay=args.tail_decay)
     cap_and_sort(data)
     covered, total_entries = coverage_report(data, probe_words)
-    print(f"[4/5] 双键扩展: 新增尾键 {tail_added} 个；合计键 {len(data)}，条目 {total_entries}")
+    print(f"[5/6] 双键扩展: 新增尾键 {tail_added} 个；合计键 {len(data)}，条目 {total_entries}")
     if probe_words:
         rate = covered / len(probe_words) * 100
         print(f"      探针覆盖率: {covered}/{len(probe_words)} = {rate:.1f}%")
@@ -346,7 +416,7 @@ def main():
     tool = find_tool(args.tool)
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     size = build_db(data, args.out, tool)
-    print(f"[5/5] 打包完成: {args.out}（{size / 1024 / 1024:.2f} MB）")
+    print(f"[6/6] 打包完成: {args.out}（{size / 1024 / 1024:.2f} MB）")
     if size > SIZE_WARN_BYTES:
         print(f"  [warn] 体积超出 {SIZE_WARN_BYTES // 1024 // 1024}MB 红线，"
               f"建议改走词库下载管线分发或裁剪低权重条目", file=sys.stderr)
