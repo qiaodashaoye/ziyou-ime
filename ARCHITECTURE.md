@@ -382,6 +382,28 @@ UpdateDialogHelper  纯代码弹窗：新版本提示 / 下载进度 / 安装权
 - **superbuild 注意项**：外部插件的 OBJECT 目标不继承 Boost:: 目标的传递头文件路径
   （模块化 Boost 无单一 include 目录），superbuild 已在 add_subdirectory(librime) 后为
   插件 objs 目标补链 Boost 使用要求，并关闭插件宿主工具（BUILD_TOOLS=OFF）。
+- **预测引擎源码定制**：`predict_engine.cc` 的 `Predict` 已加最长后缀回退
+  （整串 miss 时按 UTF-8 字逐步截前缀重试，最短保留 2 字），待下次预编译库重编生效；
+  重编前由自建 predict.db 的构建期双键（整词键 + 尾后缀键）承担同等召回。
+
+#### 联想优化层（LLM 缓存/流式/预热/预取/攒批，docs/联想功能优化调研与方案.md Phase 0~3）
+在引擎联想与 LLM 续写之上的横切增强，全部受 LLM 预测开关管辖、热路径零磁盘 IO：
+```
+:core-logic core/prediction（纯逻辑，全部单测覆盖）
+  ContextLruCache    扩容 256 + snapshot/restore/recentKeys（持久化与预热支撑）
+  StreamCandidateText 流式候选增量行解析（任意截断分片与整包解析等价）
+  AdoptionRecord     采纳词对攒批（1~4 字纯汉字计数，500×8 容量，运行时不排序）
+:app ai/prediction
+  PredictionCacheStore 候选缓存 JSON 原子落盘（首需时装载/脏变更异步写）
+  AdoptionStore       攒批 JSON 原子落盘（adb pull 导出供构建期固化）
+  LlmPredictor.predictStream SSE 流式请求（首条候选逐行交付，非流式保留为降级）
+  LlmPredictionCoordinator 编排：prewarm（会话开始按热度保温）/ prefetch（引擎预测
+      渲染后预热下一轮上下文，采纳后链式零等待）/ recordAdoption（10s 防抖落盘）
+离线构建 scripts/build_predict_db.py  自建 predict.db（种子语料 + 采纳固化 + 蒸馏 +
+      双键扩展 + 探针覆盖率报告），经 AssetDeployer/词库下载管线分发
+```
+隐私口径：持久化仅限候选词与脱敏词对计数，不含编辑器原文；`reset()` 不再清缓存
+（跨会话复用），词窗口与限流窗口仍随会话清空。
 
 #### 技能插件系统 (skill/ + :core-logic/core/skill + assets/skill_runtime)
 基于 WebView 沙箱的可扩展技能面板（计算器/天气/星座等小工具，开发者指南见
