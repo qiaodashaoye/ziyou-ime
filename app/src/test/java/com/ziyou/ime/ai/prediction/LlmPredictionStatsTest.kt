@@ -76,6 +76,27 @@ class LlmPredictionStatsTest {
         LlmPredictionStats.onRequestStarted(100L)
         LlmPredictionStats.dumpAndReset()
         val second = LlmPredictionStats.dumpAndReset()
-        assertEquals("hits=0 misses=0 hitRate=0.0% chain=0/0 prefetch=0/0 reqs=0 p50ms=-1", second)
+        assertEquals(
+            "hits=0 misses=0 hitRate=0.0% chain=0/0 prefetch=0/0 reqs=0 p50ms=-1" +
+                " engineShown=0 gap=0 llmAdopt=0/0", second)
+    }
+
+    @Test
+    fun `引擎联想在场与空档分别计数`() {
+        // S6 决策数据：上屏后引擎预测在场 / 无任何联想（句末等时刻）
+        repeat(3) { LlmPredictionStats.onEnginePredictionShown() }
+        repeat(2) { LlmPredictionStats.onAssociationGap() }
+        val dump = LlmPredictionStats.dumpAndReset()
+        assertTrue(dump.contains("engineShown=3"))
+        assertTrue(dump.contains("gap=2"))
+    }
+
+    @Test
+    fun `LLM采纳按引擎候选在场与否分桶`() {
+        // S8 决策数据：位置策略 A/B 依据
+        LlmPredictionStats.onLlmAdoption(withEngine = true)
+        repeat(2) { LlmPredictionStats.onLlmAdoption(withEngine = false) }
+        val dump = LlmPredictionStats.dumpAndReset()
+        assertTrue(dump.contains("llmAdopt=1/2"))
     }
 }

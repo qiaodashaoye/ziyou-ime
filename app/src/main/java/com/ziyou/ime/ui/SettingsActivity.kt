@@ -19,6 +19,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.core.content.pm.PackageInfoCompat
 import androidx.lifecycle.lifecycleScope
 import com.ziyou.ime.R
@@ -49,6 +50,7 @@ import com.ziyou.ime.voice.VoiceModelManager.VoiceCommitMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * 字由输入法 设置页面
@@ -286,7 +288,11 @@ class SettingsActivity : AppCompatActivity() {
             },
             personaItem,
             knowledgeItem,
-            createLlmPredictionItem()
+            createLlmPredictionItem(),
+            createSettingItem("📦", "导出采纳词对数据",
+                "LLM 智能续写的采纳记录（脱敏词对计数），供离线构建个性化预测词库") {
+                exportAdoptionData()
+            }
         ))
 
         // ===== 成长与技能 =====
@@ -401,6 +407,43 @@ class SettingsActivity : AppCompatActivity() {
                 switch.isEnabled = true
             }
             .show()
+    }
+
+    /**
+     * 导出 LLM 预测采纳词对数据（S7 攒批固化半自动化）：协调器强制落盘后
+     * 把私有文件复制到 FileProvider 暴露的缓存子目录再经 ACTION_SEND 分享，
+     * 不直接暴露 filesDir。数据为脱敏词对计数（1~4 字纯汉字），供构建脚本
+     * scripts/build_predict_db.py 的 --adoptions 参数固化进自建 predict.db。
+     */
+    private fun exportAdoptionData() {
+        AppContainer.llmPredictionCoordinator.exportAdoptions { source ->
+            if (source == null || !source.exists()) {
+                showToast("暂无采纳词对数据")
+                return@exportAdoptions
+            }
+            lifecycleScope.launch {
+                try {
+                    val shared = withContext(Dispatchers.IO) {
+                        val dir = File(cacheDir, "prediction_export")
+                        dir.mkdirs()
+                        val target = File(dir, "prediction_adoptions.json")
+                        source.copyTo(target, overwrite = true)
+                        target
+                    }
+                    val uri = FileProvider.getUriForFile(
+                        this@SettingsActivity, "$packageName.predictionexport", shared)
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "application/json"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(Intent.createChooser(intent, "导出采纳词对数据"))
+                } catch (e: Exception) {
+                    Log.e(TAG, "导出采纳词对数据失败", e)
+                    showToast("导出失败，请重试")
+                }
+            }
+        }
     }
 
     private fun openInputMethodSettings() {

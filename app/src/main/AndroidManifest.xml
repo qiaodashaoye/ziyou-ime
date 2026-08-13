@@ -130,5 +130,20 @@
                 android:resource="@xml/update_apk_paths" />
         </provider>
 
+        <!--
+          LLM 预测采纳词对导出：把 cache/prediction_export/ 下的导出 JSON 暴露为
+          content:// URI，经 ACTION_SEND + FLAG_GRANT_READ_URI_PERMISSION 临时授权
+          给用户选择的目标应用。与前两个 Provider 隔离，仅开放导出目录、不扩大敏感面。
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.predictionexport"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/prediction_export_paths" />
+        </provider>
+
     </application>
 </manifest>

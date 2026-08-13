@@ -36,12 +36,39 @@ object LlmPredictionStats {
     /** 请求发起→首批候选交付的延迟样本（ms） */
     private val firstLatencies = ArrayDeque<Long>()
 
+    /** 引擎预测展示（上屏后引擎联想在场，S6 决策数据） */
+    fun onEnginePredictionShown() {
+        enginePredShown++
+    }
+
+    /** 联想空档（上屏后无任何联想候选，S6 决策数据） */
+    fun onAssociationGap() {
+        associationGaps++
+    }
+
+    /** LLM 词被采纳（S8 决策数据：[withEngine] = 当时引擎候选是否在场） */
+    fun onLlmAdoption(withEngine: Boolean) {
+        if (withEngine) llmAdoptionsWithEngine++ else llmAdoptionsNoEngine++
+    }
+
     /** 是否有未消费的预测采纳（下次查询时结算链式轮次） */
     private var pendingAdoption = false
 
     /** 当前 in-flight 请求的发起时刻与首批交付标记（防一次请求多次记账） */
     private var requestStartMs = 0L
     private var firstDelivered = false
+
+    /**
+     * S6 决策数据：上屏后引擎联想在场情况（编码→空闲过渡时打点）。
+     * enginePredShown = 引擎预测在场；associationGap = 无任何联想（句末标点/
+     * db 未收录时刻）——gap/(shown+gap) 即句末兑底方案的决策依据。
+     */
+    private var enginePredShown = 0L
+    private var associationGaps = 0L
+
+    /** S8 决策数据：LLM 词被采纳时引擎候选是否在场（位置策略 A/B 依据） */
+    private var llmAdoptionsWithEngine = 0L
+    private var llmAdoptionsNoEngine = 0L
 
     /** 预测采纳发生（Service 采纳出口打点）：下次查询结算链式轮次 */
     fun onAdoption() {
@@ -94,7 +121,8 @@ object LlmPredictionStats {
 
     /**
      * 输出单行统计并清零（flush 时经 Log 交付）。
-     * 格式示例：`hits=12 misses=8 hitRate=60.0% chain=3/5 prefetch=2/4 reqs=4 p50ms=432`
+     * 格式示例：`hits=12 misses=8 hitRate=60.0% chain=3/5 prefetch=2/4 reqs=4 p50ms=432
+     * engineShown=9 gap=3 llmAdopt=2/1`（gap = 联想空档次数，S6/S8 决策数据）
      */
     fun dumpAndReset(): String {
         val lookups = cacheHits + cacheMisses
@@ -107,6 +135,9 @@ object LlmPredictionStats {
             append(" prefetch=").append(prefetchWarmHits).append('/').append(prefetchIssued)
             append(" reqs=").append(requestsSent)
             append(" p50ms=").append(percentile(50))
+            append(" engineShown=").append(enginePredShown)
+            append(" gap=").append(associationGaps)
+            append(" llmAdopt=").append(llmAdoptionsWithEngine).append('/').append(llmAdoptionsNoEngine)
         }
         reset()
         return summary
@@ -125,6 +156,10 @@ object LlmPredictionStats {
         pendingAdoption = false
         requestStartMs = 0
         firstDelivered = false
+        enginePredShown = 0
+        associationGaps = 0
+        llmAdoptionsWithEngine = 0
+        llmAdoptionsNoEngine = 0
     }
 
     /** 结算链式轮次：采纳后的首次查询即一轮，随后清挂起标记 */

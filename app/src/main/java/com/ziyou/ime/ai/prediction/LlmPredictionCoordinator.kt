@@ -6,7 +6,9 @@ import android.util.Log
 import com.ziyou.ime.core.prediction.AdoptionRecord
 import com.ziyou.ime.core.prediction.CommitWordWindow
 import com.ziyou.ime.core.prediction.ContextLruCache
+import com.ziyou.ime.core.prediction.RequestRateWindow
 import com.ziyou.ime.core.prediction.TriggerPolicy
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExecutorCoroutineDispatcher
@@ -15,6 +17,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
 import java.util.concurrent.Executors
 
 /**
@@ -44,20 +49,20 @@ class LlmPredictionCoordinator(private val appContext: Context) {
     companion object {
         private const val TAG = "LlmPredictCoord"
 
-        /** 滚动窗口时长（ms）：与 [MAX_REQUESTS_PER_MINUTE] 共同构成费用熔断 */
-        private const val RATE_WINDOW_MS = 60_000L
-
-        /** 每分钟真实网络请求上限（缓存命中不占配额） */
-        private const val MAX_REQUESTS_PER_MINUTE = 20
-
         /** 词窗口预热条数（§4.4：按缓存热度取最近访问的高频上下文） */
         private const val PREWARM_CONTEXT_COUNT = 3
 
-        /** 预热读热度键前的装载等待（ms）：磁盘装载通常数十 ms，宁空转不抢资源 */
-        private const val PREWARM_AFTER_LOAD_DELAY_MS = 1_500L
+        /** 预热在装载完成后的 settling 延迟（ms）：磁盘装载刚结束宁稍候不抢资源（S9） */
+        private const val PREWARM_SETTLE_DELAY_MS = 300L
+
+        /** 预热等待装载的兜底超时（ms）：异常防御，超时降级放弃本次预热 */
+        private const val PREWARM_LOAD_TIMEOUT_MS = 10_000L
 
         /** 采纳攒批落盘防抖时长（ms）：与 LevelStats 同策略，热路径只内存计数 */
         private const val ADOPTION_FLUSH_DEBOUNCE_MS = 10_000L
+
+        /** 导出等待装载的兜底超时（ms）：与预热同策略，超时降级以当前内存态导出（S7） */
+        private const val EXPORT_LOAD_TIMEOUT_MS = 10_000L
     }
 
     /** 内部协程作用域：SupervisorJob 隔离单次请求失败，Main 分发保证回调主线程 */
@@ -78,9 +83,12 @@ class LlmPredictionCoordinator(private val appContext: Context) {
      */
     private val cache = ContextLruCache()
 
-    /** 缓存是否已从磁盘装载（@Volatile：主线程写、IO 线程读判重） */
+    /** 缓存装载是否已完成（@Volatile：IO 线程装载完成后写、主线程读作落盘守卫，S4） */
     @Volatile
     private var cacheLoaded = false
+
+    /** 缓存装载完成信号（S9 预热事件触发 + 装载仅发起一次的守卫双重角色） */
+    private var cacheLoadSignal = CompletableDeferred<Unit>()
 
     /** 采纳词对攒批（运行时不排序，仅构建期固化数据源） */
     val adoption = AdoptionRecord()
@@ -88,6 +96,9 @@ class LlmPredictionCoordinator(private val appContext: Context) {
     /** 攒批是否已从磁盘装载（@Volatile：主线程写、IO 线程读判重） */
     @Volatile
     private var adoptionLoaded = false
+
+    /** 攒批装载完成信号（S7 导出需等装载完成再落盘，防部分数据覆盖历史） */
+    private var adoptionLoadSignal = CompletableDeferred<Unit>()
 
     /** 攒批落盘防抖 Job（每次记录重置计时，到期且脏才写盘） */
     private var adoptionFlushJob: Job? = null
@@ -104,8 +115,8 @@ class LlmPredictionCoordinator(private val appContext: Context) {
     /** 当前 in-flight 请求是否预取发起（防预取结果经 onCommitText 命中路径二次分发） */
     private var inFlightPrefetch = false
 
-    /** 最近真实请求发起时刻（滚动一分钟窗口）：费用熔断判定，超限转 Skip */
-    private val attemptTimes = ArrayDeque<Long>()
+    /** 滚动一分钟费用熔断窗口（[RequestRateWindow] 纯逻辑，防抖放弃可退账，S2） */
+    private val rateWindow = RequestRateWindow()
 
     /**
      * 结果分发回调（主线程）：携带请求发起时的 epoch、候选列表（**累计语义**：
@@ -193,16 +204,18 @@ class LlmPredictionCoordinator(private val appContext: Context) {
     /**
      * 词窗口预热（§4.4，主线程）：会话开始后由 Service 调用。
      *
-     * 延迟到缓存装载完成后，取最近访问热度键中首个未命中者静默请求：
-     * 结果仅入缓存不渲染（窗口为空时分发也无渲染目标），用户第一次
-     * 上屏常见词时直接缓存命中、零延迟出词。每会话最多预热一条，
-     * 不与真实请求抢占单 Job 资源。
+     * 等待缓存装载完成信号（S9：事件驱动替代固定 1.5s 延迟——磁盘快时空等
+     * 浪费、磁盘慢时预热落空两头不讨好）后，取最近访问热度键中首个未命中者
+     * 静默请求：结果仅入缓存不渲染（窗口为空时分发也无渲染目标）。单 Job
+     * 资源让位主链路；调用方（Service）负责每次服务实例至多调用一次。
      */
     fun prewarm() {
         if (!LlmPredictionConfig.isEnabled(appContext)) return
-        ensureCacheLoaded()
+        val signal = ensureCacheLoaded()
         scope.launch {
-            delay(PREWARM_AFTER_LOAD_DELAY_MS)
+            val loaded = withTimeoutOrNull(PREWARM_LOAD_TIMEOUT_MS) { signal.await() }
+            if (loaded == null) return@launch
+            delay(PREWARM_SETTLE_DELAY_MS)
             if (requestJob?.isActive == true) return@launch
             val target = cache.recentKeys(PREWARM_CONTEXT_COUNT).firstOrNull { words ->
                 words.isNotEmpty() && cache.get(words) == null
@@ -272,6 +285,32 @@ class LlmPredictionCoordinator(private val appContext: Context) {
      */
     fun contextWords(): List<String> = window.words()
 
+    /** 采纳攒批是否为空（主线程只读）：设置页导出入口的空态判定（S7） */
+    fun hasAdoptionData(): Boolean = adoption.size() > 0
+
+    /**
+     * 导出采纳攒批数据文件（S7 攒批固化半自动化）：强制把当前内存态（含未
+     * 到防抖时点的脏数据）落盘后经 [onReady] 在主线程交付磁盘文件；空态
+     * 交付 null。等待装载完成再写盘，防装载前的部分内存态覆盖磁盘历史数据
+     *（与 [ensureAdoptionLoaded] 的全量落盘语义一致）。
+     */
+    fun exportAdoptions(onReady: (File?) -> Unit) {
+        if (!hasAdoptionData()) {
+            onReady(null)
+            return
+        }
+        val signal = ensureAdoptionLoaded()
+        scope.launch {
+            withTimeoutOrNull(EXPORT_LOAD_TIMEOUT_MS) { signal.await() }
+            // 此处已回主线程（scope 为 Main）：主线程取快照与既有约定一致
+            val snapshot = adoption.snapshot()
+            withContext(persistDispatcher) {
+                AdoptionStore.save(appContext, snapshot)
+            }
+            onReady(AdoptionStore.file(appContext))
+        }
+    }
+
     /**
      * 重置会话状态（onStartInput 切换输入框 / onFinishInputView 时调用）。
      *
@@ -281,24 +320,33 @@ class LlmPredictionCoordinator(private val appContext: Context) {
      */
     fun reset() {
         window.clear()
-        attemptTimes.clear()
+        rateWindow.clear()
         invalidate()
     }
 
     /**
      * 首次需要缓存时装载磁盘快照（IO 线程，幂等）。
-     * 主线程仅发起协程，零 IO；装载完成后后续访问全内存。
+     * 主线程仅发起协程，零 IO；装载完成后 [cacheLoaded] 置位并 complete
+     * 装载信号（S9 预热事件触发点）。返回装载信号供等待方复用。
      */
-    private fun ensureCacheLoaded() {
-        if (cacheLoaded) return
-        cacheLoaded = true
+    private fun ensureCacheLoaded(): CompletableDeferred<Unit> {
+        val signal = cacheLoadSignal
+        if (signal.isCompleted) return signal
+        if (loadRequested) return signal
+        loadRequested = true
         scope.launch(persistDispatcher) {
             val entries = PredictionCacheStore.load(appContext)
             if (entries.isNotEmpty()) cache.restore(entries)
+            cacheLoaded = true
+            signal.complete(Unit)
         }
+        return signal
     }
 
-    /** 异步落盘缓存快照（IO 线程）；装载未完成时跳过避免写入空快照覆盖旧数据 */
+    /** 装载是否已发起（与 [cacheLoaded] 完成态分离：S4 落盘守卫以完成态为准） */
+    private var loadRequested = false
+
+    /** 异步落盘缓存快照（IO 线程）；装载未完成时跳过避免写入空快照覆盖旧数据（S4：守卫以装载完成态为准） */
     private fun persistCache() {
         if (!cacheLoaded) return
         val snapshot = cache.snapshot()
@@ -311,13 +359,17 @@ class LlmPredictionCoordinator(private val appContext: Context) {
      * 首次采纳时装载磁盘攒批（IO 线程，幂等）：全量落盘语义要求内存态
      * 含历史数据，否则首次 flush 会以新进程的部分数据覆盖旧文件。
      * 装载完成前的少量新记录若被 restore 覆盖，仅损失计数，无正确性影响。
+     * 返回装载信号供导出等等待方复用（S7）。
      */
-    private fun ensureAdoptionLoaded() {
-        if (adoptionLoaded) return
+    private fun ensureAdoptionLoaded(): CompletableDeferred<Unit> {
+        val signal = adoptionLoadSignal
+        if (signal.isCompleted || adoptionLoaded) return signal
         adoptionLoaded = true
         scope.launch(persistDispatcher) {
             adoption.restore(AdoptionStore.load(appContext))
+            signal.complete(Unit)
         }
+        return signal
     }
 
     /** 攒批脏检查落盘（IO 线程）：仅在确有新增时写盘 */
@@ -337,16 +389,12 @@ class LlmPredictionCoordinator(private val appContext: Context) {
      *        且结果到达时不经缓存命中短路二次分发（[inFlightPrefetch]）
      */
     private fun scheduleRequest(delayMs: Long, prefetchContext: List<String>? = null) {
-        // 费用熔断：滚动一分钟内真实请求超限则放弃（缓存命中不占配额）
+        // 费用熔断：滚动一分钟内真实请求超限则放弃（缓存命中不占配额，S2 经 RequestRateWindow）
         val now = SystemClock.elapsedRealtime()
-        while (attemptTimes.isNotEmpty() && now - attemptTimes.first() > RATE_WINDOW_MS) {
-            attemptTimes.removeFirst()
-        }
-        if (attemptTimes.size >= MAX_REQUESTS_PER_MINUTE) {
+        if (!rateWindow.tryRecord(now)) {
             Log.w(TAG, "LLM 预测请求达每分钟上限，本次放弃")
             return
         }
-        attemptTimes.addLast(now)
         requestJob?.cancel()
         lastAttemptMs = now
         LlmPredictionStats.onRequestStarted(now)
@@ -361,8 +409,12 @@ class LlmPredictionCoordinator(private val appContext: Context) {
         requestJob = scope.launch {
             if (delayMs > 0L) delay(delayMs)
             // 发射前放弃：防抖窗口内窗口已变（新的上屏），结果到达也必然过期；
+            // 请求未真正发出 → 退还限流配额（S2：防放弃请求挤占真实请求额度）；
             // 预取请求以上下文快照为准，窗口变化不使其作废（其本就面向未来上下文）
-            if (prefetchContext == null && window.words() != snapshot) return@launch
+            if (prefetchContext == null && window.words() != snapshot) {
+                rateWindow.refundLast()
+                return@launch
+            }
             val prefetch = inFlightPrefetch
             // 流式增量分发（IO 线程回调 → 主线程投递）：累计列表经 epoch 复检后
             // 交付 onResult；epoch 已过期（新上屏/新编码）则静默吞掉后续增量

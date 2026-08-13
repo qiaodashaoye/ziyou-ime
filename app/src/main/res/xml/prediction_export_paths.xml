@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+LLM 预测采纳词对导出 FileProvider 暴露路径：仅开放 cache/prediction_export/ 子目录，
+  用于设置页「导出采纳词对数据」把待分享 JSON 以 content:// URI 授权给目标应用。
+  导出前先把私有 files/prediction_adoptions.json 复制到此目录再分享，
+  不直接暴露 filesDir，与 imecontent / updateprovider 两个 Provider 的最小暴露面基线一致。
+-->
+<paths>
+    <cache-path
+        name="prediction_export"
+        path="prediction_export/" />
+</paths>

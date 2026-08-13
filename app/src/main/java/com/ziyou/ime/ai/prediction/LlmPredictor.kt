@@ -263,7 +263,9 @@ object LlmPredictor {
             var total = 0L
             while (isActive()) {
                 val line = reader.readLine() ?: break
-                total += line.length + 1
+                // S3：按 UTF-8 字节数计量（与限制语义对齐；此前按 UTF-16 字符数
+                // 会使中文场景实际放行约 3 倍字节）。行短小且本链路低频，编码开销可忽
+                total += line.toByteArray(Charsets.UTF_8).size + 1
                 if (total > MAX_RESPONSE_BYTES) {
                     throw IOException("LLM 流式响应超限（上限 ${MAX_RESPONSE_BYTES / 1024}KB）")
                 }

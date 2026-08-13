@@ -23,6 +23,7 @@ import com.ziyou.ime.config.SchemaPreference
 import com.ziyou.ime.skin.SkinManager
 import com.ziyou.ime.skin.SkinTheme
 import com.ziyou.ime.ai.prediction.LlmPredictionConfig
+import com.ziyou.ime.ai.prediction.LlmPredictionStats
 import com.ziyou.ime.core.CandidateProto
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.core.RimeMessage
@@ -378,6 +379,12 @@ class ZiYouInputMethodService : InputMethodService() {
 
     /** 当前已追加展示的 LLM 续写词（与 [llmCandidatesStartIndex] 配套，点击分段路由用） */
     private var llmCandidates: List<String> = emptyList()
+
+    /** 本次服务实例是否已发起过词窗口预热（S9：每服务实例至多一次，防输入框频繁切换重复预热） */
+    private var llmPrewarmIssued = false
+
+    /** 上次 renderContext 是否有活跃编码（S6 决策数据：编码→空闲过渡时结算联想在场情况） */
+    private var wasComposingLastRender = false
 
     /** LLM 追加词在候选流中的起始 index（= 追加时刻的引擎候选总数） */
     private var llmCandidatesStartIndex = 0
@@ -776,9 +783,13 @@ class ZiYouInputMethodService : InputMethodService() {
         // 重复语境的命中价值正在于此，内容仅候选词无泄漏面）
         AppContainer.llmPredictionCoordinator.reset()
 
-        // 词窗口预热（联想优化方案 §4.4）：协调器内部延迟到缓存装载后按热度
-        // 静默保温，开关关闭时零成本返回；不阻塞输入视图启动
-        AppContainer.llmPredictionCoordinator.prewarm()
+        // 词窗口预热（联想优化方案 §4.4）：协调器内部等待缓存装载完成信号后按热度
+        // 静默保温（S9 事件驱动），开关关闭时零成本返回；不阻塞输入视图启动；
+        // 每服务实例至多一次（onStartInputView 随输入框切换频繁触发）
+        if (!llmPrewarmIssued) {
+            llmPrewarmIssued = true
+            AppContainer.llmPredictionCoordinator.prewarm()
+        }
 
         // 词库下载后引擎可能正在重新部署，scheduleEngineSync 内部先等待就绪再同步，
         // 否则 rime.api 抛异常导致 t9 方案/ascii_mode 永不恢复，九宫格按键失效；
@@ -1084,6 +1095,8 @@ class ZiYouInputMethodService : InputMethodService() {
             // 下一轮上下文，续写链自然延续。
             val adopted = llmCandidates[llmOffset]
             val hadEnginePrediction = llmCandidatesStartIndex > 0
+            // S8 决策数据：LLM 词采纳时引擎候选是否在场（位置策略 A/B 依据）
+            LlmPredictionStats.onLlmAdoption(hadEnginePrediction)
             // 采纳词对攒批（联想优化方案 §4.6 形态 B）：主线程 O(1) 计数，
             // 构建期固化进自建 predict.db，运行时不参与排序
             AppContainer.llmPredictionCoordinator.recordAdoption(
@@ -1193,6 +1206,14 @@ class ZiYouInputMethodService : InputMethodService() {
         // 续写最有价值的场景会被 invalidate/结果丢弃误杀（新编码开始才是真正作废时刻）
         val idle = context?.input.isNullOrEmpty() != false
         llmAppendAllowed = idle
+        // S6 决策数据：编码→空闲过渡即一次「上屏后联想在场情况」采样——
+        // 引擎预测在场计 shown，无任何候选计 gap（句末标点/db 未收录时刻）；
+        // gap/(shown+gap) 达显著比例时才有句末兑底方案的立项依据（分析报告 S6）
+        if (wasComposingLastRender && idle) {
+            if (predictionMode) LlmPredictionStats.onEnginePredictionShown()
+            else LlmPredictionStats.onAssociationGap()
+        }
+        wasComposingLastRender = !idle
         // 引擎新渲染已作废视图侧 LLM 追加尾部（updateCandidates 内清空），
         // Service 侧路由记录同步清零，防陈旧分段误路由
         llmCandidates = emptyList()
