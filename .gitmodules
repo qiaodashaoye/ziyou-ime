@@ -1,6 +1,3 @@
 [submodule "librime-prebuilt/librime"]
 	path = librime-prebuilt/librime
 	url = https://github.com/rime/librime.git
-[submodule "librime-prebuilt/plugins/librime-predict"]
-	path = librime-prebuilt/plugins/librime-predict
-	url = https://github.com/rime/librime-predict
