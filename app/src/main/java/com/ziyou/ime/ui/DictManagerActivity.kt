@@ -315,11 +315,21 @@ private fun DictCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    // weight 不填满：左侧内容超长时收缩让位，保证右侧操作按钮
+                    // 永不被挤压丢失（长名词目如「诗词联想增强库（全唐诗短制版）」）
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .padding(end = 8.dp)
+                ) {
                     Text(
                         text = dict.name,
                         fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                     Spacer(Modifier.width(8.dp))
                     AssistChip(
