@@ -98,6 +98,8 @@ def run_build(args, build_tool):
            "--tsv-out", out + ".merged.tsv", "--probe", args.probe]
     for corpus in args.corpus:
         cmd += ["--corpus", corpus]
+    for corpus in args.plain_corpus:
+        cmd += ["--plain-corpus", corpus]
     if args.adoptions:
         cmd += ["--adoptions", args.adoptions]
     if args.distill:
@@ -224,6 +226,7 @@ def main():
     parser = argparse.ArgumentParser(description="build-predict-db Skill 编排脚本")
     parser.add_argument("--check", action="store_true", help="仅环境检查")
     parser.add_argument("--corpus", action="append", default=[], metavar="TSV")
+    parser.add_argument("--plain-corpus", action="append", default=[], metavar="TSV")
     parser.add_argument("--adoptions", metavar="JSON")
     parser.add_argument("--distill", action="store_true")
     parser.add_argument("--distill-limit", type=int, default=200)

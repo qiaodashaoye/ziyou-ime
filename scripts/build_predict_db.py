@@ -332,6 +332,10 @@ def main():
     parser = argparse.ArgumentParser(description="自建 predict.db 构建管线")
     parser.add_argument("--corpus", action="append", default=[], metavar="TSV",
                         help="外部语料 TSV（prev\\tnext[\\tweight]），可多次")
+    parser.add_argument("--plain-corpus", action="append", default=[], metavar="TSV",
+                        help="免尾键扩展的外部语料 TSV（可多次）：参与合并/内容过滤/候选截断，"
+                             "但键不做双键扩展（诗词句对等整句键：精确匹配天然成立，"
+                             "后缀 miss 由运行期回退覆盖，尾键只会徒增体积）")
     parser.add_argument("--no-seed", action="store_true", help="不合并种子语料")
     parser.add_argument("--adoptions", metavar="JSON", help="设备导出的采纳词对 JSON（§4.6 形态 B）")
     parser.add_argument("--distill", action="store_true", help="对探针缺失键做 LLM 蒸馏补全")
@@ -375,6 +379,12 @@ def main():
         n = load_tsv_corpus(corpus, data, os.path.basename(corpus),
                             default_weight=args.default_weight)
         print(f"[1/6] 外部语料 {os.path.basename(corpus)}: {n} 条")
+    # 免尾键扩展语料单独装载：双键扩展后再合入，其键不参与尾键生成
+    plain_data = {}
+    for corpus in args.plain_corpus:
+        n = load_tsv_corpus(corpus, plain_data, os.path.basename(corpus),
+                            default_weight=args.default_weight)
+        print(f"[1/6] 外部语料（免尾键） {os.path.basename(corpus)}: {n} 条")
     if args.adoptions:
         n = load_adoptions(args.adoptions, data, weight_full=args.adoption_weight)
         print(f"[2/6] 采纳固化: {n} 条（个性化，权重提升）")
@@ -391,6 +401,10 @@ def main():
     blocklist = load_word_set(args.blocklist, "blocklist")
     exclude = load_word_set(args.exclude, "exclude")
     dropped_keys, dropped_cands = apply_filters(data, blocklist, exclude)
+    if plain_data:
+        pk, pc = apply_filters(plain_data, blocklist, exclude)
+        dropped_keys += pk
+        dropped_cands += pc
     if blocklist or exclude:
         print(f"[4/6] 内容过滤: 剔除键 {dropped_keys} 个、候选 {dropped_cands} 条"
               f"（blocklist {len(blocklist)} 词 / exclude {len(exclude)} 词）")
@@ -399,6 +413,11 @@ def main():
               "（替换官方包分发全量用户前强烈建议配置内容安全词表）")
 
     tail_added = 0 if args.no_tail_keys else expand_tail_keys(data, tail_decay=args.tail_decay)
+    # 免尾键语料在扩展后合入：同键同词取最大权重（与常规来源同口径）
+    for key, tails in plain_data.items():
+        merged = data.setdefault(key, {})
+        for text, w in tails.items():
+            merged[text] = max(merged.get(text, 0.0), w)
     cap_and_sort(data)
     covered, total_entries = coverage_report(data, probe_words)
     print(f"[5/6] 双键扩展: 新增尾键 {tail_added} 个；合计键 {len(data)}，条目 {total_entries}")

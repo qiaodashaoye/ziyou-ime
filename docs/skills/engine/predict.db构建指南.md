@@ -152,6 +152,7 @@ python3 .qoder/skills/build-predict-db/scripts/build_db.py
 |---|---|---|---|
 | 种子语料 | 内置 `scripts/predict_seed_corpus.tsv`（`--no-seed` 可关） | 行内指定，档位 90/70/50/30 | 随仓库维护的人工精选高频词对；只收人工可解释的自然搭配 |
 | 外部语料 | `--corpus xxx.tsv`（可多次） | 50（无 weight 列时） | 开源词组库 / wiki 抽取产物；官方 `tools/make_predict_data`（Rust）可从 wiki 语料生成大规模语料 |
+| 外部语料（免尾键） | `--plain-corpus xxx.tsv`（可多次） | 50（无 weight 列时） | 整句键语料（如诗词句对）：参与合并/过滤/截断但键不做双键扩展——整句精确匹配天然成立，后缀 miss 由运行期回退覆盖，尾键徒增体积 |
 | 采纳固化 | `--adoptions xxx.json` | `90 × min(count,5)/5`（count≥5 满分） | 设备导出的真实采纳词对，权重最高——**用户实测采纳 > 统计语料** |
 | LLM 蒸馏 | `--distill` | 60 | 对探针词表无覆盖的键经 OpenAI 兼容端点离线生成；质量介于两者之间，**需人工抽检** |
 

@@ -43,6 +43,10 @@ object DictDownloader {
     /** 单个词库文件下载上限（字节），防恶意 catalog 自报小 size 实际超大文件耗尽磁盘 */
     private const val MAX_DICT_BYTES = 20L * 1024 * 1024
 
+    /** predict.db 联想子库下载上限（字节）：全量诗词增强库体积远超普通 dict.yaml，
+     *  风险仍由 HTTPS 白名单 + sha256 完整性校验兼顾。PredictDbManager 以此为唯一事实源。 */
+    const val MAX_PREDICT_DB_BYTES = 100L * 1024 * 1024
+
     /** 远程预览读取上限（字节），超出即截断（预览只需前 N 条词条） */
     private const val MAX_PREVIEW_BYTES = 1L * 1024 * 1024
 
@@ -90,6 +94,27 @@ object DictDownloader {
         info: RemoteDictInfo,
         targetDir: File,
         onProgress: ((Long, Long) -> Unit)? = null
+    ): File? = downloadTo(
+        info = info,
+        targetFile = File(targetDir, "${info.id}.dict.yaml"),
+        maxBytes = MAX_DICT_BYTES,
+        onProgress = onProgress
+    )
+
+    /**
+     * 下载词库产物到指定文件（通用实现，dict.yaml 与 predict.db 共用）。
+     *
+     * @param info 远程词库信息（id 需合法；url/sha256 参与可信下载与完整性校验）
+     * @param targetFile 目标文件（调用方决定路径与文件名；目标目录不存在时自动创建）
+     * @param maxBytes 下载字节上限（边读边卡，实际字节数为准）
+     * @param onProgress 进度回调 (downloadedBytes, totalBytes)
+     * @return 下载后的文件，失败返回 null
+     */
+    suspend fun downloadTo(
+        info: RemoteDictInfo,
+        targetFile: File,
+        maxBytes: Long,
+        onProgress: ((Long, Long) -> Unit)? = null
     ): File? = withContext(Dispatchers.IO) {
         // 防御性校验：id 会拼接为文件名，非法 id（含路径分隔符 / ".."）可能写到目录外。
         if (!RemoteDictInfo.isValidId(info.id)) {
@@ -97,9 +122,9 @@ object DictDownloader {
             return@withContext null
         }
         var connection: HttpURLConnection? = null
-        val targetFile = File(targetDir, "${info.id}.dict.yaml")
+        val targetDir = targetFile.parentFile
         try {
-            if (!targetDir.exists()) {
+            if (targetDir != null && !targetDir.exists()) {
                 targetDir.mkdirs()
             }
 
@@ -124,8 +149,8 @@ object DictDownloader {
                     while (input.read(buffer).also { bytesRead = it } != -1) {
                         downloadedBytes += bytesRead
                         // 边读边卡上限：contentLength/catalog.size 均不可信，以实际字节数为准
-                        if (downloadedBytes > MAX_DICT_BYTES) {
-                            throw IOException("词库文件超限（上限 ${MAX_DICT_BYTES / (1024 * 1024)}MB）")
+                        if (downloadedBytes > maxBytes) {
+                            throw IOException("词库文件超限（上限 ${maxBytes / (1024 * 1024)}MB）")
                         }
                         output.write(buffer, 0, bytesRead)
                         onProgress?.invoke(downloadedBytes, totalBytes)
@@ -354,7 +379,8 @@ object DictDownloader {
                         url = dictUrl,
                         size = obj.optLong("size", 0),
                         author = obj.optString("author", ""),
-                        sha256 = obj.optString("sha256", "")
+                        sha256 = obj.optString("sha256", ""),
+                        kind = obj.optString("kind", RemoteDictInfo.KIND_DICT)
                     )
                 )
             }

@@ -62,12 +62,14 @@ class DictManagerViewModel(application: Application) : AndroidViewModel(applicat
         refreshCatalog()
     }
 
-    /** 加载本地已安装词库（磁盘读在 IO 线程，避免 init/刷新时阻塞主线程） */
+    /** 加载本地已安装词库（磁盘读在 IO 线程，避免 init/刷新时阻塞主线程）。
+     *  合并两类安装记录：dict.yaml 扩展词库 + predict.db 联想子库（后者独立
+     *  记录防污染主词库 import_tables，见 PredictDbManager 类注释）。 */
     private fun loadInstalledDicts() {
         viewModelScope.launch {
             val context = getApplication<Application>()
             _installedDicts.value = withContext(Dispatchers.IO) {
-                DictManager.getInstalledDicts(context)
+                DictManager.getInstalledDicts(context) + PredictDbManager.getInstalled(context)
             }
         }
     }
@@ -125,15 +127,20 @@ class DictManagerViewModel(application: Application) : AndroidViewModel(applicat
         return _installedDicts.value.firstOrNull { it.id == dictId }
     }
 
-    /** 下载并安装词库 */
+    /** 下载并安装词库（按产物类型分流：dict.yaml 注入通道 / predict.db 整体替换通道） */
     fun installDict(info: RemoteDictInfo) {
         viewModelScope.launch {
             _downloadState.value = DownloadState.Downloading(info.id, 0f, 0, info.size)
 
             val context = getApplication<Application>()
-            val success = DictManager.installDict(context, info) { downloaded, total ->
+            val progressCb: (Long, Long) -> Unit = { downloaded, total ->
                 val progress = if (total > 0) downloaded.toFloat() / total else 0f
                 _downloadState.value = DownloadState.Downloading(info.id, progress, downloaded, total)
+            }
+            val success = if (info.isPredictDb) {
+                PredictDbManager.installPredictDb(context, info, progressCb)
+            } else {
+                DictManager.installDict(context, info, progressCb)
             }
 
             if (success) {
@@ -147,21 +154,29 @@ class DictManagerViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    /** 卸载词库 */
+    /** 卸载词库（按安装记录归属分流） */
     fun uninstallDict(dictId: String) {
         viewModelScope.launch {
             val context = getApplication<Application>()
-            DictManager.uninstallDict(context, dictId)
+            if (PredictDbManager.getInstalled(context).any { it.id == dictId }) {
+                PredictDbManager.uninstallPredictDb(context, dictId)
+            } else {
+                DictManager.uninstallDict(context, dictId)
+            }
             loadInstalledDicts()
             redeploy()
         }
     }
 
-    /** 切换词库启用状态 */
+    /** 切换词库启用状态（predict.db 子库：启用=盖回增强库，禁用=恢复基础库） */
     fun toggleEnabled(dictId: String, enabled: Boolean) {
         viewModelScope.launch {
             val context = getApplication<Application>()
-            DictManager.setEnabled(context, dictId, enabled)
+            if (PredictDbManager.getInstalled(context).any { it.id == dictId }) {
+                PredictDbManager.setEnabled(context, dictId, enabled)
+            } else {
+                DictManager.setEnabled(context, dictId, enabled)
+            }
             loadInstalledDicts()
             redeploy()
         }

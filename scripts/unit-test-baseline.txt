@@ -33,4 +33,14 @@
 # 当前实测：:core-logic 305 + :app 223（2026-08-13，全绿、0 跳过；
 # S6/S8 决策数据采集：LlmPredictionStatsTest 新增 ×2（引擎联想在场/空档
 # 计数、LLM 采纳位置分桶）并更新 dump 格式断言）
-528
+# 当前实测：:core-logic 306 + :app 224（2026-08-13，全绿、0 跳过；
+# 一句诗联想整首诗 Phase 2：AutoPunctPolicyTest 新增诗句链路抑制用例 ×1
+#（五言/七言链不插逗号）、LlmPredictionStatsTest 新增诗词采纳计数 ×1）
+# 当前实测：:core-logic 309 + :app 228（2026-08-14，全绿、0 跳过；
+# 诗词联想双缺陷修复：CandidateFusionTest 新增引擎段归一去重 ×3（重复/
+# 标点变体/腾位补齐）、SimpleCandidatesViewTest 新增 isMenuReplaced ×4
+#（预测链 menu 替换判定，防陈旧累积追加致重复展示与点击索引错位）
+# 当前实测：:core-logic 309 + :app 232（2026-08-14，全绿、0 跳过；
+# 全量诗词库旁路分发：DictModelsTest ×4（catalog kind 字段向后兼容/
+# predict_db 判定/未知类型防御/分类回退），守护 PredictDbManager 分流路由）
+541

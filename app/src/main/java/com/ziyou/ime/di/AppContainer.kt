@@ -8,6 +8,7 @@ import com.ziyou.ime.daemon.RimeDeployStep
 import com.ziyou.ime.daemon.RimeEngine
 import com.ziyou.ime.daemon.RimeSession
 import com.ziyou.ime.dict.DictManager
+import com.ziyou.ime.dict.PredictDbManager
 import com.ziyou.ime.level.LevelStats
 import com.ziyou.ime.voice.SherpaOnnxEngine
 import com.ziyou.ime.voice.SpeechRecognizerEngine
@@ -42,7 +43,10 @@ object AppContainer {
         RimeSession.deploySteps = listOf(
             // 第一步：部署资源文件（首次安装/升级时从 assets 复制到内部存储）
             RimeDeployStep { context -> AssetDeployer.deployIfNeeded(context) },
-            // 第二步：注入已启用的扩展词库到主词库文件
+            // 第二步：恢复已安装的 predict.db 联想子库（升版 assets 覆盖后重新盖回，
+            // 须在 AssetDeployer 之后；未安装时静默早返回）
+            RimeDeployStep { context -> PredictDbManager.reapplyIfInstalled(context) },
+            // 第三步：注入已启用的扩展词库到主词库文件
             // （AssetDeployer 可能覆盖了 luna_pinyin.dict.yaml，需重新追加扩展词库引用）
             RimeDeployStep { context -> DictManager.regenerateMainDict(context) }
         )

@@ -11,6 +11,7 @@ SKILL.md 的详细参考：编排脚本参数、验收门禁协议、底层构�
 |---|---|
 | `--check` | 只检查环境：Python 版本、build_predict / query_predict 工具探测、官方基线副本与探针词表是否就位；不构建 |
 | `--corpus TSV` | 外部语料（透传，可多次） |
+| `--plain-corpus TSV` | 免尾键扩展的外部语料（透传，可多次）：参与合并/过滤/截断，键不做双键扩展（诗词句对等整句键专用） |
 | `--adoptions JSON` | 设备导出的采纳词对 JSON（透传） |
 | `--distill` / `--distill-limit N` | LLM 蒸馏开关与键数上限（透传；需环境变量） |
 | `--no-seed` / `--no-tail-keys` | 关种子语料 / 关双键扩展（透传） |
