@@ -10,7 +10,10 @@ package com.ziyou.ime.core.prediction
  * 2. 采纳词自身以标点开头 → 不插。源头治理在 LlmPredictor 解析期剥离前导标点
  *    （前文与续写词之间的标点由本策略统一负责），本规则作纵深防御保留；
  * 3. 前文末词已以任何标点/符号结尾（含 ，。、：！？… 等）→ 不插（避免标点叠加）；
- * 4. 其余 → 插入 [DEFAULT_PUNCT]（逗号：最通用的句中连接；句号需要语义判断，
+ * 4. 诗句链路 → 不插：前文末词与采纳词同为 5/7 字纯汉字（五言/七言诗句形态）
+ *    时视为「一句诗联想整首诗」链式上屏，诗句间逗号会破坏诗的原文形态
+ *    （docs/一句诗联想整首诗调研与方案.md §3.4/§5 Phase 2）；
+ * 5. 其余 → 插入 [DEFAULT_PUNCT]（逗号：最通用的句中连接；句号需要语义判断，
  *    规则层不妄加，交给 LLM 候选自带标点的自然覆盖）。
  *
  * 判定依据是 [CommitWordWindow] 词窗口末词——窗口收录全部非空白上屏（含独立
@@ -35,6 +38,22 @@ object AutoPunctPolicy {
         if (!adoptedHead.isLetterOrDigit()) return ""
         // 前文末尾已有标点/符号（isLetterOrDigit 为 false 的可见字符）：避免「，，」叠加
         if (!last.last().isLetterOrDigit()) return ""
+        // 诗句链路：前后同为 5/7 字纯汉字（五言/七言）→ 链式补全整首诗，不插逗号
+        if (isPoetryChain(contextWords, adoptedText)) return ""
         return DEFAULT_PUNCT
+    }
+
+    /**
+     * 诗句链路判定（供埋点复用）：词窗口末词与采纳词同为 5/7 字纯汉字。
+     */
+    fun isPoetryChain(contextWords: List<String>, adoptedText: String): Boolean {
+        val last = contextWords.lastOrNull()?.trim().orEmpty()
+        return looksLikePoetryLine(last) && looksLikePoetryLine(adoptedText.trim())
+    }
+
+    /** 五言/七言诗句形态判定：长度 5 或 7 且全部为 CJK 汉字（纯函数，与构建管线 CJK 范围一致） */
+    private fun looksLikePoetryLine(s: String): Boolean {
+        if (s.length != 5 && s.length != 7) return false
+        return s.all { it in '\u4E00'..'\u9FFF' || it in '\u3400'..'\u4DBF' }
     }
 }

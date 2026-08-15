@@ -70,6 +70,14 @@ object LlmPredictionStats {
     private var llmAdoptionsWithEngine = 0L
     private var llmAdoptionsNoEngine = 0L
 
+    /** 诗词链路采纳次数（一句诗联想整首诗，仅计数无词内容） */
+    private var poetryAdoptions = 0L
+
+    /** 诗词链路采纳（Service 预测采纳出口打点） */
+    fun onPoetryAdoption() {
+        poetryAdoptions++
+    }
+
     /** 预测采纳发生（Service 采纳出口打点）：下次查询结算链式轮次 */
     fun onAdoption() {
         pendingAdoption = true
@@ -138,6 +146,7 @@ object LlmPredictionStats {
             append(" engineShown=").append(enginePredShown)
             append(" gap=").append(associationGaps)
             append(" llmAdopt=").append(llmAdoptionsWithEngine).append('/').append(llmAdoptionsNoEngine)
+            append(" poetry=").append(poetryAdoptions)
         }
         reset()
         return summary
@@ -160,6 +169,7 @@ object LlmPredictionStats {
         associationGaps = 0
         llmAdoptionsWithEngine = 0
         llmAdoptionsNoEngine = 0
+        poetryAdoptions = 0
     }
 
     /** 结算链式轮次：采纳后的首次查询即一轮，随后清挂起标记 */

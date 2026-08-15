@@ -117,6 +117,25 @@ class SimpleCandidatesView @JvmOverloads constructor(
             val pagesLoaded = if (pageSize > 0) accumulatedSize / pageSize else 1
             return currentPageNumber >= accumulatedPageStart + pagesLoaded
         }
+
+        /**
+         * 判定 menu 是否被「替换」（区别于翻页）：页码未变但候选内容变化。
+         *
+         * 预测链场景（如诗词联想）：采纳候选后引擎产生新一轮预测——input
+         * 恒为空、页码恒为 0，仅内容变化。此时必须重置累积缓冲；否则新页候选
+         * 被误当「前翻页」追加到陈旧缓冲尾部，造成候选栏重复展示且后段点击
+         * 映射出超出引擎候选数的全局索引（select_candidate 失败 = 点击无响应）。
+         *
+         * @param currentPageNumber 当前引擎页码
+         * @param lastPageNumber 上次渲染的引擎页码（首次渲染为 -1）
+         * @param contentChanged 候选文本序列相对上次渲染是否变化
+         * @return true 表示 menu 被替换，应重置累积缓冲
+         */
+        internal fun isMenuReplaced(
+            currentPageNumber: Int,
+            lastPageNumber: Int,
+            contentChanged: Boolean
+        ): Boolean = contentChanged && currentPageNumber == lastPageNumber
     }
 
     /** 候选词点击回调（携带被点候选本体：跨页分段确认同步需其注音，
@@ -220,6 +239,11 @@ class SimpleCandidatesView @JvmOverloads constructor(
     private var accumulatedPageStart = 0
     /** 当前页码（来自 MenuProto.pageNumber） */
     internal var currentPageNumber = 0
+
+    /** 上次渲染的引擎页码与 menu 文本签名：区分「翻页」与「menu 替换
+     * （预测链新一轮）」，见 [isMenuReplaced] */
+    private var lastRenderedPageNumber = -1
+    private var lastMenuSignature = ""
     /** 当前页大小（来自 MenuProto.pageSize） */
     internal var currentPageSize = 5
     /** 是否为最后一页 */
@@ -356,6 +380,8 @@ class SimpleCandidatesView @JvmOverloads constructor(
             highlightIndex = -1
             lastInput = ""
             lastCaretPos = 0
+            lastRenderedPageNumber = -1
+            lastMenuSignature = ""
             scrollOffset = 0f
             scroller.abortAnimation()
             isPredictionMode = false
@@ -366,6 +392,8 @@ class SimpleCandidatesView @JvmOverloads constructor(
 
             val menu = context.menu
             val pageCandidates = menu?.candidates ?: emptyArray()
+            // menu 文本签名：判定内容是否变化（页码不变但内容变 = menu 替换）
+            val menuSignature = pageCandidates.joinToString("\u0001") { it.text }
             currentPageNumber = menu?.pageNumber ?: 0
             currentPageSize = menu?.pageSize ?: 5
             isLastPage = menu?.isLastPage ?: true
@@ -382,21 +410,36 @@ class SimpleCandidatesView @JvmOverloads constructor(
                 scrollOffset = 0f
                 scroller.abortAnimation()
             } else {
-                // 翻页：判断方向，前翻页追加候选保持 scrollOffset 连续
-                val forward = isForwardPage(currentPageNumber, accumulatedPageStart,
-                    accumulatedCandidates.size, currentPageSize)
-                if (forward || accumulatedCandidates.isEmpty()) {
-                    // 前翻页或首次：追加
-                    accumulatedCandidates.addAll(pageCandidates)
-                } else {
-                    // 后翻页：重置（Rime 不支持随机跳页，无法无缝后翻）
+                val contentChanged = menuSignature != lastMenuSignature
+                if (isMenuReplaced(currentPageNumber, lastRenderedPageNumber, contentChanged)) {
+                    // menu 被替换（预测链新一轮/重新组句）：重置累积缓冲，防陈旧
+                    // 候选追加造成重复展示与点击索引错位
                     accumulatedCandidates.clear()
                     accumulatedCandidates.addAll(pageCandidates)
                     accumulatedPageStart = currentPageNumber
                     scrollOffset = 0f
                     scroller.abortAnimation()
+                } else if (contentChanged) {
+                    // 翻页：判断方向，前翻页追加候选保持 scrollOffset 连续
+                    val forward = isForwardPage(currentPageNumber, accumulatedPageStart,
+                        accumulatedCandidates.size, currentPageSize)
+                    if (forward || accumulatedCandidates.isEmpty()) {
+                        // 前翻页或首次：追加
+                        accumulatedCandidates.addAll(pageCandidates)
+                    } else {
+                        // 后翻页：重置（Rime 不支持随机跳页，无法无缝后翻）
+                        accumulatedCandidates.clear()
+                        accumulatedCandidates.addAll(pageCandidates)
+                        accumulatedPageStart = currentPageNumber
+                        scrollOffset = 0f
+                        scroller.abortAnimation()
+                    }
                 }
+                // 内容完全相同的重复渲染：保持现状，不重复追加
             }
+
+            lastRenderedPageNumber = currentPageNumber
+            lastMenuSignature = menuSignature
 
             lastInput = newInput
             lastCaretPos = newCaretPos

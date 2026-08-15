@@ -136,4 +136,36 @@ class CandidateFusionTest {
         )
         assertEquals(listOf("举头望明月"), fused)
     }
+
+    @Test
+    fun `引擎候选段内重复按归一键去重首现胜`() {
+        // 诗词联想链场景：预测态 menu 可能出现同句重复条目
+        val fused = CandidateFusion.fuse(
+            engineCandidates = listOf("疑是地上霜", "疑是地上霜", "举头望明月"),
+            llmCandidates = emptyList(),
+            limit = 5
+        )
+        assertEquals(listOf("疑是地上霜", "举头望明月"), fused)
+    }
+
+    @Test
+    fun `引擎候选仅标点不同的变体只保留首现`() {
+        // 标点变体误判防护：归一键（剔标点）相等即视为重复，保留首现原文
+        val fused = CandidateFusion.fuse(
+            engineCandidates = listOf("疑是地上霜。", "疑是地上霜", "疑是地上霜？", "举头望明月"),
+            llmCandidates = listOf("疑是地上霜"),
+            limit = 5
+        )
+        assertEquals(listOf("疑是地上霜。", "举头望明月"), fused)
+    }
+
+    @Test
+    fun `引擎段去重腾出的位置由后续候选与LLM词补齐`() {
+        val fused = CandidateFusion.fuse(
+            engineCandidates = listOf("床前明月光", "床前明月光", "疑是地上霜", "举头望明月"),
+            llmCandidates = listOf("低头思故乡"),
+            limit = 4
+        )
+        assertEquals(listOf("床前明月光", "疑是地上霜", "举头望明月", "低头思故乡"), fused)
+    }
 }

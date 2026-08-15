@@ -1,0 +1,14 @@
+{
+  "manifest_version": 1,
+  "id": "com.ziyou.skill.poetry",
+  "name": "诗词助手",
+  "version": "1.0.0",
+  "min_host_api": 2,
+  "author": "字由官方",
+  "description": "古诗词检索：按句/题目/作者查找名家诗词，整首或逐句发送到输入框；数据内置离线（chinese-poetry，MIT）",
+  "icon_text": "📜",
+  "entry": "index.html",
+  "panel_mode": "embed",
+  "needs_input": true,
+  "permissions": ["storage"]
+}

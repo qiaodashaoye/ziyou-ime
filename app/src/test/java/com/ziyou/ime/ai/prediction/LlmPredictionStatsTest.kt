@@ -78,7 +78,15 @@ class LlmPredictionStatsTest {
         val second = LlmPredictionStats.dumpAndReset()
         assertEquals(
             "hits=0 misses=0 hitRate=0.0% chain=0/0 prefetch=0/0 reqs=0 p50ms=-1" +
-                " engineShown=0 gap=0 llmAdopt=0/0", second)
+                " engineShown=0 gap=0 llmAdopt=0/0 poetry=0", second)
+    }
+
+    @Test
+    fun `诗词链路采纳单独计数`() {
+        // 一句诗联想整首诗：仅计数无词内容（隐私红线）
+        repeat(4) { LlmPredictionStats.onPoetryAdoption() }
+        val dump = LlmPredictionStats.dumpAndReset()
+        assertTrue(dump.contains("poetry=4"))
     }
 
     @Test

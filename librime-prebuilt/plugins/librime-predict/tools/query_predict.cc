@@ -67,7 +67,8 @@ int main(int argc, char* argv[]) {
       fallback = true;
   }
 
-  PredictDb db(db_path);
+  path db_file(db_path);
+  PredictDb db(db_file);
   if (!db.Load()) {
     std::cerr << "failed to load predict db: " << db_path << std::endl;
     return 1;

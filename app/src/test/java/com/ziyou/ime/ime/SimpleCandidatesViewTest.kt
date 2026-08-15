@@ -162,4 +162,32 @@ class SimpleCandidatesViewTest {
         assertTrue(SimpleCandidatesView.isForwardPage(1, 0, 0, 0))
         assertFalse(SimpleCandidatesView.isForwardPage(0, 0, 0, 0))
     }
+
+    // ===== isMenuReplaced =====
+
+    @Test
+    fun isMenuReplaced_samePageContentChanged_returnsTrue() {
+        // 预测链新一轮：input 恒空、页码恒 0、仅内容变 → menu 替换，须重置累积缓冲
+        assertTrue(SimpleCandidatesView.isMenuReplaced(0, 0, contentChanged = true))
+        assertTrue(SimpleCandidatesView.isMenuReplaced(2, 2, contentChanged = true))
+    }
+
+    @Test
+    fun isMenuReplaced_samePageContentUnchanged_returnsFalse() {
+        // 重复渲染（内容未变）：不是替换，也不应重复追加
+        assertFalse(SimpleCandidatesView.isMenuReplaced(0, 0, contentChanged = false))
+    }
+
+    @Test
+    fun isMenuReplaced_pageTurn_returnsFalse() {
+        // 页码变化（前翻/后翻）：归翻页分支处理，非替换
+        assertFalse(SimpleCandidatesView.isMenuReplaced(1, 0, contentChanged = true))
+        assertFalse(SimpleCandidatesView.isMenuReplaced(0, 1, contentChanged = true))
+    }
+
+    @Test
+    fun isMenuReplaced_firstRender_returnsFalse() {
+        // 首次渲染 lastPageNumber=-1，页码不等 → 非替换（走翻页分支的首次追加）
+        assertFalse(SimpleCandidatesView.isMenuReplaced(0, -1, contentChanged = true))
+    }
 }

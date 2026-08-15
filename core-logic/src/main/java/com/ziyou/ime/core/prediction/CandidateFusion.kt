@@ -4,10 +4,11 @@ package com.ziyou.ime.core.prediction
  * 引擎候选与 LLM 候选的融合规则（永远做加法不做替换）。
  *
  * 引擎预测零延迟零成本是保底体验，恒按原序排前；LLM 词仅在其后
- * 按序追加，去重键按 [dedupeKey] 归一（剔除标点/符号）——既防文本重复，
+ * 按序追加。**两段均按 [dedupeKey] 归一去重（首现胜）**：既防文本重复，
  * 也防「疑似地上霜」「疑似地上霜。」「疑似地上霜？」这类仅标点不同的
- * 变体占多个位置；首现胜，保留首现项的原始文本（含其句尾标点），
- * 总长截断到 [limit]（见 docs/智能预测可行性方案.md §4.4）。
+ * 变体占多个位置；引擎段自身去重针对预测态 menu 可能出现的重复条目
+ *（如诗词联想链中同一句变体并列），保留首现项的原始文本（含其句尾
+ * 标点），总长截断到 [limit]（见 docs/智能预测可行性方案.md §4.4）。
  */
 object CandidateFusion {
 
@@ -20,7 +21,7 @@ object CandidateFusion {
     /**
      * 融合引擎候选与 LLM 候选。
      *
-     * @param engineCandidates 引擎候选（原序保留在前，本身不查重不改动）
+     * @param engineCandidates 引擎候选（原序保留在前，段内按归一键去重，首现胜）
      * @param llmCandidates LLM 候选（按序追加）
      * @param limit 融合结果总长上限
      * @param exclude 排除文本（按 [dedupeKey] 归一比较）：命中即丢弃该 LLM 词。用于防
@@ -34,9 +35,17 @@ object CandidateFusion {
         limit: Int = 5,
         exclude: List<String> = emptyList()
     ): List<String> {
-        val result = engineCandidates.take(limit).toMutableList()
+        // 引擎段自身去重：预测态 menu 可能出现重复/仅标点不同的变体条目
+        //（诗词联想链场景），按归一键首现胜，保留首现项原始文本
+        val result = mutableListOf<String>()
+        val seen = mutableSetOf<String>()
+        for (candidate in engineCandidates) {
+            if (result.size >= limit) break
+            val key = dedupeKey(candidate)
+            if (key.isEmpty() || !seen.add(key)) continue
+            result.add(candidate)
+        }
         // 已收录归一键集合：引擎词 + 排除词 + 已追加的 LLM 词（均剔除标点比较）
-        val seen = result.mapTo(mutableSetOf()) { dedupeKey(it) }
         exclude.forEach { seen.add(dedupeKey(it)) }
         for (candidate in llmCandidates) {
             if (result.size >= limit) break

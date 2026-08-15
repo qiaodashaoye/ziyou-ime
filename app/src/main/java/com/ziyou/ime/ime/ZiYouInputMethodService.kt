@@ -1134,6 +1134,12 @@ class ZiYouInputMethodService : InputMethodService() {
             )
             if (prefix.isNotEmpty()) {
                 inputLogic.commitAutoPunctuation(prefix)
+            } else if (AutoPunctPolicy.isPoetryChain(
+                    AppContainer.llmPredictionCoordinator.contextWords(), candidate.text
+                )
+            ) {
+                // 诗句链路采纳埋点（一句诗联想整首诗，仅计数无词内容）
+                LlmPredictionStats.onPoetryAdoption()
             }
         }
         inputLogic.selectCandidate(index, candidate)

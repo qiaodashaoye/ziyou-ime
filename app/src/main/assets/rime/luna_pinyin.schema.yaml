@@ -66,7 +66,8 @@ engine:
 predictor:
   db: predict.db
   max_candidates: 10
-  max_iterations: 3
+  # 7 轮支持「一句诗联想整首诗」链式补全（律诗 8 句 = 首句上屏 + 7 轮采纳）
+  max_iterations: 7
 
 speller:
   alphabet: zyxwvutsrqponmlkjihgfedcba

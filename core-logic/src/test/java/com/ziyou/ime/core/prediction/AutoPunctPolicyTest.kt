@@ -13,10 +13,36 @@ class AutoPunctPolicyTest {
 
     @Test
     fun `常规场景插入中文逗号`() {
-        // 「床前明月光」后采纳「疑似地上霜」→ 前置逗号
+        // 非诗句形态的普通续写 → 前置逗号
         assertEquals(
             AutoPunctPolicy.DEFAULT_PUNCT,
-            AutoPunctPolicy.decidePrefix(listOf("床前明月光"), "疑似地上霜")
+            AutoPunctPolicy.decidePrefix(listOf("今天天气"), "真不错")
+        )
+        // 6 字非 5/7 言形态，不触发诗句链路抑制
+        assertEquals(
+            AutoPunctPolicy.DEFAULT_PUNCT,
+            AutoPunctPolicy.decidePrefix(listOf("今天天气真的"), "非常不错啊嗯")
+        )
+    }
+
+    @Test
+    fun `诗句链路不插入逗号`() {
+        // 五言链：床前明月光 → 疑是地上霜（链式补全整首诗，不破坏原文形态）
+        assertEquals("", AutoPunctPolicy.decidePrefix(listOf("床前明月光"), "疑是地上霜"))
+        // 七言链：飞流直下三千尺 → 疑是银河落九天
+        assertEquals(
+            "", AutoPunctPolicy.decidePrefix(listOf("飞流直下三千尺"), "疑是银河落九天")
+        )
+        // 五言→七言混合（词句长短不齐）同样抑制
+        assertEquals(
+            "", AutoPunctPolicy.decidePrefix(listOf("明月几时有"), "把酒问青天不知天上".take(7))
+        )
+        // 前词 5 字但采纳词非纯汉字（含标点）→ 不视为诗句链，仍不插（规则 2 先命中）
+        assertEquals("", AutoPunctPolicy.decidePrefix(listOf("床前明月光"), "，疑是地上霜"))
+        // 前词 5 字但采纳词 4 字 → 非诗句链，照常插
+        assertEquals(
+            AutoPunctPolicy.DEFAULT_PUNCT,
+            AutoPunctPolicy.decidePrefix(listOf("床前明月光"), "疑似地上")
         )
     }
 
