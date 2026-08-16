@@ -5,6 +5,7 @@ import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.util.AttributeSet
@@ -15,6 +16,7 @@ import com.ziyou.ime.core.skin.SkinColor
 import com.ziyou.ime.core.skin.SkinKeyStyle
 import com.ziyou.ime.skin.SkinManager
 import com.ziyou.ime.skin.SkinTheme
+import kotlin.math.abs
 
 /**
  * 键盘视图基类
@@ -544,6 +546,54 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
 
     // ===== 触摸处理 =====
 
+    /**
+     * 按键脏区外扩量（px）：覆盖阴影偏移 + 弥散模糊蔓延（NORMAL 模糊约
+     * 3 倍半径）+ 描边宽度，另加 1dp 抗锯齿安全边距。皮肤可变参数，
+     * 按次读取计算（触摸事件频率下开销可忽）。
+     */
+    private val keyDirtyPaddingPx: Float
+        get() {
+            val shadow = skin.keyShadow
+            val shadowOffsetDp = if (shadow != null) {
+                maxOf(abs(shadow.dxDp), abs(shadow.dyDp))
+            } else {
+                0f
+            }
+            val shadowBlurSpreadDp = (shadow?.radiusDp ?: 0f) * 3f
+            val borderDp = if (skin.keyBorderWidthDp > 0f) skin.keyBorderWidthDp else 0f
+            return dp2px(shadowOffsetDp + shadowBlurSpreadDp + borderDp + 1f)
+        }
+
+    /**
+     * 定向失效按键脏区（耗电审计 P0）：仅重绘按压态发生变化的键
+     * （含其阴影/描边外扩区），替代触摸路径上的整视图 invalidate——
+     * 快速打字时每次按键的重绘量从全键盘 ~40 键降到 1~2 键。
+     * 布局尺寸 / 皮肤 / 缩放变化仍须用全量 invalidate()。
+     *
+     * @param oldIndex 变化前的按下键索引（-1 表示无）
+     * @param newIndex 变化后的按下键索引（-1 表示无）
+     */
+    protected fun invalidateKeys(oldIndex: Int, newIndex: Int) {
+        if (width == 0 || height == 0 || keyRects.isEmpty()) {
+            invalidate()
+            return
+        }
+        var dirty: Rect? = null
+        for (index in intArrayOf(oldIndex, newIndex)) {
+            if (index < 0 || index >= keyRects.size) continue
+            val r = keyRects[index].rect
+            val pad = keyDirtyPaddingPx
+            val rect = Rect(
+                (r.left - pad).toInt().coerceAtLeast(0),
+                (r.top - pad).toInt().coerceAtLeast(0),
+                (r.right + pad).toInt().coerceAtMost(width),
+                (r.bottom + pad).toInt().coerceAtMost(height)
+            )
+            dirty = if (dirty == null) rect else dirty.apply { union(rect) }
+        }
+        if (dirty != null) invalidate(dirty.left, dirty.top, dirty.right, dirty.bottom) else invalidate()
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         // 使用 actionMasked：多指触摸时 ACTION_POINTER_DOWN/UP 携带 pointer index，
         // 直接比较 action 会漏掉事件，导致按压状态残留、后续点击无响应。
@@ -551,9 +601,10 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
             MotionEvent.ACTION_DOWN -> {
                 val index = findKeyAt(event.x, event.y)
                 if (index >= 0) {
+                    val old = pressedKeyIndex
                     pressedKeyIndex = index
                     keyRepeatFired = false
-                    invalidate()
+                    invalidateKeys(old, index)
                     performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     // 可重复键：延迟启动连续触发（长按持续删除）
                     if (isRepeatableKey(keyRects[index].key)) {
@@ -567,22 +618,24 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
                 val index = findKeyAt(event.x, event.y)
                 if (index != pressedKeyIndex) {
                     // 手指滑离原按键：停止连续触发
+                    val old = pressedKeyIndex
                     cancelKeyRepeat()
                     pressedKeyIndex = index
-                    invalidate()
+                    invalidateKeys(old, index)
                 }
                 return true
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 cancelKeyRepeat()
+                val old = pressedKeyIndex
                 // 连续触发已执行过时，抬起不再补发一次按键，避免多删一个字符
-                if (pressedKeyIndex >= 0 && event.actionMasked == MotionEvent.ACTION_UP && !keyRepeatFired) {
-                    handleKeyUp(keyRects[pressedKeyIndex].key)
+                if (old >= 0 && event.actionMasked == MotionEvent.ACTION_UP && !keyRepeatFired) {
+                    handleKeyUp(keyRects[old].key)
                 }
                 pressedKeyIndex = -1
                 keyRepeatFired = false
-                invalidate()
+                if (old >= 0) invalidateKeys(old, -1)
                 return true
             }
         }
@@ -597,8 +650,9 @@ abstract class BaseKeyboardView @JvmOverloads constructor(
     private fun clearPressedState() {
         cancelKeyRepeat()
         if (pressedKeyIndex != -1) {
+            val old = pressedKeyIndex
             pressedKeyIndex = -1
-            invalidate()
+            invalidateKeys(old, -1)
         }
         keyRepeatFired = false
     }

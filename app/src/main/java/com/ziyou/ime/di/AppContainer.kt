@@ -3,6 +3,7 @@ package com.ziyou.ime.di
 import com.ziyou.ime.ZiyouApplication
 import com.ziyou.ime.ai.prediction.LlmPredictionConfig
 import com.ziyou.ime.ai.prediction.LlmPredictionCoordinator
+import com.ziyou.ime.ai.prediction.PowerNetworkProbe
 import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.daemon.RimeDeployStep
 import com.ziyou.ime.daemon.RimeEngine
@@ -104,7 +105,11 @@ object AppContainer {
      * 取 [ZiyouApplication] 实例。
      */
     val llmPredictionCoordinator: LlmPredictionCoordinator by lazy {
-        LlmPredictionCoordinator(ZiyouApplication.instance.applicationContext)
+        val context = ZiyouApplication.instance.applicationContext
+        LlmPredictionCoordinator(context).apply {
+            // 重请求环境门控（耗电审计 P0）：预取/预热在计量网络或低电量未充电时放弃
+            allowHeavyRequests = { PowerNetworkProbe.allowHeavyRequests(context) }
+        }
     }
 
     /**

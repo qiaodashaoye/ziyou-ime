@@ -576,6 +576,76 @@ class InputLogicControllerTest {
         assertEquals("644", keyRecordStack.unconfirmedRawChars())
     }
 
+    @Test
+    fun processKey_secondPartialConfirmViaKey_stackAccumulatesBothSegments() = runTest {
+        // 用户流程：6442662 (ni'hao'ma) → 空格确认“你” → 再空格确认“好”。
+        // 第二次分段确认必须同样合并入栈（跳过已有确认段）；若早退，
+        // confirmedRawLength 落后于引擎实际确认宽度，已确认音节在预览中被打回
+        // 数字且退格边界与引擎失配，最终触发编码区全量回退为纯数字。
+        val beforeContext = confirmedKeyContext(
+            input = "6442662", preedit = "6442662", selStart = 0,
+            candidates = arrayOf("你" to "ni", "你好" to "ni'hao")
+        )
+        val afterFirst = confirmedKeyContext(
+            input = "6442662", preedit = "你42662", selStart = 1,
+            candidates = arrayOf("好" to "hao", "号" to "hao")
+        )
+        val afterSecond = confirmedKeyContext(
+            input = "6442662", preedit = "你好62", selStart = 2,
+            candidates = arrayOf("吗" to "ma", "妈" to "ma")
+        )
+        fakeEngine.api.bulkResults = mutableListOf(
+            // 末位编码键：建立按键前高亮缓存（高亮=你）
+            KeyEventResult(consumed = true, commit = null, context = beforeContext),
+            // 第一次空格：确认“你”，高亮切到“好”
+            KeyEventResult(consumed = true, commit = null, context = afterFirst),
+            // 第二次空格：确认“好”，高亮切到“吗”
+            KeyEventResult(consumed = true, commit = null, context = afterSecond)
+        )
+        "6442662".forEach { keyRecordStack.pushT9Key(it) }
+
+        controller.processKey('2'.code, 0)
+        controller.processKey(KeyCode.XK_space, 0)
+        assertEquals("首次分段确认后确认段宽度", 2, keyRecordStack.confirmedRawLength())
+
+        controller.processKey(KeyCode.XK_space, 0)
+
+        // 两次确认累计入栈：你(64) + 好(426)，剩余 ma 未确认
+        assertEquals(5, keyRecordStack.confirmedRawLength())
+        assertEquals("62", keyRecordStack.unconfirmedRawChars())
+        assertEquals(2, keyRecordStack.confirmedDisplayCodePoints())
+        // 编码区预览：已确认汉字累计 + 剩余拼音，已确认音节不得回退为数字
+        val preview = PinyinHintProvider.buildPreview(afterSecond, keyRecordStack.confirmedRawLength())
+        assertEquals("你好ma", preview)
+    }
+
+    /** 构造带确认前缀的引擎上下文（selStart 按码点计，与 JNI 层一致） */
+    private fun confirmedKeyContext(
+        input: String,
+        preedit: String,
+        selStart: Int,
+        candidates: Array<Pair<String, String>>
+    ): ContextProto {
+        val codePoints = preedit.codePointCount(0, preedit.length)
+        return ContextProto(
+            composition = CompositionProto(
+                length = codePoints, cursorPos = codePoints,
+                selStart = selStart, selEnd = codePoints,
+                preedit = preedit, commitTextPreview = null
+            ),
+            menu = MenuProto(
+                pageSize = 5, pageNumber = 0, isLastPage = false,
+                highlightedCandidateIndex = 0,
+                candidates = candidates.map { (text, comment) ->
+                    com.ziyou.ime.core.CandidateProto(text, comment, "")
+                }.toTypedArray(),
+                selectKeys = "", selectLabels = emptyArray()
+            ),
+            input = input,
+            caretPos = input.length
+        )
+    }
+
     // ===== retypeUnconfirmed（存在确认段时的编码更新路径）=====
 
     @Test

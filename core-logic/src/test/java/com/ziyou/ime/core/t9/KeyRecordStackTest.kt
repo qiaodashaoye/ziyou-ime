@@ -61,6 +61,27 @@ class KeyRecordStackTest {
     }
 
     @Test
+    fun popAndRestore_lockedPinyinAfterConfirmed_keepsConfirmedSegment() {
+        // 回归：分段确认后又锁定尾段拼音，退格解锁时确认段必须原样保留，
+        // 调用方据此路由「退格重打」（保留确认前缀），严禁全量回退为纯数字
+        val stack = KeyRecordStack()
+        "64426".forEach { stack.pushT9Key(it) }          // ni=64, hao=426
+        assertTrue(stack.confirmLeading("你", listOf("ni")))
+        stack.pushPinyinSelectAction("hao")               // 栈：[C(你), Pinyin(hao)]
+
+        val cmd = stack.popAndRestore()
+
+        // 解锁指令偏移跳过确认段原始键，还原 hao' → 426
+        assertEquals(2, cmd!!.caretPos)
+        assertEquals("hao'".length, cmd.length)
+        assertEquals("426", cmd.replacement)
+        // 确认段不得被连带解除
+        assertTrue(stack.hasConfirmed())
+        assertEquals(2, stack.confirmedRawLength())
+        assertEquals("426", stack.unconfirmedRawChars())
+    }
+
+    @Test
     fun popAndRestore_t9Key_returnsNullAndPops() {
         val stack = KeyRecordStack()
         stack.pushT9Key('4')
@@ -136,6 +157,38 @@ class KeyRecordStackTest {
         assertFalse(stack.confirmLeading("妈", listOf("ma")))
         assertFalse(stack.hasConfirmed())
         assertEquals("486", stack.unconfirmedRawChars())
+    }
+
+    @Test
+    fun confirmLeading_secondConfirmAfterFirst_skipsExistingConfirmed() {
+        // 连续分段确认（逐段空格确认 你→好）：第二次合并必须跳过已有确认段，
+        // 从首个未确认记录消费，否则确认宽度落后导致预览回退数字
+        val stack = KeyRecordStack()
+        "6442662".forEach { stack.pushT9Key(it) }        // ni=64, hao=426, ma=62
+        assertTrue(stack.confirmLeading("你", listOf("ni")))
+        assertTrue(stack.confirmLeading("好", listOf("hao")))
+
+        assertEquals(5, stack.confirmedRawLength())
+        assertEquals("62", stack.unconfirmedRawChars())
+        assertEquals(2, stack.confirmedDisplayCodePoints())
+        // 后续仍可针对首个未确认段锁拼音，偏移跳过全部确认段
+        val cmd = stack.pushPinyinSelectAction("ma")
+        assertEquals(5, cmd!!.caretPos)
+        assertEquals("ma'", cmd.replacement)
+    }
+
+    @Test
+    fun confirmedDisplayCodePoints_accumulatesLeadingConfirmedText() {
+        val stack = KeyRecordStack()
+        assertEquals(0, stack.confirmedDisplayCodePoints())
+        "6442662".forEach { stack.pushT9Key(it) }
+        stack.confirmLeading("你", listOf("ni"))
+        assertEquals(1, stack.confirmedDisplayCodePoints())
+        stack.confirmLeading("好", listOf("hao"))
+        assertEquals(2, stack.confirmedDisplayCodePoints())
+        // 展开确认后归零（与 confirmedRawLength 同步失效）
+        stack.unconfirmAll()
+        assertEquals(0, stack.confirmedDisplayCodePoints())
     }
 
     @Test

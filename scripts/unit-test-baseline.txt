@@ -43,4 +43,15 @@
 # 当前实测：:core-logic 309 + :app 232（2026-08-14，全绿、0 跳过；
 # 全量诗词库旁路分发：DictModelsTest ×4（catalog kind 字段向后兼容/
 # predict_db 判定/未知类型防御/分类回退），守护 PredictDbManager 分流路由）
-541
+# 当前实测：:core-logic 319 + :app 232（2026-08-16，全绿、0 跳过；
+# 耗电审计 P0 新增 ×10：FailureBackoffTest ×5（门槛前不阻塞/30s 冷却/
+# 30→60→120 指数递增封顶/成功复位/自定义参数）、HeavyRequestGateTest ×5
+#（计量网络拒绝/低电量未充电拒绝/门槛边界/充电豁免）；
+# 同期收紧 TriggerPolicy 限流 800→1500ms、防抖 300→600ms、每分钟配额 20→10，
+# RequestRateWindowTest 默认配额断言同步更新（用例数不变））
+# 当前实测：:core-logic 322 + :app 234（2026-08-16，全绿、0 跳过；
+# 九宫格退格全量回退回归修复新增 ×5：KeyRecordStackTest ×3（确认段后
+# 锁拼音退格解锁保留确认段/连续分段确认跳过已有确认段/确认展示码点累计）、
+# InputLogicControllerTest ×1（按键路径二次分段确认累计入栈且预览保持拼音）、
+# PinyinHintProviderTest ×1（二次确认前缀累计预览），守护编码区「拼音+数字」混合形态）
+556

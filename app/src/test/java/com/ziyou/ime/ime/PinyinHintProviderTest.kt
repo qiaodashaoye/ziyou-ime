@@ -209,6 +209,19 @@ class PinyinHintProviderTest {
     }
 
     @Test
+    fun buildPreview_secondPartialConfirm_accumulatesConfirmedPrefix() {
+        // 连续分段确认（逐段空格确认 你→好）：confirmedRawLength 累计为 5（ni+hao），
+        // 预览保持「汉字前缀 + 剩余拼音」混合形态，已确认音节不得被打回数字
+        val ctx = context(
+            input = "6442662",
+            candidates = listOf(candidate("吗", "ma")),
+            preedit = "你好62",
+            selStartCodePoints = 2
+        )
+        assertEquals("你好ma", PinyinHintProvider.buildPreview(ctx, confirmedRawLength = 5))
+    }
+
+    @Test
     fun buildPreview_partialConfirmWithoutTrustedOffset_returnsNull() {
         // 引擎存在确认段但状态机降级（无可信确认偏移）→ 返回 null 回退 Rime 原始 preedit
         val ctx = context(input = "64426", preedit = "你426", selStartCodePoints = 1)

@@ -6,6 +6,7 @@ import android.util.Log
 import com.ziyou.ime.core.prediction.AdoptionRecord
 import com.ziyou.ime.core.prediction.CommitWordWindow
 import com.ziyou.ime.core.prediction.ContextLruCache
+import com.ziyou.ime.core.prediction.FailureBackoff
 import com.ziyou.ime.core.prediction.RequestRateWindow
 import com.ziyou.ime.core.prediction.TriggerPolicy
 import kotlinx.coroutines.CompletableDeferred
@@ -118,6 +119,10 @@ class LlmPredictionCoordinator(private val appContext: Context) {
     /** 滚动一分钟费用熔断窗口（[RequestRateWindow] 纯逻辑，防抖放弃可退账，S2） */
     private val rateWindow = RequestRateWindow()
 
+    /** 连续失败指数退避（耗电审计 P0）：网络不可达/鉴权失败时冷却期内
+     *  放弃发起请求，防空烧限流配额与射频；任一成功/缓存命中即复位 */
+    private val failureBackoff = FailureBackoff()
+
     /**
      * 结果分发回调（主线程）：携带请求发起时的 epoch、候选列表（**累计语义**：
      * 流式下每次为截至当前的全部候选）与触发时的上下文词快照。由 Service 设置；
@@ -125,6 +130,13 @@ class LlmPredictionCoordinator(private val appContext: Context) {
      * 「刚上屏的词被模型复读回显」。
      */
     var onResult: ((epoch: Long, candidates: List<String>, contextWords: List<String>) -> Unit)? = null
+
+    /**
+     * 重请求（预取/预热）环境门控（耗电审计 P0）：由组合根注入，读取
+     * 网络计量性与电量状态（见 [PowerNetworkProbe] → [com.ziyou.ime.core.prediction.HeavyRequestGate]）。
+     * 默认放行：测试未注入时不改变既有行为。真实上屏触发的请求不受此门控约束。
+     */
+    var allowHeavyRequests: () -> Boolean = { true }
 
     /**
      * 上屏文本入口（主线程，输入热路径）。
@@ -149,6 +161,8 @@ class LlmPredictionCoordinator(private val appContext: Context) {
         val cached = cache.get(words)
         if (cached != null) {
             LlmPredictionStats.onCacheHit()
+            // 缓存命中说明端到端链路可用，复位失败退避（不经网络零成本）
+            failureBackoff.recordSuccess()
             requestJob?.cancel()
             requestJob = null
             val dispatchEpoch = ++epoch
@@ -184,6 +198,8 @@ class LlmPredictionCoordinator(private val appContext: Context) {
     fun prefetch(predictedWords: List<String>) {
         if (!LlmPredictionConfig.isEnabled(appContext)) return
         if (predictedWords.isEmpty()) return
+        // 环境门控（耗电审计 P0）：计量网络/低电量未充电时静默放弃预取
+        if (!allowHeavyRequests()) return
         if (requestJob?.isActive == true) return
         ensureCacheLoaded()
         val now = SystemClock.elapsedRealtime()
@@ -211,6 +227,8 @@ class LlmPredictionCoordinator(private val appContext: Context) {
      */
     fun prewarm() {
         if (!LlmPredictionConfig.isEnabled(appContext)) return
+        // 环境门控（耗电审计 P0）：计量网络/低电量未充电时静默放弃预热
+        if (!allowHeavyRequests()) return
         val signal = ensureCacheLoaded()
         scope.launch {
             val loaded = withTimeoutOrNull(PREWARM_LOAD_TIMEOUT_MS) { signal.await() }
@@ -389,8 +407,12 @@ class LlmPredictionCoordinator(private val appContext: Context) {
      *        且结果到达时不经缓存命中短路二次分发（[inFlightPrefetch]）
      */
     private fun scheduleRequest(delayMs: Long, prefetchContext: List<String>? = null) {
-        // 费用熔断：滚动一分钟内真实请求超限则放弃（缓存命中不占配额，S2 经 RequestRateWindow）
+        // 失败退避（耗电审计 P0）：冷却期内放弃发起，避免空烧配额与射频
         val now = SystemClock.elapsedRealtime()
+        if (failureBackoff.isBlocked(now)) {
+            return
+        }
+        // 费用熔断：滚动一分钟内真实请求超限则放弃（缓存命中不占配额，S2 经 RequestRateWindow）
         if (!rateWindow.tryRecord(now)) {
             Log.w(TAG, "LLM 预测请求达每分钟上限，本次放弃")
             return
@@ -433,11 +455,14 @@ class LlmPredictionCoordinator(private val appContext: Context) {
                 }
             }
             val candidates = result.getOrElse { err ->
+                // 失败退避记账（耗电审计 P0）：连续失败达阈后进入指数冷却
+                failureBackoff.recordFailure(SystemClock.elapsedRealtime())
                 // 失败文案已在 LlmPredictor 内脱敏（仅状态码/通用描述，不含用户词）；
                 // 「开关已开但无续写词」排查首看本行（HTTP 401/超时/非 HTTPS 等）
                 Log.w(TAG, "LLM 预测请求失败，本次放弃: ${err.message}")
                 return@launch
             }
+            failureBackoff.recordSuccess()
             // epoch 过期守卫：请求期间有新上屏/新编码/离开预测态则丢弃，不渲染不缓存
             if (requestEpoch != epoch) return@launch
             if (prefetchContext == null && window.words() != snapshot) return@launch

@@ -297,9 +297,43 @@ class ZiYouInputMethodService : InputMethodService() {
         }
     }
 
-    /** 剪贴板变更监听：复制即收录历史（持强引用，onCreate 注册 / onDestroy 注销） */
+    /** 剪贴板变更监听：复制即收录历史（持强引用，键盘可见期注册/注销，见 [startClipboardWatch]） */
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
         captureClipboardToHistory()
+    }
+
+    /** 剪贴板监听是否已注册（防 onStartInputView 重复触发时重复注册） */
+    private var clipboardWatching = false
+
+    /**
+     * 开始监听剪贴板变更（键盘可见期，onStartInputView 调用）。
+     *
+     * 耗电审计 P0：监听收窄到键盘可见期——键盘隐藏时系统剪贴板变更不再
+     * 唤醒本进程收录历史（重度复制场景下消除频繁的进程唤醒）；
+     * 键盘隐藏期间的复制不会丢失，[onStartInputView] 的兜底同步会补收。
+     * （Android 10+ 后台读剪贴板仅默认输入法豁免，非默认时读到 null 自然跳过）
+     */
+    private fun startClipboardWatch() {
+        if (clipboardWatching) return
+        try {
+            getSystemService(ClipboardManager::class.java)
+                ?.addPrimaryClipChangedListener(clipboardListener)
+            clipboardWatching = true
+        } catch (e: Exception) {
+            Log.w(TAG, "注册剪贴板监听失败: ${e.message}")
+        }
+    }
+
+    /** 停止监听剪贴板变更（onFinishInputView / onDestroy 兜底，幂等）。 */
+    private fun stopClipboardWatch() {
+        if (!clipboardWatching) return
+        clipboardWatching = false
+        try {
+            getSystemService(ClipboardManager::class.java)
+                ?.removePrimaryClipChangedListener(clipboardListener)
+        } catch (e: Exception) {
+            Log.w(TAG, "注销剪贴板监听失败: ${e.message}")
+        }
     }
 
     /**
@@ -475,14 +509,8 @@ class ZiYouInputMethodService : InputMethodService() {
             }
         }
 
-        // 监听剪贴板变更：复制即收录粘贴板历史
-        // （Android 10+ 后台读剪贴板仅默认输入法豁免，非默认时读到 null 自然跳过）
-        try {
-            getSystemService(ClipboardManager::class.java)
-                ?.addPrimaryClipChangedListener(clipboardListener)
-        } catch (e: Exception) {
-            Log.w(TAG, "注册剪贴板监听失败: ${e.message}")
-        }
+        // 剪贴板监听已收窄到键盘可见期（onStartInputView 注册，耗电审计 P0），
+        // 此处不再常驻注册；onDestroy 保留兜底注销
 
         // 皮肤快照就绪/变更监听：背景图异步补齐、设置页切换/自定义保存后
         // 重建输入视图套用新皮肤（与形态切换同源路径），并重同步引擎状态
@@ -775,8 +803,11 @@ class ZiYouInputMethodService : InputMethodService() {
         // 换行键文案随编辑器动作变化（如微信搜索框显示「搜索」），与实际落地语义一致
         syncEnterKeyLabel()
 
-        // 兜底同步当前剪贴板（服务重启期间漏听的复制在此补收；去重逻辑保证幂等零 IO）
+        // 兜底同步当前剪贴板（服务重启/键盘隐藏期间漏听的复制在此补收；去重逻辑保证幂等零 IO）
         captureClipboardToHistory()
+
+        // 键盘可见期才监听剪贴板变更（耗电审计 P0：消除键盘隐藏时的进程唤醒）
+        startClipboardWatch()
 
         // LLM 智能续写：新输入会话开始，清空词窗口并作废 in-flight 请求
         //（防跨输入框上下文泄漏；纯内存操作，零 IO；LRU 缓存跨会话保留，
@@ -820,6 +851,9 @@ class ZiYouInputMethodService : InputMethodService() {
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
         Log.d(TAG, "onFinishInputView")
+
+        // 键盘隐藏：停止剪贴板监听，避免键盘不可见时系统复制事件唤醒本进程（耗电审计 P0）
+        stopClipboardWatch()
 
         // 关闭全部面板（技能面板 WebView、AI 请求、涂鸦、粘贴板、工具、语音），避免后台常驻
         closeAllPanels()
@@ -1044,13 +1078,23 @@ class ZiYouInputMethodService : InputMethodService() {
             else -> {
                 // 九宫格模式下的智能退格
                 if (keyCode == KeyCode.XK_BackSpace && currentKeyboardType == KeyboardType.NINE_GRID && !keyRecordStack.isEmpty()) {
+                    // 退格前的未确认原始编码（存在确认段时供「退格重打」计算删除量）
+                    val rawBeforeRestore = keyRecordStack.unconfirmedRawChars()
                     val restoreCommand = keyRecordStack.popAndRestore()
                     if (restoreCommand != null) {
-                        // replaceKey（底层 set_input）会清空引擎内全部已确认段：
-                        // 先同步解除栈内确认标记，保持栈与引擎一致（无确认段时为空操作）
-                        keyRecordStack.unconfirmAll()
-                        // 撤销拼音选择：将已锁定拼音替换回原 T9 键
-                        inputLogic.restorePinyin(restoreCommand)
+                        if (keyRecordStack.hasConfirmed()) {
+                            // 存在已确认段：replaceKey（底层 set_input）会重建 composition，
+                            // 清空引擎内全部已确认段——已确认汉字与已锁定拼音被全量
+                            // 打回原始数字（如 你hao → 64426）。改走与 handlePinyinSelect
+                            // 同源的「退格重打」：只解锁尾部已锁定拼音，确认前缀全程保留
+                            inputLogic.retypeUnconfirmed(
+                                rawBeforeRestore.length,
+                                keyRecordStack.unconfirmedRawChars()
+                            )
+                        } else {
+                            // 无确认段：撤销拼音选择，将已锁定拼音替换回原 T9 键
+                            inputLogic.restorePinyin(restoreCommand)
+                        }
                         return  // 不发送普通 BackSpace
                     }
                     // restoreCommand 为 null 表示弹出的是普通 T9Key/Apostrophe；
@@ -1372,13 +1416,8 @@ class ZiYouInputMethodService : InputMethodService() {
         Log.i(TAG, "InputMethodService onDestroy")
         // 注销皮肤变更监听（与 onCreate 注册对称）
         SkinManager.removeListener(skinChangeListener)
-        // 注销剪贴板监听（与 onCreate 注册对称）
-        try {
-            getSystemService(ClipboardManager::class.java)
-                ?.removePrimaryClipChangedListener(clipboardListener)
-        } catch (e: Exception) {
-            Log.w(TAG, "注销剪贴板监听失败: ${e.message}")
-        }
+        // 兜底注销剪贴板监听（正常路径已在 onFinishInputView 注销，此处幂等）
+        stopClipboardWatch()
         // 释放全部面板（技能 WebView / AI 请求 / 涂鸦 / 粘贴板 / 工具 / 键盘选择 / 语音）
         closeAllPanels()
         // 解绑 LLM 续写结果回调（协调器为进程级单例，持回调会泄漏已销毁 Service）

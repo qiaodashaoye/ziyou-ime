@@ -155,6 +155,21 @@ class KeyRecordStack {
     }
 
     /**
+     * 前部已确认段展示文本占用的 Unicode 码点总数（无确认段返回 0）。
+     *
+     * 与引擎 preedit 确认前缀的码点偏移对齐（如连续确认 你+好 后为 2），
+     * 供按键路径的后续分段确认同步切出本次**新增**的确认文本。
+     */
+    fun confirmedDisplayCodePoints(): Int {
+        var count = 0
+        for (record in records) {
+            if (record !is InputKey.ConfirmedKey) break
+            count += record.text.codePointCount(0, record.text.length)
+        }
+        return count
+    }
+
+    /**
      * 未确认部分的原始编码串表示（数字 / 已锁定拼音+分词符 / 分词符），
      * 供「退格重打」路径按引擎编码串逐键重放。
      */

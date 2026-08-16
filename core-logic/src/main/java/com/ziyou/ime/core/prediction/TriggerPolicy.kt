@@ -27,11 +27,13 @@ class TriggerPolicy private constructor() {
     }
 
     companion object {
-        /** 最小请求间隔（ms）：硬限流下限 */
-        const val MIN_INTERVAL_MS = 800L
+        /** 最小请求间隔（ms）：硬限流下限。
+         *  省电收紧（耗电审计 P0）：800→1500，降低移动网络下射频尾巴功耗 */
+        const val MIN_INTERVAL_MS = 1_500L
 
-        /** 防抖时长（ms）：commit 后延迟发射，窗口内再次上屏重置计时 */
-        const val DEBOUNCE_MS = 300L
+        /** 防抖时长（ms）：commit 后延迟发射，窗口内再次上屏重置计时。
+         *  省电收紧（耗电审计 P0）：300→600，合并更多连续上屏 */
+        const val DEBOUNCE_MS = 600L
 
         /** 句末标点集合（中英文句号/叹号/问号 + 省略号） */
         private const val SENTENCE_END_PUNCT = "。！？!?…"

@@ -289,20 +289,29 @@ class InputLogicController(
 
     /**
      * 按键路径的分段确认同步（空格选高亮候选 / select_keys 等）：
-     * 引擎已出现确认前缀（preedit 头部汉字，selStart > 0）而栈尚未记录时，
-     * 以按键前高亮候选（[selected]）的注音为音节依据合并栈头。确认段文本取自
-     * preedit 确认前缀（可能长于候选文本）；普通编码态（无确认前缀）与栈已有
-     * 确认段的后续分段确认不在本路径处理（后者降级行为与历史一致）。
+     * 引擎已出现确认前缀（preedit 头部汉字，selStart > 0）时，以按键前高亮候选
+     * （[selected]）的注音为音节依据合并栈头；栈已有确认段时（连续分段确认，
+     * 如逐段空格确认 你→好）只合并本次新增部分，[KeyRecordStack.confirmLeading]
+     * 天然跳过已有确认段。确认段文本取自 preedit 确认前缀的新增段（可能长于
+     * 候选文本）；普通编码态（无确认前缀）不触发同步。同步失败整栈 clear 降级。
      */
     private fun syncStackAfterKeyPartialConfirm(context: ContextProto?, selected: CandidateProto?) {
-        if (keyRecordStack.isEmpty() || keyRecordStack.hasConfirmed()) return
+        if (keyRecordStack.isEmpty()) return
         val composition = context?.composition ?: return
         val selStart = composition.selStart
         if (selStart <= 0) return
         val preedit = composition.preedit ?: return
         val codePoints = preedit.codePointCount(0, preedit.length)
         if (selStart > codePoints) return
-        val confirmedText = preedit.substring(0, preedit.offsetByCodePoints(0, selStart))
+        // 连续分段确认：栈内已有确认段已覆盖 preedit 确认前缀的前部，只切本次新增部分；
+        // 若整体早退，confirmedRawLength 会落后于引擎实际确认宽度，已确认音节在预览中
+        // 被打回数字且退格边界与引擎失配，最终触发编码区全量回退为纯数字
+        val knownConfirmedCodePoints = keyRecordStack.confirmedDisplayCodePoints()
+        if (selStart <= knownConfirmedCodePoints) return  // 本次按键无新增确认
+        val confirmedText = preedit.substring(
+            preedit.offsetByCodePoints(0, knownConfirmedCodePoints),
+            preedit.offsetByCodePoints(0, selStart)
+        )
         val syllables = syllablesOf(selected)
         if (syllables.isEmpty()) return
         if (!keyRecordStack.confirmLeading(confirmedText, syllables)) {

@@ -19,8 +19,10 @@ class RequestRateWindow(
         /** 滚动窗口时长（ms）：一分钟 */
         const val DEFAULT_WINDOW_MS = 60_000L
 
-        /** 每窗口真实网络请求上限 */
-        const val DEFAULT_MAX_PER_WINDOW = 20
+        /** 每窗口真实网络请求上限。
+         *  省电收紧（耗电审计 P0）：20→10，每次请求伴随 TLS 握手与射频尾巴，
+         *  移动网络下高频请求是 LLM 预测耗电主因 */
+        const val DEFAULT_MAX_PER_WINDOW = 10
     }
 
     /** 窗口内各次记账时刻（时间序：队首最旧） */

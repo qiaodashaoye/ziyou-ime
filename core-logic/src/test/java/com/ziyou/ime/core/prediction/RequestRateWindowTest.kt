@@ -85,11 +85,11 @@ class RequestRateWindowTest {
     }
 
     @Test
-    fun `默认配置为一分钟二十次`() {
+    fun `默认配置为一分钟十次`() {
         assertEquals(60_000L, RequestRateWindow.DEFAULT_WINDOW_MS)
-        assertEquals(20, RequestRateWindow.DEFAULT_MAX_PER_WINDOW)
+        assertEquals(10, RequestRateWindow.DEFAULT_MAX_PER_WINDOW)
         val window = RequestRateWindow()
-        repeat(20) { i -> assertTrue(window.tryRecord(i * 1_000L)) }
-        assertFalse(window.tryRecord(20_000L))
+        repeat(10) { i -> assertTrue(window.tryRecord(i * 1_000L)) }
+        assertFalse(window.tryRecord(10_000L))
     }
 }

@@ -28,6 +28,10 @@ import java.net.URL
  * 超时、响应字节数上限（端点由用户自行配置，不做域名白名单）；但超时
  * 大幅收紧（预测是旁路增强，不可拖慢输入）。
  *
+ * 连接复用（耗电审计 P0）：响应体被完整消费（读到 EOF）的成功路径不调
+ * disconnect，让底层 keep-alive 池复用 TCP+TLS 连接，避免每次请求重新
+ * 握手的 CPU 与射频开销；提前终止（[DONE]/超限）与失败路径才断开。
+ *
  * 隐私红线：日志中禁止出现用户词内容——本类全部日志仅含状态码/通用描述。
  */
 object LlmPredictor {
@@ -89,6 +93,9 @@ object LlmPredictor {
                 return@withContext Result.failure(IOException("未配置 API Key"))
             }
             var connection: HttpURLConnection? = null
+            // 连接复用标记（耗电审计 P0）：响应体完整消费（读到 EOF）才置位，
+            // finally 据此跳过 disconnect 让底层 keep-alive 池复用连接
+            var reusable = false
             try {
                 connection = openConnection(AiConfig.getApiUrl(context), apiKey, stream = false)
                 connection.outputStream.use { output ->
@@ -104,6 +111,7 @@ object LlmPredictor {
                 }
 
                 val body = connection.inputStream.use { readBoundedText(it) }
+                reusable = true
                 val candidates = StreamCandidateText.parseWhole(extractMessageContent(body))
                 if (candidates.isEmpty()) {
                     Result.failure(IOException("LLM 预测返回内容为空"))
@@ -120,7 +128,7 @@ object LlmPredictor {
                 Log.w(TAG, "LLM 预测异常: ${e.javaClass.simpleName}")
                 Result.failure(IOException("LLM 预测请求失败"))
             } finally {
-                connection?.disconnect()
+                if (!reusable) connection?.disconnect()
             }
         }
 
@@ -152,6 +160,9 @@ object LlmPredictor {
             val parser = StreamCandidateText()
             val collected = ArrayList<String>(StreamCandidateText.MAX_CANDIDATES)
             var connection: HttpURLConnection? = null
+            // 连接复用标记（耗电审计 P0）：仅流读到 EOF 才可复用；
+            // [DONE] 提前终止/字节超限/异常时流中尚有未消费数据，必须断开
+            var reusable = false
             try {
                 connection = openConnection(AiConfig.getApiUrl(context), apiKey, stream = true)
                 connection.outputStream.use { output ->
@@ -166,7 +177,7 @@ object LlmPredictor {
                 }
 
                 connection.inputStream.use { input ->
-                    readSseChunks(input, isActive = { isActive }) { delta ->
+                    reusable = readSseChunks(input, isActive = { isActive }) { delta ->
                         val fresh = parser.offer(delta)
                         if (fresh.isNotEmpty()) {
                             collected.addAll(fresh)
@@ -203,7 +214,7 @@ object LlmPredictor {
                     Result.failure(IOException("LLM 预测请求失败"))
                 }
             } finally {
-                connection?.disconnect()
+                if (!reusable) connection?.disconnect()
             }
         }
 
@@ -253,16 +264,18 @@ object LlmPredictor {
      * @param input SSE 字节流
      * @param isActive 协程存活探针（作废后不再消费后续数据）
      * @param onDelta 增量文本回调（choices[0].delta.content 非空时）
+     * @return true 表示读到流 EOF（连接可归还 keep-alive 池复用，耗电审计 P0）；
+     *         false 表示提前终止（[DONE]/超限/协程作废），流中尚有未消费数据
      */
     private fun readSseChunks(
         input: InputStream,
         isActive: () -> Boolean,
         onDelta: (String) -> Unit
-    ) {
+    ): Boolean {
         BufferedReader(InputStreamReader(input, Charsets.UTF_8), BUFFER_SIZE).use { reader ->
             var total = 0L
             while (isActive()) {
-                val line = reader.readLine() ?: break
+                val line = reader.readLine() ?: return true
                 // S3：按 UTF-8 字节数计量（与限制语义对齐；此前按 UTF-16 字符数
                 // 会使中文场景实际放行约 3 倍字节）。行短小且本链路低频，编码开销可忽
                 total += line.toByteArray(Charsets.UTF_8).size + 1
@@ -272,7 +285,7 @@ object LlmPredictor {
                 if (line.isEmpty() || line.startsWith(":")) continue
                 if (!line.startsWith("data:")) continue
                 val payload = line.substring(5).trim()
-                if (payload == "[DONE]") break
+                if (payload == "[DONE]") return false
                 val delta = JSONObject(payload)
                     .optJSONArray("choices")
                     ?.optJSONObject(0)
@@ -280,6 +293,8 @@ object LlmPredictor {
                     ?.optString("content")
                 if (!delta.isNullOrEmpty()) onDelta(delta)
             }
+            // isActive 为 false 退出：未读到 EOF，连接不可复用
+            return false
         }
     }
 
