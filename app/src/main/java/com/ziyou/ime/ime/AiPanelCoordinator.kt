@@ -7,14 +7,18 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.annotation.MainThread
+import com.ziyou.ime.ai.AiPanelMode
 import com.ziyou.ime.skin.SkinManager
+import com.ziyou.ime.ui.PersonaManagerActivity
 import com.ziyou.ime.ui.SettingsActivity
 
 /**
- * AI 问答面板协调器。
+ * AI 面板协调器（问答 / 人设润色双入口）。
  *
  * 从 [ZiYouInputMethodService] 剥离「AI 面板生命周期 + 键盘收放布局编排」职责，
  * 与 [SkillPanelCoordinator] 遵循同一拆分纪律。
+ * 两个面板由工具栏两个独立按钮分别触发（[openAsk] / [openPolish]），
+ * 模式在面板构造时固定，面板内不提供模式切换。
  *
  * 面板始终挂载在内容根容器顶部（编码区上方），两种布局形态：
  * - 提问态：面板紧凑高度（标题栏 + 输入行），下方键盘/候选区完整可用，
@@ -52,20 +56,25 @@ class AiPanelCoordinator(
     /** 面板是否已打开。 */
     val isOpen: Boolean get() = panel != null
 
-    /** 面板开关切换（候选区按钮栏「AI」键入口）。 */
-    fun toggle() {
-        if (isOpen) close() else open()
-    }
+    /** 打开 AI 问答面板（工具栏「AI」键入口）。 */
+    fun openAsk() = open(AiPanelMode.ASK)
+
+    /** 打开人设润色面板（工具栏「润色」键入口）。 */
+    fun openPolish() = open(AiPanelMode.POLISH)
 
     /**
-     * 打开 AI 面板：挂载到内容根容器顶部（编码区上方），
-     * 键盘保持可见供输入问题，上屏路由切到面板输入框。
+     * 打开指定模式的 AI 面板：挂载到内容根容器顶部（编码区上方），
+     * 键盘保持可见供输入，上屏路由切到面板输入框。
+     * 已打开时先关旧面板再开新面板（支持两入口直接互切）。
      */
-    fun open() {
-        if (panel != null) return
+    private fun open(mode: AiPanelMode) {
+        if (panel != null) {
+            if (panel?.mode == mode) return  // 同模式重复点击：保持现状
+            close()
+        }
         val content = host.contentLayout() ?: return
         host.onPanelWillOpen()
-        val newPanel = AiPanelView(service, SkinManager.getCurrentSkin(service), panelHost)
+        val newPanel = AiPanelView(service, SkinManager.getCurrentSkin(service), panelHost, mode)
         // 索引 0 = 整个输入视图最顶部（编码区之上），提问态紧凑高度
         content.addView(newPanel, 0, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
@@ -95,6 +104,13 @@ class AiPanelCoordinator(
 
         override fun onRequestOpenSettings() {
             val intent = Intent(service, SettingsActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            service.startActivity(intent)
+        }
+
+        override fun onRequestOpenPersonaManager() {
+            val intent = Intent(service, PersonaManagerActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             service.startActivity(intent)

@@ -32,6 +32,7 @@ enum class ToolbarItem(
     DOODLE("doodle", "画", "涂鸦画板", ToolbarIconDrawer.Icon.DOODLE, KeyCode.KEYCODE_DOODLE_PANEL),
     SKILL("skill", "技", "技能面板", ToolbarIconDrawer.Icon.SKILL, KeyCode.KEYCODE_SKILL_PANEL),
     AI("ai", "AI", "AI 问答", ToolbarIconDrawer.Icon.AI, KeyCode.KEYCODE_AI_ASSISTANT),
+    AI_POLISH("ai_polish", "润色", "人设润色", ToolbarIconDrawer.Icon.AI_POLISH, KeyCode.KEYCODE_AI_POLISH),
     CLIPBOARD("clipboard", "贴", "粘贴板历史", ToolbarIconDrawer.Icon.CLIPBOARD, KeyCode.KEYCODE_CLIPBOARD_PANEL),
     FLOATING("floating", "浮", "悬浮键盘切换", ToolbarIconDrawer.Icon.FLOATING, KeyCode.KEYCODE_TOGGLE_FLOATING),
     VOICE("voice", "声", "语音输入", ToolbarIconDrawer.Icon.VOICE, KeyCode.KEYCODE_VOICE_PANEL),

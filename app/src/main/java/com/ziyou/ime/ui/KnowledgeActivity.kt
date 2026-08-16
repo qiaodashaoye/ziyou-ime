@@ -9,13 +9,13 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.ziyou.ime.ai.PersonaRepository
 import com.ziyou.ime.ai.knowledge.AiUsageStats
 import com.ziyou.ime.ai.knowledge.KnowledgeImporter
 import com.ziyou.ime.ai.knowledge.KnowledgeItem
@@ -29,9 +29,12 @@ import java.util.Locale
 /**
  * AI 知识库管理页面
  *
- * - 顶部：启用开关 + 使用统计摘要（条目数/总字数/知识库命中率）
- * - 列表：知识条目（名称/来源类型/分块数/导入时间），点击查看详情/删除，
- *   文件夹来源附「同步」入口（增量重导变更文件）
+ * 知识库与人设强绑定：本页只负责知识条目的导入/删除/同步，
+ * 绑定关系在「人设管理」页创建/编辑人设时直接勾选建立，无全局启用开关。
+ *
+ * - 顶部：使用统计摘要（条目数/总字数/知识库命中率）
+ * - 列表：知识条目（名称/来源类型/分块数/绑定角色数/导入时间），
+ *   点击查看详情/删除，文件夹来源附「同步」入口（增量重导变更文件）
  * - 底部导入入口：txt/md 文件（SAF OpenDocument）、文件夹（OpenDocumentTree）、
  *   自定义文本（弹窗输入）
  *
@@ -66,30 +69,9 @@ class KnowledgeActivity : AppCompatActivity() {
             setPadding(dp(16), dp(16), dp(16), dp(16))
         }
 
-        // 启用开关行
-        val switchRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(4), 0, dp(4), dp(4))
-        }
-        switchRow.addView(TextView(this).apply {
-            text = "启用知识库问答"
-            textSize = 16f
-            setTextColor(0xFF212121.toInt())
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        @Suppress("UseSwitchCompatOrMaterialCode")
-        val enableSwitch = Switch(this).apply {
-            isChecked = KnowledgeRepository.isEnabled(this@KnowledgeActivity)
-            setOnCheckedChangeListener { _, checked ->
-                KnowledgeRepository.setEnabled(this@KnowledgeActivity, checked)
-            }
-        }
-        switchRow.addView(enableSwitch)
-        root.addView(switchRow)
-
         root.addView(TextView(this).apply {
-            text = "开启后，键盘 AI 问答会先在本地知识库中检索相关内容，" +
-                "再结合检索结果回答（RAG）。知识内容仅存储在本机。"
+            text = "在此导入知识条目，然后在「人设管理」页创建或编辑人设时勾选绑定：" +
+                "该人设问答/润色时将仅检索其绑定的知识（RAG）。知识内容仅存储在本机。"
             textSize = 12f
             setTextColor(0xFF757575.toInt())
             setPadding(dp(4), 0, dp(4), dp(8))
@@ -167,6 +149,9 @@ class KnowledgeActivity : AppCompatActivity() {
             KnowledgeItem.SourceType.FOLDER -> "[文件夹]"
             KnowledgeItem.SourceType.TEXT -> "[文本]"
         }
+        // 已绑定人设徽标（润色时作为该角色的专属检索范围）
+        val boundCount = PersonaRepository.countPersonasBoundTo(this, item.id)
+        val kbBadge = if (boundCount > 0) " · 已绑定 $boundCount 个角色" else ""
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(4), dp(12), dp(4), dp(12))
@@ -181,7 +166,7 @@ class KnowledgeActivity : AppCompatActivity() {
                 setTextColor(0xFF212121.toInt())
             })
             addView(TextView(context).apply {
-                text = "${item.chunkCount} 个知识块 · ${formatChars(item.totalChars)} · " +
+                text = "${item.chunkCount} 个知识块 · ${formatChars(item.totalChars)}$kbBadge · " +
                     "导入于 ${formatDate(item.importedAt)}"
                 textSize = 12f
                 setTextColor(0xFF757575.toInt())
@@ -216,9 +201,14 @@ class KnowledgeActivity : AppCompatActivity() {
     }
 
     private fun confirmRemove(item: KnowledgeItem) {
+        // 已绑定人设时二次确认文案提示影响面（删除后绑定自动解除）
+        val boundCount = PersonaRepository.countPersonasBoundTo(this, item.id)
+        val warning = if (boundCount > 0)
+            "\n\n该条目已绑定 $boundCount 个角色，删除后相关角色的润色将不再检索它。"
+        else ""
         AlertDialog.Builder(this)
             .setTitle("删除知识条目")
-            .setMessage("确定删除「${item.name}」？")
+            .setMessage("确定删除「${item.name}」？$warning")
             .setPositiveButton("删除") { _, _ ->
                 if (KnowledgeRepository.removeItem(this, item.id)) {
                     KnowledgeSearcher.invalidate()

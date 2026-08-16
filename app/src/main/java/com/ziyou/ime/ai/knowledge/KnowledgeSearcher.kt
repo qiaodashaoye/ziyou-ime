@@ -24,10 +24,16 @@ object KnowledgeSearcher : Retriever {
 
     private const val TAG = "KnowledgeSearcher"
 
-    /** 索引快照：BM25 索引 + docId → (条目, chunk 原文) 映射，原子替换 */
+    /** 润色模式检索 Top-K：参考资料仅作风格参照，过多 chunk 挤占润色输出
+     *  token 且诱导模型照抄资料，故比问答路径（[KnowledgeRepository.DEFAULT_TOP_K]）收紧。 */
+    const val POLISH_TOP_K = 3
+
+    /** 索引快照：BM25 索引 + docId → (条目, chunk 原文) 映射 + 条目 ID →
+     *  docId 集反向表（人设绑定子集检索用），原子替换 */
     private class Snapshot(
         val index: Bm25Index,
-        val chunks: List<Pair<KnowledgeItem, String>>
+        val chunks: List<Pair<KnowledgeItem, String>>,
+        val docIdsByItem: Map<String, Set<Int>>
     )
 
     @Volatile
@@ -55,10 +61,12 @@ object KnowledgeSearcher : Retriever {
                     }
                 }
                 val index = Bm25Index()
-                allChunks.forEachIndexed { docId, (_, text) ->
+                val docIdsByItem = HashMap<String, MutableSet<Int>>()
+                allChunks.forEachIndexed { docId, (item, text) ->
                     index.addDocument(docId, BigramTokenizer.tokenize(text))
+                    docIdsByItem.getOrPut(item.id) { mutableSetOf() }.add(docId)
                 }
-                snapshot = Snapshot(index, allChunks)
+                snapshot = Snapshot(index, allChunks, docIdsByItem)
                 Log.i(TAG, "知识库索引构建完成: ${items.size} 条目 / ${allChunks.size} chunk" +
                     " / ${System.currentTimeMillis() - start}ms")
             }
@@ -68,12 +76,24 @@ object KnowledgeSearcher : Retriever {
     /**
      * BM25 检索最相关的 [topK] 个知识块（纯内存，需先 [ensureLoaded]；
      * 未加载或无命中返回空列表，调用方降级为无知识库路径）。
+     *
+     * [itemIds] 非空时仅在指定条目范围内检索（人设绑定专属知识库）：
+     * 经反向表映射为 docId 集后传入 BM25 打分阶段过滤；集合内无任何
+     * 已索引文档（条目已删但绑定未清理等）时安全返回空列表。
      */
-    override fun retrieve(query: String, topK: Int): List<RetrievedChunk> {
+    override fun retrieve(query: String, topK: Int, itemIds: Set<String>?): List<RetrievedChunk> {
         val snap = snapshot ?: return emptyList()
         if (snap.chunks.isEmpty()) return emptyList()
+        val docFilter: Set<Int>? = itemIds?.let { ids ->
+            val docIds = mutableSetOf<Int>()
+            for (id in ids) {
+                snap.docIdsByItem[id]?.let { docIds.addAll(it) }
+            }
+            if (docIds.isEmpty()) return emptyList()
+            docIds
+        }
         val queryTokens = BigramTokenizer.tokenize(query)
-        return snap.index.search(queryTokens, topK).map { scored ->
+        return snap.index.search(queryTokens, topK, docFilter).map { scored ->
             val (item, text) = snap.chunks[scored.docId]
             RetrievedChunk(
                 text = text,
@@ -83,6 +103,10 @@ object KnowledgeSearcher : Retriever {
             )
         }
     }
+
+    /** 全库检索（旧签名保留，等价于不传 itemIds）。 */
+    override fun retrieve(query: String, topK: Int): List<RetrievedChunk> =
+        retrieve(query, topK, null)
 
     /** 失效缓存（知识条目增删改后调用），下次检索时重新构建。 */
     fun invalidate() {

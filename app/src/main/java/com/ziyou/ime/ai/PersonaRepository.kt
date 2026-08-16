@@ -16,10 +16,12 @@ import org.json.JSONObject
  * JSON 结构（`KEY_CUSTOM_LIST` 的值）：
  * ```json
  * [
- *   { "id": "...", "name": "...", "description": "...", "systemPrompt": "..." },
+ *   { "id": "...", "name": "...", "description": "...", "systemPrompt": "...",
+ *     "knowledgeItemIds": ["kb_...", ...] },
  *   ...
  * ]
  * ```
+ * `knowledgeItemIds` 为可选字段（缺省反序列化为空列表，旧数据零迁移）。
  * 内置人设不持久化，始终从代码读取，保证升级后内置模板可自动更新。
  */
 object PersonaRepository {
@@ -92,7 +94,11 @@ object PersonaRepository {
         return true
     }
 
-    /** 删除自定义人设（内置人设不可删除；删除后若为当前选中，回退到默认人设）。 */
+    /**
+     * 删除自定义人设（内置人设不可删除；删除后若为当前选中，回退到默认人设）。
+     * 其名下跨会话摘要槽由调用方经 AiMemoryStore.clearPersona 一并清理，
+     * 避免本层反向依赖 knowledge 包。
+     */
     fun removeCustomPersona(context: Context, id: String): Boolean {
         val customs = loadCustomPersonas(context).toMutableList()
         val removed = customs.removeAll { it.id == id && !it.isBuiltin }
@@ -105,6 +111,28 @@ object PersonaRepository {
         return true
     }
 
+    // ===== 知识库绑定引用维护 =====
+
+    /**
+     * 清理所有自定义人设对已删知识条目 [itemId] 的绑定引用。
+     * 知识条目删除后由 KnowledgeRepository 侧调用；人设与条目均为
+     * 个位数规模，全量遍历重写无性能压力。无引用时不触发写入。
+     */
+    fun purgeKnowledgeRefs(context: Context, itemId: String) {
+        val customs = loadCustomPersonas(context)
+        if (customs.none { itemId in it.knowledgeItemIds }) return
+        val cleaned = customs.map { p ->
+            if (itemId in p.knowledgeItemIds) {
+                p.copy(knowledgeItemIds = p.knowledgeItemIds.filter { it != itemId })
+            } else p
+        }
+        saveCustomPersonas(context, cleaned)
+    }
+
+    /** 反查：绑定指定知识条目的自定义人设数（知识库页徽标展示用）。 */
+    fun countPersonasBoundTo(context: Context, itemId: String): Int =
+        loadCustomPersonas(context).count { itemId in it.knowledgeItemIds }
+
     // ===== 内部序列化 =====
 
     private fun loadCustomPersonas(context: Context): List<AiPersona> {
@@ -114,12 +142,16 @@ object PersonaRepository {
             val array = JSONArray(json)
             (0 until array.length()).map { i ->
                 val obj = array.getJSONObject(i)
+                val boundIds = obj.optJSONArray("knowledgeItemIds")
+                val ids = if (boundIds == null) emptyList()
+                else (0 until boundIds.length()).map { boundIds.getString(it) }
                 AiPersona(
                     id = obj.getString("id"),
                     name = obj.getString("name"),
                     description = obj.optString("description", ""),
                     systemPrompt = obj.getString("systemPrompt"),
-                    isBuiltin = false
+                    isBuiltin = false,
+                    knowledgeItemIds = ids
                 )
             }
         } catch (e: Exception) {
@@ -131,11 +163,15 @@ object PersonaRepository {
     private fun saveCustomPersonas(context: Context, personas: List<AiPersona>) {
         val array = JSONArray()
         personas.forEach { p ->
-            array.put(JSONObject()
+            val obj = JSONObject()
                 .put("id", p.id)
                 .put("name", p.name)
                 .put("description", p.description)
-                .put("systemPrompt", p.systemPrompt))
+                .put("systemPrompt", p.systemPrompt)
+            if (p.knowledgeItemIds.isNotEmpty()) {
+                obj.put("knowledgeItemIds", JSONArray(p.knowledgeItemIds))
+            }
+            array.put(obj)
         }
         getPreferences(context).edit()
             .putString(KEY_CUSTOM_LIST, array.toString())

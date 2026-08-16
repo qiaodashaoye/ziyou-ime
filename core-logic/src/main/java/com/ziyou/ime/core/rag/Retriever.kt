@@ -27,6 +27,14 @@ interface Retriever {
     /**
      * 按相关性检索最相关的 [topK] 个知识块，按得分降序返回；
      * 无可用知识或无命中时返回空列表（调用方据此降级为无知识库路径）。
+     *
+     * [itemIds] 非空时仅在指定知识条目（[RetrievedChunk.itemId]）范围内检索
+     * （人设绑定专属知识库的子集检索）；null 为全库检索。过滤发生在打分
+     * 阶段，召回质量等价于子库独立索引。默认实现忽略该参数（向后兼容）。
      */
+    fun retrieve(query: String, topK: Int, itemIds: Set<String>? = null): List<RetrievedChunk> =
+        retrieve(query, topK)
+
+    /** 全库检索（旧签名保留，等价于 [retrieve] 不传 itemIds）。 */
     fun retrieve(query: String, topK: Int): List<RetrievedChunk>
 }

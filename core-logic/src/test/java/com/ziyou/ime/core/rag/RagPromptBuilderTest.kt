@@ -63,4 +63,44 @@ class RagPromptBuilderTest {
         assertFalse(prompt.contains("【参考资料】"))
         assertEquals("$base\n\n$persona", prompt)
     }
+
+    // ===== buildPolish（润色任务变体） =====
+
+    @Test
+    fun `润色prompt无参考资料时仍含人设与润色指令`() {
+        val prompt = RagPromptBuilder.buildPolish(base, persona)
+        assertTrue(prompt.startsWith(base))
+        assertTrue(prompt.contains(persona))
+        assertTrue(prompt.contains("【润色任务】"))
+        assertFalse(prompt.contains("【风格参考资料】"))
+    }
+
+    @Test
+    fun `润色prompt注入风格参考资料且不要求引用编号`() {
+        val prompt = RagPromptBuilder.buildPolish(
+            base, persona, chunks = listOf(chunk("明月出天山", "李白诗集.txt")))
+        assertTrue(prompt.contains("【风格参考资料】"))
+        assertTrue(prompt.contains("[1]（来源：李白诗集.txt）"))
+        assertTrue(prompt.contains("明月出天山"))
+        // 润色场景仅借鉴风格，不复用问答路径的「标注编号」指令
+        assertFalse(prompt.contains("请优先基于上述参考资料回答问题"))
+    }
+
+    @Test
+    fun `润色指令约定编号输出格式与解析器对齐`() {
+        val prompt = RagPromptBuilder.buildPolish(base, persona)
+        assertTrue(prompt.contains("保留原文的核心意思与关键信息"))
+        assertTrue(prompt.contains("1. <版本一文本>（风格说明，不超过15字）"))
+        assertTrue(prompt.contains("除编号版本外不要输出任何其他内容"))
+    }
+
+    @Test
+    fun `润色prompt受总预算约束`() {
+        val bigChunk = chunk("大".repeat(RagPromptBuilder.MAX_PROMPT_CHARS))
+        val prompt = RagPromptBuilder.buildPolish(base, persona, chunks = listOf(bigChunk))
+        // 超预算 chunk 丢弃，但润色指令始终追加；总长受控
+        assertTrue(prompt.length <= RagPromptBuilder.MAX_PROMPT_CHARS + 600)
+        assertTrue(prompt.contains("【润色任务】"))
+        assertFalse(prompt.contains("【风格参考资料】"))
+    }
 }

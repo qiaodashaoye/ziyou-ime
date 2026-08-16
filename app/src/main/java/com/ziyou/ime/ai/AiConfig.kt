@@ -13,6 +13,10 @@ data class AiApiProvider(
     val defaultModel: String
 )
 
+/** AI 面板工作模式：问答（多轮对话）/ 润色（人设改写候选后上屏）。
+ *  模式由工具栏入口按钮决定（面板构造时固定），不持久化。 */
+enum class AiPanelMode { ASK, POLISH }
+
 /**
  * AI 问答服务配置
  *

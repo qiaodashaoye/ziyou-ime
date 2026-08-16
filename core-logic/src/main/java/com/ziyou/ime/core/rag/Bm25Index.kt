@@ -55,9 +55,14 @@ class Bm25Index(
     /**
      * BM25 检索：返回按得分降序的前 [topK] 个文档；查询 token 全部未命中
      * 或索引为空时返回空列表。
+     *
+     * [docFilter] 非空时仅集合内文档参与打分排序（打分循环内 O(1) 判断，
+     * 无额外扫描）：过滤发生在打分阶段而非取 Top-K 之后，召回质量等价于
+     * 子库独立建索引，而全库索引只需维护一份（人设级 RAG 子集检索用）。
      */
-    fun search(queryTokens: List<String>, topK: Int): List<ScoredDoc> {
+    fun search(queryTokens: List<String>, topK: Int, docFilter: Set<Int>? = null): List<ScoredDoc> {
         if (queryTokens.isEmpty() || docLengths.isEmpty() || topK <= 0) return emptyList()
+        if (docFilter != null && docFilter.isEmpty()) return emptyList()
         val n = docLengths.size.toDouble()
         val avgDocLength = totalTokens.toDouble() / n
         val scores = HashMap<Int, Double>()
@@ -67,6 +72,7 @@ class Bm25Index(
             // IDF 采用带 +1 平滑的标准公式，保证非负
             val idf = ln(1.0 + (n - postings.size + 0.5) / (postings.size + 0.5))
             for ((docId, tf) in postings) {
+                if (docFilter != null && docId !in docFilter) continue
                 val docLength = docLengths[docId] ?: continue
                 val norm = tf * (k1 + 1) / (tf + k1 * (1 - b + b * docLength / avgDocLength))
                 scores[docId] = (scores[docId] ?: 0.0) + idf * norm

@@ -3,6 +3,7 @@ package com.ziyou.ime.ai.knowledge
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import com.ziyou.ime.ai.PersonaRepository
 import org.json.JSONArray
 import java.io.File
 
@@ -10,9 +11,12 @@ import java.io.File
  * 知识库持久化仓库
  *
  * 持久化模式与 [com.ziyou.ime.ai.PersonaRepository] 对齐：
- * - SharedPreferences（`ziyou_ai_knowledge`）存开关、Top-K 与条目元数据 JSON 数组；
+ * - SharedPreferences（`ziyou_ai_knowledge`）存 Top-K 与条目元数据 JSON 数组；
  * - chunk 正文以 JSON 数组落 `filesDir/knowledge/<itemId>.json`（SP 有体积限制，
  *   正文不入 SP）；内存倒排索引不持久化，由 [KnowledgeSearcher] 从 chunk 懒构建。
+ *
+ * 知识库与人设强绑定：无全局启用开关，检索范围由各人设的
+ * knowledgeItemIds 绑定关系驱动（见 AiChatOrchestrator）。
  *
  * 容量纪律：单条目 chunk ≤ [MAX_CHUNKS_PER_ITEM]，全库正文 ≤ [MAX_TOTAL_CHARS]
  * 字符，超限由导入侧拒绝（见 [KnowledgeImporter]）。
@@ -21,7 +25,6 @@ object KnowledgeRepository {
 
     private const val TAG = "KnowledgeRepository"
     private const val PREF_NAME = "ziyou_ai_knowledge"
-    private const val KEY_ENABLED = "enabled"
     private const val KEY_TOP_K = "top_k"
     private const val KEY_ITEMS = "items"
 
@@ -37,15 +40,7 @@ object KnowledgeRepository {
     /** 全库正文字符总量上限（约 10MB 文本） */
     const val MAX_TOTAL_CHARS = 10 * 1024 * 1024
 
-    // ===== 开关与配置 =====
-
-    /** 知识库总开关（默认关闭：关闭时检索/索引零开销）。 */
-    fun isEnabled(context: Context): Boolean =
-        getPreferences(context).getBoolean(KEY_ENABLED, false)
-
-    fun setEnabled(context: Context, enabled: Boolean) {
-        getPreferences(context).edit().putBoolean(KEY_ENABLED, enabled).apply()
-    }
+    // ===== 配置 =====
 
     /** 检索 Top-K（暂无设置 UI，预留配置项）。 */
     fun getTopK(context: Context): Int =
@@ -91,12 +86,14 @@ object KnowledgeRepository {
         }
     }
 
-    /** 删除条目（元数据与 chunk 文件一并清除）。 */
+    /** 删除条目（元数据与 chunk 文件一并清除，同时清理人设侧绑定引用）。 */
     fun removeItem(context: Context, itemId: String): Boolean {
         val items = getItems(context)
         if (items.none { it.id == itemId }) return false
         saveItems(context, items.filter { it.id != itemId })
         chunkFile(context, itemId).delete()
+        // 反向清理自定义人设对该条目的绑定引用（同包上层，方向安全）
+        PersonaRepository.purgeKnowledgeRefs(context, itemId)
         return true
     }
 

@@ -23,7 +23,7 @@ class ToolbarIconDrawer {
 
     /** 图标目录：动态按钮（对应 [ToolbarItem]）+ 固定收起/Logo 按钮 +
      *  工具面板标题栏设置按钮（[ToolPanelView]） */
-    enum class Icon { DOODLE, SKILL, AI, CLIPBOARD, FLOATING, KEYBOARD, VOICE, HIDE, SETTINGS, LOGO }
+    enum class Icon { DOODLE, SKILL, AI, AI_POLISH, CLIPBOARD, FLOATING, KEYBOARD, VOICE, HIDE, SETTINGS, LOGO }
 
     /** 单个图标的绘制规格：描边主体 + 可选填充细节（如颜料点/键帽） */
     private class Spec(val stroke: Path, val fill: Path? = null)
@@ -51,6 +51,7 @@ class ToolbarIconDrawer {
         Icon.DOODLE to doodle(),
         Icon.SKILL to skill(),
         Icon.AI to ai(),
+        Icon.AI_POLISH to aiPolish(),
         Icon.CLIPBOARD to clipboard(),
         Icon.FLOATING to floating(),
         Icon.KEYBOARD to keyboard(),
@@ -128,6 +129,27 @@ class ToolbarIconDrawer {
             quadTo(20.1f, 6.3f, 19.5f, 8.2f)
             quadTo(18.9f, 6.3f, 17f, 5.7f)
             quadTo(18.9f, 5.1f, 19.5f, 3.2f)
+            close()
+        }
+        return Spec(stroke, fill)
+    }
+
+    /** 人设润色：人物剪影（头像 + 肩部）描边 + 右上小星光点缀（角色化 AI 隐喻） */
+    private fun aiPolish(): Spec {
+        val stroke = Path().apply {
+            // 头像：圆形描边
+            addCircle(9.3f, 8f, 3.4f, Path.Direction.CW)
+            // 肩部：两端收于底边的半包弧
+            moveTo(3.4f, 20.8f)
+            cubicTo(3.4f, 15.2f, 15.2f, 15.2f, 15.2f, 20.8f)
+        }
+        val fill = Path().apply {
+            // 小星光：四角星填充（与 AI 图标同源元素，暗示 AI 改写）
+            moveTo(19.3f, 3f)
+            quadTo(19.9f, 4.9f, 21.8f, 5.5f)
+            quadTo(19.9f, 6.1f, 19.3f, 8f)
+            quadTo(18.7f, 6.1f, 16.8f, 5.5f)
+            quadTo(18.7f, 4.9f, 19.3f, 3f)
             close()
         }
         return Spec(stroke, fill)

@@ -10,18 +10,26 @@ package com.ziyou.ime.ai
  * 内置人设（[isBuiltin] = true）由应用硬编码，不可删除，但可被同名自定义人设覆盖；
  * 用户可在设置页新建、编辑、删除自定义人设（[isBuiltin] = false）。
  *
+ * 人设的核心用途是「润色」：键盘 AI 面板润色模式下，用户草稿不直接上屏，
+ * 而是经 LLM 按人设口吻改写为候选句供用户选择上屏；绑定知识库的人设在
+ * 润色时会先检索专属语料注入 prompt 作为风格参照（RAG）。
+ *
  * @property id          唯一标识；内置人设以 "builtin_" 前缀命名
  * @property name        角色名称（列表展示、标题栏标签）
  * @property description 角色简介（设置页列表次行说明）
  * @property systemPrompt 系统提示词（注入 LLM system message，定义角色与风格）
  * @property isBuiltin   是否为内置人设（true 时不可删除）
+ * @property knowledgeItemIds 绑定的知识条目 ID 列表（KnowledgeItem.id）；空 = 无专属
+ *                            知识。仅自定义人设可绑定；条目删除时由
+ *                            [PersonaRepository.purgeKnowledgeRefs] 反向清理引用
  */
 data class AiPersona(
     val id: String,
     val name: String,
     val description: String,
     val systemPrompt: String,
-    val isBuiltin: Boolean = false
+    val isBuiltin: Boolean = false,
+    val knowledgeItemIds: List<String> = emptyList()
 ) {
 
     companion object {

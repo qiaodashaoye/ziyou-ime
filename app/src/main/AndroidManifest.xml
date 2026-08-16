@@ -82,6 +82,12 @@
             android:exported="false"
             android:label="AI 知识库" />
 
+        <!-- AI 人设管理（查看/切换/编辑/删除人设及其知识库绑定） -->
+        <activity
+            android:name=".ui.PersonaManagerActivity"
+            android:exported="false"
+            android:label="AI 人设管理" />
+
         <!-- 等级体系详情 -->
         <activity
             android:name=".ui.LevelActivity"

@@ -13,20 +13,16 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
-import android.widget.Toast
-import com.ziyou.ime.ai.AiChatClient
+import com.ziyou.ime.ai.AiChatOrchestrator
 import com.ziyou.ime.ai.AiConfig
+import com.ziyou.ime.ai.AiPanelMode
 import com.ziyou.ime.ai.AiPersona
 import com.ziyou.ime.ai.ChatMessage
 import com.ziyou.ime.ai.MarkdownRenderer
 import com.ziyou.ime.ai.PersonaRepository
 import com.ziyou.ime.ai.knowledge.AiMemoryStore
 import com.ziyou.ime.ai.knowledge.AiUsageStats
-import com.ziyou.ime.ai.knowledge.KnowledgeRepository
-import com.ziyou.ime.ai.knowledge.KnowledgeSearcher
-import com.ziyou.ime.core.rag.RagPromptBuilder
-import com.ziyou.ime.core.rag.RetrievedChunk
-import com.ziyou.ime.core.rag.SensitiveWordFilter
+import com.ziyou.ime.core.ai.PolishVariant
 import com.ziyou.ime.skin.SkinTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,28 +30,33 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
- * AI 问答面板：内部结构为「宿主标题栏 + 对话气泡区（可滚动）+ 输入行」。
+ * AI 面板：按构造参数 [mode] 固定为问答或人设润色形态（工具栏两个独立
+ * 按钮分别触发，见 [AiPanelCoordinator]），内部结构为「标题栏（人设 chip）
+ * + 内容区（可滚动）+ 输入行」。
  *
  * 挂载在输入视图内容根容器顶部（编码区上方，见 [AiPanelCoordinator]），
  * 复用技能面板的输入路由纪律：面板打开期间 [aiCommitTarget] 接管键盘上屏，
- * 用户经正常拼音键盘打字，文本注入面板输入框而非宿主编辑器。
+ * 用户经正常拼音键盘打字，文本注入面板输入框而非宿主编辑器——润色模式
+ * 正是借此实现「草稿不直接上屏」：草稿经 [AiChatOrchestrator.polish] 按人设
+ * 改写为候选，用户点候选「上屏」才经宿主提交。
  *
  * 两种布局形态（由宿主经 [Host.onRequestKeyboardCollapsed] 编排）：
- * - 提问态：输入行 + 键盘可见，对话区收起为小窗预览（有历史时）；
- * - 答案态（点击搜索后）：键盘/候选区收回，对话区接管其空间独立滚动。
+ * - 提问态：输入行 + 键盘可见，内容区收起为小窗预览（有历史时）；
+ * - 答案态（发送后）：键盘/候选区收回，内容区接管其空间独立滚动。
  *
- * AI 请求经 [AiChatClient] 在 IO 线程异步执行，面板持有独立协程作用域，
- * [release] 时取消，网络失败以错误气泡呈现。
- * 面板整体 clickable，阻断触摸穿透到下层视图。
+ * 业务编排在 [AiChatOrchestrator]（检索/prompt/请求），面板只留 UI；
+ * AI 请求在 IO 线程异步执行，面板持有独立协程作用域，[release] 时取消，
+ * 网络失败以错误气泡呈现。面板整体 clickable，阻断触摸穿透到下层视图。
  */
 @SuppressLint("ViewConstructor")
 class AiPanelView(
     context: Context,
     private val theme: SkinTheme,
-    private val host: Host
+    private val host: Host,
+    /** 工作模式：构造时固定，面板内不提供切换（双入口各自触发） */
+    val mode: AiPanelMode
 ) : LinearLayout(context) {
 
     /** 宿主（协调器）需提供的能力。 */
@@ -68,6 +69,9 @@ class AiPanelView(
 
         /** 打开设置页（未配置 AI 服务时的引导入口） */
         fun onRequestOpenSettings()
+
+        /** 打开人设管理页（新建/编辑/删除人设及其知识库绑定） */
+        fun onRequestOpenPersonaManager()
 
         /** 将 AI 答案上屏到当前输入框（绕过面板输入路由，直达宿主编辑器） */
         fun onCommitAnswer(text: String)
@@ -91,9 +95,8 @@ class AiPanelView(
         private const val BUBBLE_MAX_WIDTH_RATIO = 0.78f
         /** 多轮对话历史上限（条数，包含 user + assistant，FIFO 淘汰） */
         private const val MAX_HISTORY_SIZE = 10
-
-        /** 回答内容安全过滤器（内置最小词表，与知识库导入侧一致） */
-        private val answerFilter = SensitiveWordFilter(SensitiveWordFilter.DEFAULT_WORDS)
+        /** 迭代润色历史上限（条数，FIFO；携带上轮候选助模型收敛去重） */
+        private const val MAX_POLISH_HISTORY = 6
     }
 
     private val density = resources.displayMetrics.density
@@ -123,20 +126,27 @@ class AiPanelView(
     /** 面板协程作用域（主线程），面板释放时整体取消 */
     private val panelScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
-    /** 当前进行中的 AI 请求（同一时刻仅允许一个） */
+    /** 当前进行中的 AI 请求（同一时刻仅允许一个，问答/润色共用） */
     private var requestJob: Job? = null
 
-    /** 当前人设（面板打开时从仓库读取，切换时立即更新） */
+    /** 当前人设（面板打开时从仓库读取，切换时立即更新，两面板共享） */
     private var currentPersona: AiPersona = PersonaRepository.getCurrentPersona(context)
 
-    /** 多轮对话历史（FIFO，上限 [MAX_HISTORY_SIZE]） */
+    /** 问答模式多轮对话历史（FIFO，上限 [MAX_HISTORY_SIZE]） */
     private val chatHistory: MutableList<ChatMessage> = mutableListOf()
 
-    /** 标题栏人设标签（点击弹出切换浮层） */
-    private lateinit var personaLabel: TextView
+    /** 润色模式迭代历史（user=原文/调整要求，assistant=上轮候选）。
+     *  隐私纪律：仅内存态，不落盘，[release] 即销毁 */
+    private val polishHistory: MutableList<ChatMessage> = mutableListOf()
 
-    /** 标题栏知识库开关标签（📚，开启高亮色 / 关闭次要色） */
-    private lateinit var knowledgeLabel: TextView
+    /** 当前润色轮的草稿原文（重新润色时复用；上屏/新对话后复位） */
+    private var lastPolishDraft: String? = null
+
+    /** 当前是否存在润色候选结果（决定输入框双态：草稿 vs 调整要求） */
+    private var hasPolishResult: Boolean = false
+
+    /** 标题栏人设标签（点击弹出切换浮层；绑定时附 📚N 徽标） */
+    private lateinit var personaLabel: TextView
 
     /** 人设选择浮层（初始 GONE，点击 personaLabel 展开） */
     private lateinit var personaOverlay: LinearLayout
@@ -150,14 +160,14 @@ class AiPanelView(
 
     /**
      * 上屏目标：面板打开期间键盘文本经此注入输入框；
-     * 无编码时的回车键路由为发送（与搜索按钮等价）。
+     * 无编码时的回车键按模式路由：问答=发送提问，润色=发起/重新润色。
      */
     val aiCommitTarget = object : InputLogicController.CommitTarget {
         override fun commit(text: CharSequence) = appendInput(text)
 
         override fun deleteBackward() = deleteInputBackward()
 
-        override fun onEnter() = sendQuestion()
+        override fun onEnter() = sendCurrent()
     }
 
     init {
@@ -168,7 +178,7 @@ class AiPanelView(
 
         // ── 标题栏 ──
         val titleView = TextView(context).apply {
-            text = "AI 问答"
+            text = if (mode == AiPanelMode.ASK) "AI 问答" else "人设润色"
             textSize = 15f
             setTextColor(theme.keyTextColor)
             gravity = Gravity.CENTER
@@ -185,13 +195,12 @@ class AiPanelView(
                 host.onRequestClose()
             }
         }
-        // 人设标签（左侧，点击展开切换浮层）
+        // 人设标签（点击展开切换浮层；绑定知识库时附 📚N 徽标）
         personaLabel = TextView(context).apply {
-            text = "· ${currentPersona.name}"
             textSize = 12f
             setTextColor(theme.candidateHighlightColor)
             gravity = Gravity.CENTER
-            setPadding(dp(10f), 0, dp(4f), 0)
+            setPadding(dp(8f), 0, dp(4f), 0)
             maxLines = 1
             isClickable = true
             setOnClickListener {
@@ -199,20 +208,8 @@ class AiPanelView(
                 togglePersonaOverlay()
             }
         }
-        // 知识库开关标签（人设标签右侧，点击切换 RAG 检索开关）
-        knowledgeLabel = TextView(context).apply {
-            text = "\uD83D\uDCDA"
-            textSize = 12f
-            gravity = Gravity.CENTER
-            setPadding(dp(4f), 0, dp(4f), 0)
-            isClickable = true
-            setOnClickListener {
-                host.performHaptic()
-                toggleKnowledge()
-            }
-        }
-        refreshKnowledgeLabel()
-        // 新对话按钮（右侧，清空历史重新开始）
+        refreshPersonaLabel()
+        // 新对话按钮（右侧，按当前面板模式清空对应会话）
         val newChatButton = TextView(context).apply {
             text = "新对话"
             textSize = 12f
@@ -228,7 +225,6 @@ class AiPanelView(
             orientation = HORIZONTAL
             setBackgroundColor(theme.candidateBackground)
             addView(personaLabel, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
-            addView(knowledgeLabel, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
             addView(titleView, LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
             addView(newChatButton, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
             addView(closeButton, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
@@ -275,7 +271,7 @@ class AiPanelView(
             background = roundedBg(theme.candidateHighlightColor, 18f, null)
             setOnClickListener {
                 host.performHaptic()
-                sendQuestion()
+                sendCurrent()
             }
         }
         inputRow = LinearLayout(context).apply {
@@ -290,6 +286,7 @@ class AiPanelView(
         addView(inputRow, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
 
         refreshInputDisplay()
+        refreshSendButton()
     }
 
     // ===== 输入路由 =====
@@ -307,10 +304,14 @@ class AiPanelView(
         refreshInputDisplay()
     }
 
-    /** 刷新输入框展示：空时显示提示文字，非空显示已输入内容。 */
+    /** 刷新输入框展示：空时按模式/状态显示提示文字，非空显示已输入内容。 */
     private fun refreshInputDisplay() {
         if (inputBuffer.isEmpty()) {
-            inputDisplay.text = "询问AI..."
+            inputDisplay.text = when {
+                mode == AiPanelMode.ASK -> "询问AI..."
+                hasPolishResult -> "输入调整要求（可选）..."
+                else -> "输入要润色的文字..."
+            }
             inputDisplay.setTextColor(theme.preeditTextColor and 0x00FFFFFF or 0x80000000.toInt())
         } else {
             inputDisplay.text = inputBuffer
@@ -318,13 +319,21 @@ class AiPanelView(
         }
     }
 
-    // ===== 提问 / 应答 =====
+    // ===== 发送（按模式路由） =====
+
+    /** 统一发送入口（搜索按钮 / 键盘回车）：问答=提问，润色=发起/重新润色。 */
+    private fun sendCurrent() {
+        when (mode) {
+            AiPanelMode.ASK -> sendQuestion()
+            AiPanelMode.POLISH -> sendPolish()
+        }
+    }
 
     /**
-     * 发送当前输入的问题（搜索按钮 / 键盘回车共同入口）。
+     * 问答模式：发送当前输入的问题。
      *
      * 支持多轮追问：上一次请求未完成时取消旧请求再发起新的；
-     * 对话历史经 [chatHistory] 维护，上限 [MAX_HISTORY_SIZE]。
+     * 检索/prompt/请求编排在 [AiChatOrchestrator.ask]，面板只渲染结果。
      */
     private fun sendQuestion() {
         val question = inputBuffer.toString().trim()
@@ -353,65 +362,169 @@ class AiPanelView(
             return
         }
 
-        // 拼接基础格式约束 + 当前人设提示词（无知识库时的原路径 prompt）
-        val fullSystemPrompt = AiChatClient.BASE_SYSTEM_PROMPT + "\n\n" + currentPersona.systemPrompt
         showLoading()
-        val appContext = context.applicationContext
+        val personaSnapshot = currentPersona
         requestJob = panelScope.launch {
-            // RAG 分叉：知识库开启且有数据时检索并融合 prompt；
-            // 检索异常或无命中时降级为与现状一致的原路径（错误隔离）
-            var retrieved: List<RetrievedChunk> = emptyList()
-            val systemPrompt = withContext(Dispatchers.IO) {
-                try {
-                    if (KnowledgeRepository.isEnabled(appContext) &&
-                        KnowledgeRepository.hasItems(appContext)) {
-                        KnowledgeSearcher.ensureLoaded(appContext)
-                        retrieved = KnowledgeSearcher.retrieve(
-                            question, KnowledgeRepository.getTopK(appContext))
+            AiChatOrchestrator.ask(context, personaSnapshot, question, chatHistory)
+                .fold(
+                    onSuccess = { outcome ->
+                        hideLoading()
+                        chatHistory.add(ChatMessage("assistant", outcome.answer))
+                        trimHistory()
+                        addAnswerBubble(outcome.answer, isError = false,
+                            sources = outcome.chunks.map { it.sourceName })
+                    },
+                    onFailure = { e ->
+                        hideLoading()
+                        Log.w(TAG, "AI 请求失败: ${e.message}")
+                        // 失败时回滚刚追加的 user 消息，避免下次重试时重复
+                        if (chatHistory.isNotEmpty() && chatHistory.last().role == "user"
+                            && chatHistory.last().content == question) {
+                            chatHistory.removeAt(chatHistory.lastIndex)
+                        }
+                        addAnswerBubble(e.message ?: "请求失败，请稍后重试", isError = true)
                     }
-                    if (retrieved.isNotEmpty()) {
-                        RagPromptBuilder.build(
-                            AiChatClient.BASE_SYSTEM_PROMPT,
-                            currentPersona.systemPrompt,
-                            AiMemoryStore.loadSummary(appContext),
-                            retrieved
-                        )
-                    } else fullSystemPrompt
-                } catch (e: Exception) {
-                    Log.w(TAG, "知识库检索失败，降级为普通问答: ${e.message}")
-                    retrieved = emptyList()
-                    fullSystemPrompt
+                )
+        }
+    }
+
+    /**
+     * 润色模式：草稿经人设润色产出候选（首轮），或携带调整要求重新润色。
+     *
+     * 输入框双态：无候选时内容为草稿；有候选时内容为调整要求（空则纯重生成）。
+     * 草稿不直接上屏，候选「上屏」经用户显式点击才提交宿主编辑器。
+     */
+    private fun sendPolish() {
+        val input = inputBuffer.toString().trim()
+        // 双态取值：有候选时草稿复用上轮，输入视为调整要求
+        val draft = if (hasPolishResult) lastPolishDraft else input
+        val feedback = if (hasPolishResult) input.takeIf { it.isNotEmpty() } else null
+        if (draft.isNullOrEmpty()) return
+
+        if (requestJob?.isActive == true) {
+            requestJob?.cancel()
+        }
+        inputBuffer.clear()
+        refreshInputDisplay()
+
+        // 首轮展示草稿原文气泡；重润时仅调整要求单独成泡（草稿不重复刷屏）
+        if (!hasPolishResult) addQuestionBubble(draft)
+        feedback?.let { addQuestionBubble("调整要求：$it") }
+
+        host.onRequestKeyboardCollapsed(true)
+
+        if (!AiConfig.isConfigured(context)) {
+            addAnswerBubble("尚未配置 AI 服务。请在「设置 → AI 问答」中填写 API Key 后使用。",
+                isError = true, withSettingsEntry = true)
+            return
+        }
+
+        // 本轮 user 先入历史（orchestrator 透传给 AiChatClient 末尾追加，
+        // 与问答路径同一约定：传入时 dropLast）
+        val userContent = if (feedback.isNullOrBlank()) draft
+        else "原文：$draft\n调整要求：$feedback"
+        polishHistory.add(ChatMessage("user", userContent))
+        trimPolishHistory()
+
+        showLoading()
+        val personaSnapshot = currentPersona
+        requestJob = panelScope.launch {
+            val outcome = AiChatOrchestrator.polish(
+                context, personaSnapshot, draft, feedback, polishHistory.dropLast(1))
+            hideLoading()
+            if (outcome.error != null || outcome.variants.isEmpty()) {
+                // 回滚本轮 user，避免重试时历史重复
+                if (polishHistory.isNotEmpty() && polishHistory.last().role == "user"
+                    && polishHistory.last().content == userContent) {
+                    polishHistory.removeAt(polishHistory.lastIndex)
+                }
+                addAnswerBubble(outcome.error ?: "润色结果解析失败，请重试", isError = true)
+                return@launch
+            }
+            lastPolishDraft = draft
+            hasPolishResult = true
+            // 上轮候选入历史：模型可感知已产出版本，重润时收敛去重
+            polishHistory.add(ChatMessage("assistant",
+                outcome.variants.joinToString("\n") { it.text }))
+            trimPolishHistory()
+            renderPolishResult(outcome.variants, outcome.sources)
+            refreshInputDisplay()
+            refreshSendButton()
+        }
+    }
+
+    /** 润色候选渲染：每候选一张卡片（文本 + 风格说明）附「上屏」按钮。 */
+    private fun renderPolishResult(variants: List<PolishVariant>, sources: List<String>) {
+        for (variant in variants) {
+            val card = LinearLayout(context).apply {
+                orientation = VERTICAL
+                background = roundedBg(theme.keyBackground, 12f, theme.borderColor)
+                setPadding(dp(12f), dp(8f), dp(12f), dp(8f))
+                addView(TextView(context).apply {
+                    text = variant.text
+                    textSize = 14f
+                    setTextColor(theme.keyTextColor)
+                    setLineSpacing(0f, 1.15f)
+                })
+                if (variant.note.isNotBlank()) {
+                    addView(TextView(context).apply {
+                        text = variant.note
+                        textSize = 11f
+                        setTextColor(theme.preeditTextColor)
+                        setPadding(0, dp(2f), 0, 0)
+                    })
                 }
             }
-            AiUsageStats.recordQuestion(appContext, retrieved.size)
-            val result = AiChatClient.ask(
-                appContext,
-                question,
-                systemPrompt,
-                chatHistory.dropLast(1)  // 刚追加的 user 由 buildRequestBody 末尾加入，历史仅传前 N-1 条
-            )
-            hideLoading()
-            result.fold(
-                onSuccess = { answer ->
-                    // 回答渲染前经敏感词清洗（命中词替换为 *）
-                    val sanitized = answerFilter.sanitize(answer)
-                    AiUsageStats.recordSuccess(appContext)
-                    chatHistory.add(ChatMessage("assistant", sanitized))
-                    trimHistory()
-                    addAnswerBubble(sanitized, isError = false,
-                        sources = retrieved.map { it.sourceName })
-                },
-                onFailure = { e ->
-                    Log.w(TAG, "AI 请求失败: ${e.message}")
-                    AiUsageStats.recordFailure(appContext)
-                    // 失败时回滚刚追加的 user 消息，避免下次重试时重复
-                    if (chatHistory.isNotEmpty() && chatHistory.last().role == "user"
-                        && chatHistory.last().content == question) {
-                        chatHistory.removeAt(chatHistory.lastIndex)
-                    }
-                    addAnswerBubble(e.message ?: "请求失败，请稍后重试", isError = true)
-                }
-            )
+            val row = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(3f), 0, dp(3f))
+                addView(card, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+                addView(createAnswerActionButton("上屏") { commitPolishVariant(variant.text) },
+                    LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                        marginStart = dp(6f)
+                    })
+            }
+            chatList.addView(row)
+        }
+        // 风格参照来源行（与问答引用行同样式；编号与 prompt 内一致）
+        if (sources.isNotEmpty()) {
+            val label = sources.mapIndexed { i, name -> "[${i + 1}]$name" }
+                .distinct()
+                .joinToString(" ")
+            chatList.addView(TextView(context).apply {
+                this.text = "风格参照: $label"
+                textSize = 11f
+                setTextColor(theme.preeditTextColor)
+                setPadding(dp(4f), dp(2f), dp(4f), dp(2f))
+                maxLines = 2
+            })
+        }
+        chatScroll.visibility = VISIBLE
+        scrollToBottom()
+    }
+
+    /**
+     * 润色候选上屏：直达宿主编辑器，随后复位本轮候选与输入框并恢复键盘，
+     * 便于连续润色下一句（polishHistory 保留一轮供上下文衔接）。
+     */
+    private fun commitPolishVariant(text: String) {
+        host.performHaptic()
+        host.onCommitAnswer(text)
+        hasPolishResult = false
+        lastPolishDraft = null
+        chatList.removeAllViews()
+        chatScroll.visibility = GONE
+        inputBuffer.clear()
+        refreshInputDisplay()
+        refreshSendButton()
+        host.onRequestKeyboardCollapsed(false)
+    }
+
+    /** 润色历史 FIFO 淘汰（保持偶数条：user/assistant 成对）。 */
+    private fun trimPolishHistory() {
+        while (polishHistory.size > MAX_POLISH_HISTORY) {
+            polishHistory.removeAt(0)
         }
     }
 
@@ -422,19 +535,34 @@ class AiPanelView(
         }
     }
 
-    /** 开启新对话：持久化当前会话记忆后清空气泡与历史，恢复输入行与键盘。 */
+    /**
+     * 开启新对话：仅清空当前模式的会话。
+     * - 问答模式：持久化当前会话记忆后清空气泡与历史；
+     * - 润色模式：仅清候选与内存历史（润色内容不落盘，隐私纪律）。
+     */
     private fun startNewConversation() {
         requestJob?.cancel()
         requestJob = null
-        persistConversationMemory()
-        chatHistory.clear()
+        if (mode == AiPanelMode.ASK) {
+            persistConversationMemory()
+            chatHistory.clear()
+        } else {
+            polishHistory.clear()
+            lastPolishDraft = null
+            hasPolishResult = false
+        }
+        resetConversationUi()
+    }
+
+    /** 会话清空后的公共视图复位：移除气泡、恢复键盘与输入行。 */
+    private fun resetConversationUi() {
         chatList.removeAllViews()
         chatScroll.visibility = GONE
-        // 恢复键盘与输入行
         host.onRequestKeyboardCollapsed(false)
         inputRow.visibility = VISIBLE
         inputBuffer.clear()
         refreshInputDisplay()
+        refreshSendButton()
     }
 
     /** 加载指示行：旋转进度条 + 「正在思考…」。 */
@@ -632,8 +760,10 @@ class AiPanelView(
             val item = TextView(context).apply {
                 val check = if (isCurrent) "✓ " else "    "
                 val badge = if (persona.isBuiltin) "[内置] " else ""
+                val kbBadge = if (persona.knowledgeItemIds.isNotEmpty())
+                    " \uD83D\uDCDA${persona.knowledgeItemIds.size}" else ""
                 val desc = if (persona.description.isNotBlank()) "  ${persona.description}" else ""
-                text = "$check${persona.name} $badge$desc"
+                text = "$check${persona.name} $badge$kbBadge$desc"
                 textSize = 14f
                 setTextColor(if (isCurrent) theme.candidateHighlightColor else theme.keyTextColor)
                 setPadding(dp(16f), dp(10f), dp(16f), dp(10f))
@@ -662,6 +792,18 @@ class AiPanelView(
                 setBackgroundColor(theme.borderColor)
             }, LayoutParams(LayoutParams.MATCH_PARENT, dp(0.5f)))
         }
+        // 新建角色入口（跳人设管理页：名称/简介/提示词/绑定知识库）
+        container.addView(TextView(context).apply {
+            text = "＋ 新建角色（在人设管理页配置与绑定知识库）"
+            textSize = 13f
+            setTextColor(theme.candidateHighlightColor)
+            setPadding(dp(16f), dp(10f), dp(16f), dp(10f))
+            setOnClickListener {
+                host.performHaptic()
+                personaOverlay.visibility = GONE
+                host.onRequestOpenPersonaManager()
+            }
+        }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
     }
 
     /** 展开 / 收起人设选择浮层。 */
@@ -676,54 +818,60 @@ class AiPanelView(
     }
 
     /**
-     * 切换人设：更新当前人设、刷新标签、清空气泡与历史（避免风格冲突），
-     * 然后收起浮层。
+     * 切换人设：更新当前人设、刷新标签，并清空两种模式的会话
+     * （风格/知识域切换，上下文不应混用），然后收起浮层。
      */
     private fun switchToPersona(persona: AiPersona) {
         if (persona.id == currentPersona.id) {
             personaOverlay.visibility = GONE
             return
         }
+        requestJob?.cancel()
+        requestJob = null
+        // 切换前持久化当前问答会话记忆（摘要按旧人设分槽）
+        persistConversationMemory()
         currentPersona = persona
         PersonaRepository.setCurrentPersona(context, persona.id)
-        personaLabel.text = "· ${persona.name}"
-        // 切换人设后清空当前会话（风格冲突，历史上下文不应混用）
-        startNewConversation()
+        refreshPersonaLabel()
+        // 两模式会话一并清空
+        chatHistory.clear()
+        polishHistory.clear()
+        lastPolishDraft = null
+        hasPolishResult = false
+        resetConversationUi()
         personaOverlay.visibility = GONE
     }
 
-    // ===== 知识库开关 =====
+    // ===== 按钮文案 =====
 
-    /** 切换知识库开关；库为空时提示先去设置页导入。 */
-    private fun toggleKnowledge() {
-        val enabled = KnowledgeRepository.isEnabled(context)
-        if (!enabled && !KnowledgeRepository.hasItems(context)) {
-            Toast.makeText(context, "请先在「设置 → AI 知识库」中导入知识库", Toast.LENGTH_SHORT).show()
-            return
+    /** 发送按钮文案：问答「搜索」/ 润色「润色」（有候选后「重新润色」）。 */
+    private fun refreshSendButton() {
+        sendButton.text = when {
+            mode == AiPanelMode.ASK -> "搜索"
+            hasPolishResult -> "重新润色"
+            else -> "润色"
         }
-        KnowledgeRepository.setEnabled(context, !enabled)
-        refreshKnowledgeLabel()
     }
 
-    /** 刷新知识库标签颜色：开启高亮色 / 关闭次要色（降透明）。 */
-    private fun refreshKnowledgeLabel() {
-        val enabled = KnowledgeRepository.isEnabled(context)
-        knowledgeLabel.setTextColor(
-            if (enabled) theme.candidateHighlightColor
-            else theme.preeditTextColor and 0x00FFFFFF or 0x60000000)
-        knowledgeLabel.alpha = if (enabled) 1f else 0.55f
+    /** 人设标签文案：人设名 + 绑定知识库时的 📚N 徽标。 */
+    private fun refreshPersonaLabel() {
+        val bound = currentPersona.knowledgeItemIds.size
+        personaLabel.text = if (bound > 0) "\uD83C\uDFAD${currentPersona.name}\uD83D\uDCDA$bound"
+        else "\uD83C\uDFAD${currentPersona.name}"
     }
 
     // ===== 对话记忆 =====
 
-    /** 持久化当前会话历史并异步更新跨会话摘要（新对话 / release 时调用）。 */
+    /** 持久化当前会话历史并异步更新当前人设名下的跨会话摘要
+     *  （新对话 / 切人设 / release 时调用；仅问答历史，润色不落盘）。 */
     private fun persistConversationMemory() {
         if (chatHistory.isEmpty()) return
         val appContext = context.applicationContext
         val historySnapshot = chatHistory.toList()
+        val personaId = currentPersona.id
         AiMemoryStore.saveSession(appContext, historySnapshot)
         // 摘要生成走 AiMemoryStore 内部的独立 IO 作用域，不依赖面板 panelScope
-        AiMemoryStore.updateSummaryAsync(appContext, historySnapshot)
+        AiMemoryStore.updateSummaryAsync(appContext, personaId, historySnapshot)
     }
 
     // ===== 布局形态（由协调器在键盘收放后回调）=====

@@ -992,7 +992,13 @@ class ZiYouInputMethodService : InputMethodService() {
             // AI 问答面板开关：编码区上方展示输入框/答案区（与其他面板互斥）
             KeyCode.KEYCODE_AI_ASSISTANT -> {
                 closeAllPanels()
-                aiPanels.toggle()
+                aiPanels.openAsk()
+            }
+
+            // 人设润色面板开关：草稿经人设改写为候选后选择性上屏（与其他面板互斥）
+            KeyCode.KEYCODE_AI_POLISH -> {
+                closeAllPanels()
+                aiPanels.openPolish()
             }
             
             // 涂鸦画板开关：收起键盘展示画布（与其他面板互斥）；
