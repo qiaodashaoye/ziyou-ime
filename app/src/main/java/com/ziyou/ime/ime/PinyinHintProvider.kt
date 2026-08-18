@@ -40,14 +40,14 @@ object PinyinHintProvider {
             if (pinyins.isNotEmpty()) return pinyins.take(MAX_HINTS)
         }
         // 回退：从候选词 comment 提取（分段确认后候选已是未确认段的，天然对齐）；
-        // 仅接受纯字母/分隔符 comment：内置英文词候选的注音是标记码（如 0ok），
-        // 含数字不可作拼音提示展示
+        // 经 [normalizePinyinComment] 统一归一化：剥离［］包裹、丢弃 */∞ 标记与
+        // 含数字的标记码（如内置英文词注音 0ok）
         val candidates = context.menu?.candidates ?: return null
         if (candidates.isEmpty()) return null
         val hints = LinkedHashSet<String>()
         for (candidate in candidates) {
-            val py = candidate.comment.trim()
-            if (py.isNotEmpty() && py.all { it == '\'' || it == ' ' || it.isLetter() }) hints.add(py)
+            val py = normalizePinyinComment(candidate.comment)
+            if (py != null) hints.add(py)
             if (hints.size >= MAX_HINTS) break
         }
         return hints.toList().takeIf { it.isNotEmpty() }
@@ -125,15 +125,33 @@ object PinyinHintProvider {
         return preedit.substring(0, endIndex)
     }
 
-    /** 提取高亮候选（无高亮时取首位）的读音音节列表；无可用 comment 返回空。 */
+    /**
+     * 提取高亮候选（无高亮时取首位）的读音音节列表；无可用 comment 返回空。
+     * comment 先经 [normalizePinyinComment] 归一化（兼容［］包裹与星号/∞ 标记）。
+     */
     private fun highlightedSyllables(context: ContextProto): List<String> {
         val menu = context.menu ?: return emptyList()
         val candidates = menu.candidates
         if (candidates.isEmpty()) return emptyList()
         val index = menu.highlightedCandidateIndex.takeIf { it in candidates.indices } ?: 0
-        return candidates[index].comment.trim()
-            .split('\'', ' ')
+        val normalized = normalizePinyinComment(candidates[index].comment) ?: return emptyList()
+        return normalized.split('\'', ' ')
             .filter { seg -> seg.isNotEmpty() && seg.all { it.isLetter() } }
+    }
+
+    /**
+     * 候选 comment 归一化：去空白、剥离 corrector/comment_format 的全角包裹符
+     * ［］，仅保留纯字母/'/空格的拼音串；其余形态（is_in_user_dict 的星号/∞
+     * 标记、纠错提示的带调注音、英文标记码等）返回 null 跳过。
+     *
+     * T9 白霜集成后 comment 数据链：comment_format 包裹 → corrector 以
+     * keep_comments 保留净拼音输出；本归一化对两种形态（净/包裹）均健壮，
+     * 防止配置回退或他方案包裹形态再次切断预览读音源。
+     */
+    private fun normalizePinyinComment(comment: String): String? {
+        val stripped = comment.trim().removeSurrounding("［", "］").trim()
+        if (stripped.isEmpty()) return null
+        return stripped.takeIf { py -> py.all { it == '\'' || it == ' ' || it.isLetter() } }
     }
 
     /**

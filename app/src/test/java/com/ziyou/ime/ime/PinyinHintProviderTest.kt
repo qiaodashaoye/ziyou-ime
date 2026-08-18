@@ -261,12 +261,12 @@ class PinyinHintProviderTest {
         assertEquals(listOf("hao"), PinyinHintProvider.buildHints(ctx))
     }
 
-    // ===== T9 白霜深度集成：comment 契约变更的白名单防御（实施计划冲突点 #1/#2）=====
+    // ===== T9 白霜深度集成：comment 契约归一化（缺陷修复：拼音与首候选脱钩）=====
 
     @Test
-    fun buildHints_fallback_skipsBracketWrappedComments() {
-        // 挂载 corrector 后 comment 被［］包裹（translator/comment_format），
-        // 回退路径白名单（仅字母/'/空格）必须丢弃，未包裹的正常 comment 保留
+    fun buildHints_fallback_extractsWrappedComments() {
+        // comment_format 包裹形态［guo］：归一化剥离［］后提取内层拼音，
+        // 与净形态 comment 去重后等价（防配置回退再次切断读音源）
         val ctx = context(
             input = "guo",
             candidates = listOf(candidate("过", "［guo］"), candidate("国", "guo"))
@@ -275,19 +275,19 @@ class PinyinHintProviderTest {
     }
 
     @Test
-    fun buildHints_fallback_allCommentsWrapped_returnsNull() {
-        // 全部候选 comment 均被包裹时回退路径无可用提示，返回 null
-        // （侧栏降级为符号模式，不得崩溃或展示［guo］脏文本）
+    fun buildHints_fallback_allCommentsWrapped_extractsPinyins() {
+        // 全部候选 comment 均被包裹时仍能提取拼音列表（旧行为返回 null，
+        // 归一化后侧栏提示不再降级为符号模式）
         val ctx = context(
             input = "guo",
             candidates = listOf(candidate("过", "［guo］"), candidate("国", "［guo］"))
         )
-        assertNull(PinyinHintProvider.buildHints(ctx))
+        assertEquals(listOf("guo"), PinyinHintProvider.buildHints(ctx))
     }
 
     @Test
     fun buildHints_fallback_skipsUserDictMarkComments() {
-        // is_in_user_dict 将用户词/联想句 comment 改写为 */∞，同样不过白名单
+        // is_in_user_dict 将用户词/联想句 comment 改写为星号/∞，不过白名单需跳过
         val ctx = context(
             input = "guo",
             candidates = listOf(
@@ -309,5 +309,31 @@ class PinyinHintProviderTest {
         )
         val hints = PinyinHintProvider.buildHints(ctx)
         assertTrue(hints != null && hints.contains("guo"))
+    }
+
+    @Test
+    fun buildPreview_followsHighlightedCandidate_wrappedComment() {
+        // 缺陷修复守护：包裹形态 comment 归一化后仍能驱动预览消歧，
+        // 编码区拼音与高亮候选读音同源（不再脱钩回退本地表）
+        val ctx = context(
+            input = "48",
+            candidates = listOf(candidate("乎", "［hu］"), candidate("顾", "［gu］")),
+            highlighted = 0
+        )
+        assertEquals("hu", PinyinHintProvider.buildPreview(ctx))
+    }
+
+    @Test
+    fun buildPreview_emptyComment_fallsBackToLocalT9Table() {
+        // comment 被清空（如 keep_comments 配置回退）时预览不崩：
+        // 回退本地 T9 表还原，字母数与击键数一致（数字不上屏）
+        val ctx = context(
+            input = "48",
+            candidates = listOf(candidate("乎", "")),
+            highlighted = 0
+        )
+        val preview = PinyinHintProvider.buildPreview(ctx)
+        assertEquals(2, preview!!.length)
+        assertTrue(preview.all { it.isLetter() })
     }
 }

@@ -157,6 +157,11 @@ translator:
   # 32→100 对齐 frost t9，供 corrector.lua 判定与多音节词注音覆盖。
   spelling_hints: 100
   always_show_comments: true   # corrector.lua：强制保留 comment 供判定
+  keep_comments: true          # corrector.lua：判定完成后保留非纠错候选的拼音
+                               # comment（输出经 style "{comment}" 为不带［］的净拼音）。
+                               # 缺失时 corrector 会清空全部 comment，编码区预览
+                               # （PinyinHintProvider）失去高亮候选读音源，导致
+                               # 拼音与首候选脱钩/退化显示原始数字（缺陷修复）
   comment_format:              # corrector.lua 契约：［］包裹（见 T9 白霜集成计划 3.2）
     - xform/^/［/              # 副作用：PinyinHintProvider 的 comment 回退路径被
     - xform/$/］/              # 白名单丢弃，由主路径 T9PinYinUtils 本地还原兜底
