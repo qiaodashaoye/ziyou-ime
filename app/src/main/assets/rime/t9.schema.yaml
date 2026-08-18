@@ -37,6 +37,8 @@ switches:
   - name: prediction
     reset: 1
     states: [ 关闭联想, 开启联想 ]
+  - name: emoji
+    states: [ 💀, 😄 ]
 
 engine:
   processors:
@@ -57,9 +59,14 @@ engine:
     - fallback_segmentor
   translators:
     - punct_translator
+    - table_translator@custom_phrase  # 数字编码自定义短语（custom_phrase_t9.txt，自建）
     - script_translator
     - predict_translator # librime-predict：翻译 prediction 段的预测候选
+    - lua_translator@*force_gc        # 步进 GC，抑制大词库 + lua 的内存增长
   filters:
+    - lua_filter@*is_in_user_dict     # 用户词 * / 联想句 ∞ 标记（顺序：先于 corrector）
+    - lua_filter@*corrector           # 错音错字提示（corrections 四列表，双写 rime_user）
+    - simplifier@emoji                # Emoji 变换（emoji 开关控制，默认关）
     - simplifier@zh_trad
     - uniquifier
 
@@ -146,10 +153,36 @@ translator:
   # 替换结果几乎都能命中稠密棱镜，剪枝失效导致路径组合爆炸，单键耗时随编码
   # 长度超线性增长（InputLogicController 慢按键日志可复现）。九键本身一码多音
   # 的消歧已覆盖绝大多数相邻键误触，故全键盘（luna_pinyin）保留、九键关闭。
-  # 让候选携带真实拼音读音（作为 comment），供客户端拼音候选区展示
-  spelling_hints: 32
+  # 让候选携带真实拼音读音（作为 comment），供客户端拼音候选区展示；
+  # 32→100 对齐 frost t9，供 corrector.lua 判定与多音节词注音覆盖。
+  spelling_hints: 100
+  always_show_comments: true   # corrector.lua：强制保留 comment 供判定
+  comment_format:              # corrector.lua 契约：［］包裹（见 T9 白霜集成计划 3.2）
+    - xform/^/［/              # 副作用：PinyinHintProvider 的 comment 回退路径被
+    - xform/$/］/              # 白名单丢弃，由主路径 T9PinYinUtils 本地还原兜底
   preedit_format:
     - xform/([nljqxy])v/$1ü/
+
+# 自定义短语：custom_phrase_t9.txt（frost 上游缺此文件，字由自建，数字编码）
+custom_phrase:
+  dictionary: ""
+  user_dict: custom_phrase_t9
+  db_class: stabledb
+  enable_completion: false
+  enable_sentence: false
+  initial_quality: 99
+
+# Emoji（对齐全拼 rime_frost 的 emoji 配置；表文件随 assets 部署）
+emoji:
+  option_name: emoji
+  opencc_config: emoji.json
+  inherit_comment: false       # emoji 候选空注释，防污染拼音提示
+
+# 用户词典标记（is_in_user_dict.lua 读取本开关；缺失时脚本默认 true）
+is_in_user_dict: true
+
+# 错音错字提示格式（corrector.lua 占位符，命中的纠错注音直接作 comment）
+corrector: "{comment}"
 
 zh_trad:
   option_name: simplification

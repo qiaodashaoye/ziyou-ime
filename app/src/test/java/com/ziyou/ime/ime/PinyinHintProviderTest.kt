@@ -260,4 +260,54 @@ class PinyinHintProviderTest {
         )
         assertEquals(listOf("hao"), PinyinHintProvider.buildHints(ctx))
     }
+
+    // ===== T9 白霜深度集成：comment 契约变更的白名单防御（实施计划冲突点 #1/#2）=====
+
+    @Test
+    fun buildHints_fallback_skipsBracketWrappedComments() {
+        // 挂载 corrector 后 comment 被［］包裹（translator/comment_format），
+        // 回退路径白名单（仅字母/'/空格）必须丢弃，未包裹的正常 comment 保留
+        val ctx = context(
+            input = "guo",
+            candidates = listOf(candidate("过", "［guo］"), candidate("国", "guo"))
+        )
+        assertEquals(listOf("guo"), PinyinHintProvider.buildHints(ctx))
+    }
+
+    @Test
+    fun buildHints_fallback_allCommentsWrapped_returnsNull() {
+        // 全部候选 comment 均被包裹时回退路径无可用提示，返回 null
+        // （侧栏降级为符号模式，不得崩溃或展示［guo］脏文本）
+        val ctx = context(
+            input = "guo",
+            candidates = listOf(candidate("过", "［guo］"), candidate("国", "［guo］"))
+        )
+        assertNull(PinyinHintProvider.buildHints(ctx))
+    }
+
+    @Test
+    fun buildHints_fallback_skipsUserDictMarkComments() {
+        // is_in_user_dict 将用户词/联想句 comment 改写为 */∞，同样不过白名单
+        val ctx = context(
+            input = "guo",
+            candidates = listOf(
+                candidate("过", "*"),
+                candidate("国魂", "∞"),
+                candidate("国", "guo")
+            )
+        )
+        assertEquals(listOf("guo"), PinyinHintProvider.buildHints(ctx))
+    }
+
+    @Test
+    fun buildHints_mainPath_unaffectedByCommentContract() {
+        // 主路径（T9PinYinUtils 本地还原数字段）与 comment 契约无关：
+        // 即使全部 comment 被包裹，486 仍还原出 guo 等候选拼音
+        val ctx = context(
+            input = "486",
+            candidates = listOf(candidate("过", "［guo］"))
+        )
+        val hints = PinyinHintProvider.buildHints(ctx)
+        assertTrue(hints != null && hints.contains("guo"))
+    }
 }

@@ -114,6 +114,19 @@ object AssetDeployer {
             // 部署 librime-predict 联想词库到用户目录（predictor 默认从 user dir 解析 predict.db）
             copyAssetFile(context, PREDICT_DB, File(userDir, PREDICT_DB))
 
+            // T9 白霜深度集成 T0：corrector.lua 经 rime_api.get_user_data_dir() 读
+            // corrections 表，而 librime-lua 该 API 仅返回 rime_user/（无 shared dir
+            // 回退，见实施计划冲突点 #3），需双写至用户目录；升版覆盖与 shared dir 一致
+            val userCnDicts = File(userDir, "cn_dicts")
+            if (!userCnDicts.exists()) {
+                userCnDicts.mkdirs()
+            }
+            copyAssetFile(
+                context,
+                "$ASSETS_RIME_DIR/cn_dicts/corrections.dict.yaml",
+                File(userCnDicts, "corrections.dict.yaml")
+            )
+
             // 白霜迁移：旧方案用户词库一次性迁移（幂等，失败不阻断部署）
             migrateUserDb(userDir)
 

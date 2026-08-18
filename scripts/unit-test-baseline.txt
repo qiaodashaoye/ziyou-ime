@@ -65,4 +65,8 @@
 # （FROST 四核心表/无英文表、LUNA 回滚清单、ext_dicts 注入顺序）、
 # catalog v4 legacy id 幂等迁移规划（改名/零开销 no-op/二次幂等/
 # 新 id 占用丢弃旧记录/混排）、deprecatedBy 向后兼容）
-583
+# 当前实测：:core-logic 340 + :app 247（2026-08-18，全绿、0 跳过；
+# T9 白霜深度集成 T1 新增 PinyinHintProviderTest ×4：comment 契约变更
+# 白名单防御（［］包裹丢弃/全包裹返回 null/*/∞ 标记丢弃/主路径不受影响），
+# 守护 corrector 与 is_in_user_dict 挂载后的侧栏拼音提示链路）
+587

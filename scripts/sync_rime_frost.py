@@ -36,6 +36,8 @@ DEFAULT_DICTS_REPO = REPO_ROOT.parent / "ziyou-ime-dicts"
 
 # ── sync-core 清单:frost 相对路径 → assets/rime 相对路径 ──────────────────
 CORE_FILES = {
+    # 注意:custom_phrase_t9.txt 为字由自建资产(frost 上游无此文件,见
+    # docs/T9白霜资源深度集成实施计划.md T2),不得纳入本清单防上游同步覆盖。
     # 核心中文词表(覆盖式同步;8105/base 为白霜重统计字频/词频主体)
     "cn_dicts/8105.dict.yaml": "cn_dicts/8105.dict.yaml",
     "cn_dicts/base.dict.yaml": "cn_dicts/base.dict.yaml",
