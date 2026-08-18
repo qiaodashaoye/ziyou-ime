@@ -24,4 +24,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "ziyou-ime"
 include(":app")
+include(":rime-sdk")
 include(":core-logic")

@@ -1252,9 +1252,14 @@ class ZiYouInputMethodService : InputMethodService() {
         // 下一轮 LLM 缓存，采纳后链式第二轮零等待；开关关闭/限流/有 in-flight
         // 请求时协调器内部静默返回，渲染热路径仅一次布尔判断成本
         if (predictionMode && LlmPredictionConfig.isEnabled(applicationContext)) {
-            val texts = context.menu.candidates.take(3).map { it.text }.filter { it.isNotEmpty() }
-            if (texts.isNotEmpty()) {
-                AppContainer.llmPredictionCoordinator.prefetch(texts)
+            // 局部变量承接非空上下文：context 为可空参数，跨模块（:rime-sdk）
+            // 后 Kotlin 不再对其属性做 smart cast
+            val menu = context?.menu
+            if (menu != null) {
+                val texts = menu.candidates.take(3).map { it.text }.filter { it.isNotEmpty() }
+                if (texts.isNotEmpty()) {
+                    AppContainer.llmPredictionCoordinator.prefetch(texts)
+                }
             }
         }
         // LLM 追加窗口以「无活跃编码」为准：句末标点上屏引擎清预测（menu 空）、

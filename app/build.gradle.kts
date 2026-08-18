@@ -14,7 +14,8 @@ val keystoreProperties = Properties().apply {
 }
 
 // 发布 ABI 列表可通过 -Pziyou.abis=arm64-v8a,armeabi-v7a 覆盖；
-// 每个 ABI 必须先经 librime-prebuilt/build.sh 产出 libs/<abi>/librime.a
+// librime_jni.so 由 :rime-sdk 模块编译（librime.a 经 libs/<abi>/ 链入），
+// 此处 abiFilters 仅约束最终 APK 打包的 ABI 集合
 val releaseAbis = (project.findProperty("ziyou.abis") as String?)
     ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
     ?: listOf("arm64-v8a")
@@ -40,24 +41,6 @@ android {
 
         ndk {
             abiFilters += releaseAbis
-        }
-
-        externalNativeBuild {
-            cmake {
-                // 启用 librime-predict 模块依赖声明（rime_require_module_predict）。
-                // 必须与 librime-prebuilt 侧的 WITH_PREDICT 开关一致：
-                // 库未编入插件时此处开启会链接失败（undefined symbol）
-                arguments("-DWITH_PREDICT=ON")
-                // 启用 librime-lua 模块依赖声明（rime_require_module_lua），
-                // 支撑 rime-frost 方案的 lua_translator/lua_filter 组件；
-                // 同样必须与 librime-prebuilt 侧 WITH_LUA 开关一致（见迁移方案 3.1）
-                arguments("-DWITH_LUA=ON")
-                // 启用 librime-witogram 模块依赖声明（rime_require_module_witogram），
-                // 支撑 rime_frost 方案 grammar 段的整句组词惩罚；必须与
-                // librime-prebuilt 侧 WITH_WITOGRAM 开关一致（见 docs/
-                // librime-witogram集成可行性分析报告.md）
-                arguments("-DWITH_WITOGRAM=ON")
-            }
         }
     }
 
@@ -102,13 +85,6 @@ android {
 
     buildFeatures {
         compose = true
-    }
-
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/jni/librime_jni/CMakeLists.txt")
-            version = "3.22.1"
-        }
     }
 
     packaging {
@@ -180,6 +156,10 @@ androidComponents {
 }
 
 dependencies {
+
+    // ===== 内部模块：底层 SDK（librime 交互 + 通用输入基础能力，含 JNI/native）=====
+    // api 传递：app 侧既有代码直接 import com.ziyou.ime.core/daemon/config 包（迁移期包名不变）
+    api(project(":rime-sdk"))
 
     // ===== 内部模块：纯逻辑层（无 Android UI / 无 JNI 依赖）=====
     implementation(project(":core-logic"))
