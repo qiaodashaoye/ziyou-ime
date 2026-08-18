@@ -46,6 +46,8 @@ CORE_FILES = {
     # 英文主词库(melt_eng 次翻译器依赖;ziyou 自有 en_dicts/base 不覆盖)
     "en_dicts/en.dict.yaml": "en_dicts/en.dict.yaml",
     "en_dicts/en_ext.dict.yaml": "en_dicts/en_ext.dict.yaml",
+    # 中英混输词表(table_translator@cn_en + cn_en_spacer,白霜补齐项)
+    "en_dicts/cn_en.txt": "en_dicts/cn_en.txt",
     # melt_eng 方案与自定义短语
     "melt_eng.schema.yaml": "melt_eng.schema.yaml",
     "melt_eng.dict.yaml": "melt_eng.dict.yaml",
@@ -61,7 +63,7 @@ LUA_SCRIPTS = [
     "select_character", "date_translator", "lunar", "unicode",
     "number_translator", "calculator", "calc_translator", "force_gc",
     "is_in_user_dict", "corrector", "autocap_filter", "v_filter",
-    "pin_cand_filter", "reduce_english_filter",
+    "pin_cand_filter", "reduce_english_filter", "cn_en_spacer",
 ]
 
 # ── pack-dicts 打包定义 ─────────────────────────────────────────────────

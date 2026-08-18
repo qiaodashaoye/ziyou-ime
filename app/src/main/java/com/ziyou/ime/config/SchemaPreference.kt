@@ -18,8 +18,12 @@ object SchemaPreference {
     private const val PREF_NAME = "ziyou_schema"
     private const val KEY_QWERTY_SCHEMA = "qwerty_schema"
 
-    /** 无偏好时的默认全键盘方案（与 default.yaml schema_list 首位一致） */
-    const val DEFAULT_SCHEMA_ID = "luna_pinyin"
+    /**
+     * 无偏好时的默认全键盘方案（与 default.yaml schema_list 首位一致）。
+     * 白霜迁移后为 rime_frost；已持久化 luna_pinyin 偏好的老用户不受影响
+     * （L1 方案级回滚：设置页可手动切回）。
+     */
+    const val DEFAULT_SCHEMA_ID = "rime_frost"
 
     /** 读取全键盘方案 id（未设置时回退 [DEFAULT_SCHEMA_ID]） */
     fun getQwertySchema(context: Context): String =
