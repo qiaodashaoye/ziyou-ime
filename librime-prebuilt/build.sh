@@ -178,6 +178,39 @@ ensure_predict_plugin() {
 ensure_predict_plugin
 
 # ---------------------------------------------------------------------------
+# Lua 源码准备：librime-lua 未命中系统 lua（交叉编译必然）时回退编译
+# thirdparty/lua5.4（见 plugins/librime-lua/CMakeLists.txt）。该分支不入
+# 版本库，此处幂等浅克隆；superbuild 侧另有同逻辑兑底（本机未 gitignore）。
+# ---------------------------------------------------------------------------
+ensure_lua_sources() {
+  if [ "${WITH_LUA}" != "ON" ]; then
+    return
+  fi
+  local thirdparty="${SCRIPT_DIR}/plugins/librime-lua/thirdparty"
+  if [ -d "${thirdparty}/lua5.4" ]; then
+    return
+  fi
+  if [ ! -d "${SCRIPT_DIR}/plugins/librime-lua" ]; then
+    echo "错误: 启用 WITH_LUA 需先引入 librime-lua 源码（plugins/librime-lua）。" >&2
+    exit 1
+  fi
+  echo ">> 克隆 Lua 5.4 源码 (librime-lua thirdparty 分支) ..."
+  for attempt in 1 2 3; do
+    if git clone --depth=1 -b thirdparty \
+        https://github.com/hchunhui/librime-lua.git "${thirdparty}"; then
+      return
+    fi
+    echo ">> 克隆失败（第 ${attempt} 次），稍后重试..." >&2
+    rm -rf "${thirdparty}"
+    sleep 5
+  done
+  echo "错误: Lua 源码克隆失败，请检查网络后重试。" >&2
+  exit 1
+}
+
+ensure_lua_sources
+
+# ---------------------------------------------------------------------------
 # 逐 ABI 构建
 # ---------------------------------------------------------------------------
 JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"

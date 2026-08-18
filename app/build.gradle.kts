@@ -32,7 +32,8 @@ android {
         // 16KB 页面对齐已通过链接参数启用，满足 Android 16 对 target 36 应用的强制要求
         targetSdk = 36
         // versionCode 变更会触发 AssetDeployer 重新部署（schema 变更/predict.db 需随升版生效）
-        versionCode = 3
+        // v4：白霜拼音（rime-frost）词库迁移 Phase 1 —— 新增 rime_frost 方案与核心词表
+        versionCode = 4
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -47,6 +48,10 @@ android {
                 // 必须与 librime-prebuilt 侧的 WITH_PREDICT 开关一致：
                 // 库未编入插件时此处开启会链接失败（undefined symbol）
                 arguments("-DWITH_PREDICT=ON")
+                // 启用 librime-lua 模块依赖声明（rime_require_module_lua），
+                // 支撑 rime-frost 方案的 lua_translator/lua_filter 组件；
+                // 同样必须与 librime-prebuilt 侧 WITH_LUA 开关一致（见迁移方案 3.1）
+                arguments("-DWITH_LUA=ON")
             }
         }
     }
