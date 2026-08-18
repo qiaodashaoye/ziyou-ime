@@ -1,5 +1,6 @@
 package com.ziyou.ime.ime
 
+import com.ziyou.ime.core.CandidateProto
 import com.ziyou.ime.core.CompositionProto
 import com.ziyou.ime.core.ContextProto
 import com.ziyou.ime.util.T9PinYinUtils
@@ -126,17 +127,44 @@ object PinyinHintProvider {
     }
 
     /**
-     * 提取高亮候选（无高亮时取首位）的读音音节列表；无可用 comment 返回空。
-     * comment 先经 [normalizePinyinComment] 归一化（兼容［］包裹与星号/∞ 标记）。
+     * 提取高亮候选（无高亮时取首位）的读音音节列表；无可用读音源返回空。
+     * comment 先经 [normalizePinyinComment] 归一化（兼容［］包裹与星号/∞ 标记）；
+     * 高亮候选 comment 不可用时经 [usableComment] 在菜单内回退扫描。
      */
     private fun highlightedSyllables(context: ContextProto): List<String> {
         val menu = context.menu ?: return emptyList()
         val candidates = menu.candidates
         if (candidates.isEmpty()) return emptyList()
         val index = menu.highlightedCandidateIndex.takeIf { it in candidates.indices } ?: 0
-        val normalized = normalizePinyinComment(candidates[index].comment) ?: return emptyList()
-        return normalized.split('\'', ' ')
+        val source = usableComment(candidates, index) ?: return emptyList()
+        return source.split('\'', ' ')
             .filter { seg -> seg.isNotEmpty() && seg.all { it.isLetter() } }
+    }
+
+    /**
+     * 预览读音 comment 源选择：高亮候选优先；不可用时菜单内回退扫描。
+     *
+     * 高亮候选 comment 不可用的典型场景：
+     * - custom_phrase 数字编码短语（table_translator 候选无拼音 comment，
+     *   librime 词条格式仅三列，见 table_db.cc）；
+     * - 用户词/联想句被 is_in_user_dict 改写为星号/∞ 标记。
+     * 回退策略：同码候选共享读音空间，优先取**同字数**候选的可用 comment
+     * （等长候选音节数必然一致，与高亮词读音最贴近），其次任意可用
+     * comment；均优于本地 T9 表字母序还原（其首匹配几乎从不等于引擎首词
+     * 读音，如 64426 还原为 mi'han 而非 ni'hao）。
+     */
+    private fun usableComment(candidates: Array<CandidateProto>, index: Int): String? {
+        normalizePinyinComment(candidates[index].comment)?.let { return it }
+        val highlightedLength = candidates[index].text.length
+        for (candidate in candidates) {
+            if (candidate.text.length == highlightedLength) {
+                normalizePinyinComment(candidate.comment)?.let { return it }
+            }
+        }
+        for (candidate in candidates) {
+            normalizePinyinComment(candidate.comment)?.let { return it }
+        }
+        return null
     }
 
     /**

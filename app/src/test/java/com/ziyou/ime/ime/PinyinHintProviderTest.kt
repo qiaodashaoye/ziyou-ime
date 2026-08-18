@@ -325,7 +325,7 @@ class PinyinHintProviderTest {
 
     @Test
     fun buildPreview_emptyComment_fallsBackToLocalT9Table() {
-        // comment 被清空（如 keep_comments 配置回退）时预览不崩：
+        // 菜单内无任何可用 comment（如 keep_comments 配置回退）时预览不崩：
         // 回退本地 T9 表还原，字母数与击键数一致（数字不上屏）
         val ctx = context(
             input = "48",
@@ -335,5 +335,51 @@ class PinyinHintProviderTest {
         val preview = PinyinHintProvider.buildPreview(ctx)
         assertEquals(2, preview!!.length)
         assertTrue(preview.all { it.isLetter() })
+    }
+
+    // ===== 首候选脱钩缺陷回归（custom_phrase 数字码/用户词星号标记）=====
+
+    @Test
+    fun buildPreview_customPhraseNoComment_scansSameLengthSiblings() {
+        // 缺陷复现场景：custom_phrase 你好固顶但 table 候选无拼音 comment，
+        // 旧行为回退本地表还原为 mi'han（字母序首匹配）；修复后扫描同字数
+        // 兄弟候选的可用 comment，预览与首候选读音同源（ni'hao）
+        val ctx = context(
+            input = "64426",
+            candidates = listOf(
+                candidate("你好", ""),
+                candidate("尼好", "ni hao"),
+                candidate("迷汉", "mi han")
+            ),
+            highlighted = 0
+        )
+        assertEquals("ni'hao", PinyinHintProvider.buildPreview(ctx))
+    }
+
+    @Test
+    fun buildPreview_userPhraseStarMark_scansNextUsableComment() {
+        // 用户词被 is_in_user_dict 改标星号后，预览仍从同码候选取读音
+        val ctx = context(
+            input = "64426",
+            candidates = listOf(candidate("你好", "*"), candidate("尼好", "ni hao")),
+            highlighted = 0
+        )
+        assertEquals("ni'hao", PinyinHintProvider.buildPreview(ctx))
+    }
+
+    @Test
+    fun buildPreview_scanPrefersSameTextLengthOverAny() {
+        // 同字数优先：单字候选的可用 comment 不得越级覆盖同长度候选读音
+        // （64426 的二字词读音是两音节，单字 ni 会导致音节数错位）
+        val ctx = context(
+            input = "64426",
+            candidates = listOf(
+                candidate("你好", "64426"),
+                candidate("你", "ni"),
+                candidate("尼好", "ni hao")
+            ),
+            highlighted = 0
+        )
+        assertEquals("ni'hao", PinyinHintProvider.buildPreview(ctx))
     }
 }
