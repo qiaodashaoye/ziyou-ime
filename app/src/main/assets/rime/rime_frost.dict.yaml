@@ -1,0 +1,70 @@
+# Rime dictionary
+# encoding: utf-8
+#
+# 白霜拼音主词库（字由输入法裁剪版）
+# 上游：https://github.com/gaboolic/rime-frost （署名：Dvel、gaboolic；
+# 基于雾凇拼音 rime-ice，745396750 字语料重统计字频/词频）
+#
+# 词库组成（见 docs/白霜拼音词库迁移可行性方案.md 2.1/3.2）：
+#   - 内嵌核心：cn_dicts/8105（字表）、base（基础词库）、others（杂项补充）、
+#     corrections（错音错字提示，供 corrector.lua）
+#   - 英文主词库 melt_eng（en_dicts/en、en_ext）由 melt_eng.schema 独立挂载
+#   - 大词库（ext/tencent）与细胞词库（cn_dicts_cell）走 ziyou-ime-dicts
+#     扩展词库下载通道，由 DictManager.regenerateMainDict 动态追加 ext_dicts/*
+#     （Phase 3 接入；当前版本为静态模板）
+
+---
+name: rime_frost
+version: "2026-08-18.ziyou1"
+sort: by_weight
+import_tables:
+  - cn_dicts/8105         # 字表（通用规范汉字表，白霜重统计字频）
+  - cn_dicts/base         # 基础词库（白霜重统计词频）
+  - cn_dicts/others       # 杂项补充（容错读音等）
+  - cn_dicts/corrections  # 错音错字提示（corrector.lua 数据源）
+  # 扩展词库（按需下载，DictManager 注入位，Phase 3 生效）：
+  # - ext_dicts/frost_ext
+  # - ext_dicts/frost_tencent
+  # - ext_dicts/frost_cell_*
+...
+
+# 大写字母（支持拼音中混入大写字母造词，如 DNA、GDP；对齐 luna_pinyin 既有能力）
+A	A
+B	B
+C	C
+D	D
+E	E
+F	F
+G	G
+H	H
+I	I
+J	J
+K	K
+L	L
+M	M
+N	N
+O	O
+P	P
+Q	Q
+R	R
+S	S
+T	T
+U	U
+V	V
+W	W
+X	X
+Y	Y
+Z	Z
+
+# 数字参与造词
+0	ling
+1	yi
+1	yao
+2	er
+3	san
+4	si
+5	wu
+6	liu
+7	qi
+8	ba
+9	jiu

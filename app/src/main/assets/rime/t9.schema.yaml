@@ -3,7 +3,10 @@
 #
 # 九宫格（T9）拼音方案 —— 智能九键（单击数字键，引擎消歧）
 #
-# 复用 luna_pinyin 词库。核心原理（参考 rime-ice / 薄荷九宫格）：
+# 复用 rime_frost 词库（白霜拼音，2026-08 自 luna_pinyin 换装，见迁移方案 4.1.4：
+#   仅换 translator.dictionary，algebra/predictor/key_binder 全部保留；
+#   frost 原生 rime_frost_t9 因私有 t9_processor 硬阻塞，暂不处理/二期评估）。
+# 核心原理（参考 rime-ice / 薄荷九宫格）：
 #   speller/algebra 通过 derive 把每个拼音字母额外派生出「数字键」写法，
 #   2=abc 3=def 4=ghi 5=jkl 6=mno 7=pqrs 8=tuv 9=wxyz，
 #   于是输入 486 可命中 guo/gun/huo/hun 等所有映射到 486 的音节，由引擎消歧。
@@ -17,7 +20,7 @@ schema:
   author:
     - 字由输入法
   description: |
-    智能九宫格（T9）拼音方案，复用朙月拼音词库。
+    智能九宫格（T9）拼音方案，复用白霜拼音（rime_frost）词库。
     单击数字键 2-9 输入，由引擎在所有可能拼音组合中匹配候选。
     配合九宫格键盘左侧标点键（，。！？）快速输入标点。
 
@@ -134,7 +137,7 @@ speller:
     - erase/^0.*$/
 
 translator:
-  dictionary: luna_pinyin
+  dictionary: rime_frost
   enable_user_dict: true
   enable_sentence: true
   # 性能红线：此处刻意不开启 enable_correction。九键编码经 derive 映射后棱镜

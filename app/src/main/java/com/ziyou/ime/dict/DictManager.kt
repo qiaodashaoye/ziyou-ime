@@ -222,6 +222,11 @@ object DictManager {
      * 此方法在以下时机调用：
      * 1. 应用启动时（RimeSession.initialize 中，AssetDeployer 之后）
      * 2. 词库安装/卸载/启用/禁用后
+     *
+     * 白霜迁移说明（docs/白霜拼音词库迁移可行性方案.md Phase 3）：
+     * rime_frost / t9 方案已改挂 rime_frost.dict.yaml，本方法当前仅影响
+     * luna_pinyin 回滚方案；双后端模板（DICT_BACKEND 开关 + rime_frost
+     * 注入模板）在 Phase 3 落地，届时扩展词库将同步注入 rime_frost 主词库。
      */
     fun regenerateMainDict(context: Context) {
         try {

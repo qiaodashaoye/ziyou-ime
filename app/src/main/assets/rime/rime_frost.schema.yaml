@@ -1,0 +1,283 @@
+# Rime schema
+# encoding: utf-8
+#
+# 白霜拼音（rime-frost）—— 字由输入法裁剪版（Phase 1）
+# 上游：https://github.com/gaboolic/rime-frost （基于雾凇拼音 rime-ice 改造，
+# 745396750 字语料重统计字频/词频。保留原作者署名：Dvel、gaboolic）
+#
+# 裁剪说明（见 docs/白霜拼音词库迁移可行性方案.md 3.2）：
+#   保留：全部 lua_translator/lua_filter（随 WITH_LUA 生效）、custom_phrase、
+#         melt_eng 英文次翻译器、emoji/简繁 simplifier；
+#         追加 ziyou 的 predictor + predict_translator 联想链（对齐既有能力）。
+#   移除：radical_lookup / frost_aux（辅助码，二期）、chaifen / mars /
+#         chinese_english（opencc 表二期补齐）、grammar 段（octagram 三期）。
+#   简繁开关统一为 ziyou 现有 `simplification` 选项（上游为 traditionalization）。
+
+schema:
+  schema_id: rime_frost
+  name: 白霜拼音
+  version: "2026-08-18.ziyou1"
+  author:
+    - Dvel
+    - gaboolic
+    - 字由输入法（裁剪适配）
+  description: |
+    白霜拼音（字由输入法裁剪版）
+    https://github.com/gaboolic/rime-frost
+  dependencies:
+    - melt_eng        # 英文输入，作为次翻译器挂载
+
+# 开关（与 ziyou 现有 luna/t9 方案的选项名对齐，保证状态持久化连续）
+switches:
+  - name: ascii_mode
+    reset: 0
+    states: [ 中文, ABC ]
+  - name: simplification
+    reset: 0
+    states: [ 简体, 繁体 ]
+  - name: ascii_punct
+    reset: 0
+    states: [ 中文标点, 西文标点 ]
+  - name: emoji
+    states: [ 💀, 😄 ]
+  - name: prediction
+    reset: 1
+    states: [ 关闭联想, 开启联想 ]
+
+# 输入引擎
+engine:
+  processors:
+    - lua_processor@*select_character          # 以词定字
+    - ascii_composer
+    - recognizer
+    - predictor          # librime-predict：上屏后生成预测候选（须在 key_binder 之前）
+    - key_binder
+    - speller
+    - punctuator
+    - selector
+    - navigator
+    - express_editor
+  segmentors:
+    - ascii_segmentor
+    - matcher
+    - abc_segmentor
+    - punct_segmentor
+    - fallback_segmentor
+  translators:
+    - punct_translator
+    - script_translator
+    - predict_translator # librime-predict：翻译 prediction 段的预测候选
+    - lua_translator@*date_translator    # 时间、日期、星期
+    - lua_translator@*lunar              # 农历
+    - table_translator@custom_phrase     # 自定义短语 custom_phrase.txt
+    - table_translator@melt_eng          # 英文输入
+    - lua_translator@*unicode            # Unicode
+    - lua_translator@*number_translator  # 数字、金额大写
+    - lua_translator@*force_gc           # 暴力 GC
+    - lua_translator@*calculator         # 计算器
+  filters:
+    - lua_filter@*is_in_user_dict        # 用户词典的词加上一个*
+    - lua_filter@*corrector              # 错音错字提示
+    - lua_filter@*autocap_filter         # 英文自动大写
+    - lua_filter@*v_filter               # v 模式 symbols 优先
+    - lua_filter@*pin_cand_filter        # 置顶候选项（顺序要求：置顶 > Emoji > 简繁）
+    - lua_filter@*reduce_english_filter  # 降低部分英语单词在候选项的位置
+    - simplifier@emoji                   # Emoji
+    - simplifier@traditionalize          # 简繁切换
+    - uniquifier                         # 去重
+
+# librime-predict 联想配置（predict.db 由 AssetDeployer 部署到用户目录）
+predictor:
+  db: predict.db
+  max_candidates: 10
+  max_iterations: 7
+
+# Lua 配置: 日期、时间、星期、ISO 8601、时间戳的触发关键字
+date_translator:
+  date: rq
+  time: sj
+  week: xq
+  datetime: dt
+  timestamp: ts
+
+# Lua 配置：农历的触发关键字
+lunar: nl
+
+# Lua 配置：为 corrector 格式化 comment，占位符为 {comment}
+corrector: "{comment}"
+
+# Lua 配置: 降低部分英语单词在候选项的位置（custom 模式，上游默认词表）
+reduce_english_filter:
+  mode: custom
+  idx: 2
+  words: [
+    aid, ann,
+    bail, bait, bam, band, bans, bat, bay, bend, bent, benz, bib, bid, bien, biz, boc, bop, bos, bud, buf, bach, bench, bush,
+    cab, cad, cain, cam, cans, cap, cas, cef, chad, chan, chap, chef, cher, chew, chic, chin, chip, chit, coup, cum, cunt, cur, couch,
+    dab, dag, dal, dam, dent, dew, dial, diet, dim, din, dip, dis, dit, doug, dub, dug, dunn, don,
+    fab, fax, fob, fog, foul, fur,
+    gag, gail, gain, gal, gam, gaol, ged, gel, ger, guam, gus, gut,
+    hail, ham, hank, hans, hat, hay, heil, heir, hem, hep, hud, hum, hung, hunk, hut, hush,
+    jim, jug,
+    kat,
+    lab, lad, lag, laid, lam, laos, lap, lat, lax, lay, led, leg, lex, liam, lib, lid, lied, lien, lies, linn, lip, lit, liz, lob, lug, lund, lung, lux, lash, loch, lush,
+    mag, maid, mann, mar, mat, med, mel, mend, mens, ment, mil, mins, mint, mob, moc, mop, mos, mot, mud, mug, mum, mesh,
+    nap, nat, nay, neil, nib, nip, noun, nous, nun, nut, nail, nash,
+    pac, paid, pail, pain, pair, pak, pal, pam, pans, pant, pap, par, pat, paw, pax, pens, pic, pier, pies, pins, pint, pit, pix, pod, pop, pos, pot, pour, pow, pub, pinch, pouch,
+    rand, rant, rent, rep, res, ret, rex, rib, rid, rig, rim, rub, rug, rum, runc, runs, ranch,
+    sac, sail, sal, sam, sans, sap, saw, sax, sew, sham, shaw, shin, sig, sin, sip, sis, suit, sung, suns, sup, sur, sus,
+    tad, tail, taj, tar, tax, tec, ted, tel, ter, tex, tic, tied, tier, ties, tim, tin, tit, tour, tout, tum,
+    wag, wand, womens, wap, wax, weir, won,
+    yan, yen,
+    zach
+  ]
+
+# Lua 配置: 置顶候选项（上游默认表，用户可用 custom.yaml 覆盖）
+pin_cand_filter:
+  - q	去 其实 岂不是
+  - w	我 问题 为什么
+  - e	而 而且 二维码
+  - r	人 然后 如果
+  - t	他 同时 特别是
+  - y	有 已经 有没有
+  - sh	是 什么 是不是
+  - ch	出 差点 差不多
+  - o	哦 偶尔 喔
+  - p	配 平时 朋友圈
+  - a	啊 爱好 按理说 阿
+  - s	算 虽然 算不算
+  - d	的 但是 的时候
+  - f	非 发现 非常
+  - g	个 感觉 怪不得
+  - h	和 好的 会不会
+  - j	就 觉得 基本上
+  - k	可 可以 看起来
+  - l	了 理解 了不起
+  - z	在 自己 怎么样
+  - x	小 现在 行不行
+  - c	从 才能 猜不到
+  - zh	这 只是 之所以
+  - b	吧 不是 不知道
+  - n	你 那么 能不能
+  - m	吗 没有 没什么
+
+# 主翻译器，拼音
+translator:
+  dictionary: rime_frost        # 挂载词库 rime_frost.dict.yaml
+  max_homophones: 4
+  max_homographs: 4
+  max_sentences: 3
+  spelling_hints: 8             # corrector.lua：拼音显示在 comment 中
+  always_show_comments: true    # corrector.lua：强制显示 comment 供判断
+  initial_quality: 1.2          # 拼音权重高于英文
+  comment_format:               # 标记拼音注释，供 corrector.lua 判断
+    - xform/^/［/
+    - xform/$/］/
+  preedit_format:
+    - xform/([jqxy])v/$1u/      # 显示为 ju qu xu yu
+    - xform/([nl])v/$1v/        # 显示为 nv lv
+    - xform/([nl])ue/$1ve/      # 显示为 nve lve
+
+# 次翻译器，英文
+melt_eng:
+  dictionary: melt_eng
+  enable_sentence: false
+  enable_user_dict: false
+  initial_quality: 0.7
+  comment_format:
+    - xform/.*//
+
+# 自定义短语：custom_phrase.txt
+custom_phrase:
+  dictionary: ""
+  user_dict: custom_phrase
+  db_class: stabledb
+  enable_completion: false
+  enable_sentence: false
+  initial_quality: 99
+
+# Emoji
+emoji:
+  option_name: emoji
+  opencc_config: emoji.json
+  inherit_comment: false
+
+# 简繁切换（option_name 对齐 ziyou 现有 simplification 选项）
+traditionalize:
+  option_name: simplification
+  opencc_config: s2t.json
+  tips: none
+
+# 标点符号（从 ziyou default.yaml 继承，保持与 luna/t9 方案一致的标点行为）
+punctuator:
+  import_preset: default
+
+# 处理符合特定规则的输入码
+recognizer:
+  import_preset: default
+  patterns:
+    unicode: "^U[a-f0-9]+"              # lua_translator@*unicode
+    number: "^R[0-9]+[.]?[0-9]*"        # lua_translator@*number_translator 数字金额大写
+    gregorian_to_lunar: "^N[0-9]{1,8}"  # lua_translator@*lunar 公历转农历
+    calculator: "^[Vv].*$"              # lua_translator@*calculator 计算器
+
+# 按键绑定：从 ziyou default.yaml 继承（不引入上游分号选 2 候选等习惯）
+key_binder:
+  import_preset: default
+
+# 拼写设定（上游白霜全拼 algebra 原样保留）
+speller:
+  alphabet: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA
+  initials: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA
+  delimiter: " '"
+  algebra:
+    ### 超级简拼
+    - erase/^hm$/
+    - erase/^m$/
+    - erase/^n$/
+    - erase/^ng$/
+    - abbrev/^([a-z]).+$/$1/
+    - abbrev/^([zcs]h).+$/$1/
+    ### v u 转换
+    - derive/^([nl])ve$/$1ue/
+    - derive/^([jqxy])u/$1v/
+    - derive/^([nl])ue$/$1ve/
+    - derive/^([jqxy])v/$1u/
+    ### 自动纠错
+    - derive/([zcs])h(a|e|i|u|ai|ei|an|en|ou|uo|ua|un|ui|uan|uai|uang|ang|eng|ong)$/h$1$2/
+    - derive/([zcs])h([aeiu])$/$1$2h/
+    - derive/^([wghk])ai$/$1ia/
+    - derive/([wfghkz])ei$/$1ie/
+    - derive/([jqx])ie$/$1ei/
+    - derive/([rtypsdghklzcbnm])ao$/$1oa/
+    - derive/([ypfm])ou$/$1uo/
+    - derive/([wrtypsdfghklzcbnm])ang$/$1nag/
+    - derive/([wrtypsdfghklzcbnm])ang$/$1agn/
+    - derive/([wrtpsdfghklzcbnm])eng$/$1neg/
+    - derive/([wrtpsdfghklzcbnm])eng$/$1egn/
+    - derive/([qtypdjlxbnm])ing$/$1nig/
+    - derive/([qtypdjlxbnm])ing$/$1ign/
+    - derive/([rtysdghklzcn])ong$/$1nog/
+    - derive/([rtysdghklzcn])ong$/$1ogn/
+    - derive/([qtpdjlxbnm])iao$/$1ioa/
+    - derive/([qtpdjlxbnm])iao$/$1oia/
+    - derive/([rtsghkzc])ui$/$1iu/
+    - derive/([qjlxnm])iu$/$1ui/
+    - derive/([qjlxn])iang$/$1aing/
+    - derive/([qjlxn])iang$/$1inag/
+    - derive/([g|k|h|zh|sh])ua$/$1au/
+    - derive/([g|h|k|zh|ch|sh])uai$/$1aui/
+    - derive/([qrtysdghjklzxcn])uan$/$1aun/
+    - derive/([nlyjqx])ue$/$1eu/
+    - derive/([g|h|k|zh|ch|sh])uang$/$1aung/
+    - derive/([g|h|k|zh|ch|sh])uang$/$1uagn/
+    - derive/([g|h|k|zh|ch|sh])uang$/$1unag/
+    - derive/([g|h|k|zh|ch|sh])uang$/$1augn/
+    - derive/([jqx])iong$/$1inog/
+    - derive/([jqx])iong$/$1oing/
+    - derive/([jqx])iong$/$1iogn/
+    - derive/([jqx])iong$/$1oign/
+    - derive/([rtsdghkzc])o(u|ng)$/$1o/
+    - derive/(.+)ong$/$1on/
+    - derive/([tl])eng$/$1en/
+    - derive/([qwrtypsdfghjklzxcbnm])([aeio])ng$/$1ng/
