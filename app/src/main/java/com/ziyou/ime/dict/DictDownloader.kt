@@ -369,6 +369,9 @@ object DictDownloader {
                     Log.w(TAG, "跳过不可信下载源的词库 $id: $dictUrl")
                     continue
                 }
+                // deprecated_by 同来自不可信 catalog，将参与 id 语义的展示/指引，
+                // 非空时同样过 id 白名单校验，非法值丢弃为空串
+                val deprecatedBy = obj.optString("deprecated_by", "")
                 dictionaries.add(
                     RemoteDictInfo(
                         id = id,
@@ -380,7 +383,8 @@ object DictDownloader {
                         size = obj.optLong("size", 0),
                         author = obj.optString("author", ""),
                         sha256 = obj.optString("sha256", ""),
-                        kind = obj.optString("kind", RemoteDictInfo.KIND_DICT)
+                        kind = obj.optString("kind", RemoteDictInfo.KIND_DICT),
+                        deprecatedBy = if (deprecatedBy.isEmpty() || RemoteDictInfo.isValidId(deprecatedBy)) deprecatedBy else ""
                     )
                 )
             }

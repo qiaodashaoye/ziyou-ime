@@ -60,4 +60,9 @@
 # （docFilter 打分阶段过滤/空集/null 等价/子库独立索引等价守护）、
 # RagPromptBuilderTest ×4（buildPolish 润色变体：指令存在/风格参考资料/
 # 编号格式与解析器对齐/预算约束））
-574
+# 当前实测：:core-logic 340 + :app 243（2026-08-18，全绿、0 跳过；
+# 白霜迁移 Phase 3 新增 DictManagerFrostTest ×9：双后端主词库模板
+# （FROST 四核心表/无英文表、LUNA 回滚清单、ext_dicts 注入顺序）、
+# catalog v4 legacy id 幂等迁移规划（改名/零开销 no-op/二次幂等/
+# 新 id 占用丢弃旧记录/混排）、deprecatedBy 向后兼容）
+583

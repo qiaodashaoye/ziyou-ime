@@ -37,7 +37,10 @@ data class RemoteDictInfo(
     /** 产物类型：[KIND_DICT]=Rime dict.yaml（注入 import_tables）；
      *  [KIND_PREDICT_DB]=predict.db 联想子库（整体替换用户目录 predict.db，
      *  见 PredictDbManager）。旧 catalog 无此字段时默认 dict（向后兼容）。 */
-    val kind: String = KIND_DICT
+    val kind: String = KIND_DICT,
+    /** catalog v4：本条目废弃后的替代条目 id（白霜迁移 legacy_* → frost_* 指引，
+     *  见迁移方案 6.1）。空串表示无替代；旧 catalog 无此字段时默认空（向后兼容）。 */
+    val deprecatedBy: String = ""
 ) {
     val dictCategory: DictCategory
         get() = DictCategory.fromValue(category)
