@@ -396,6 +396,23 @@ class ZiYouInputMethodService : InputMethodService() {
     private val keyRecordStack = KeyRecordStack()
 
     /**
+     * 九键自定义短语读音字典（词→拼音）：懒加载部署目录的
+     * custom_phrase_t9.txt 第四列（librime 仅读前三列，第四列客户端专用）。
+     * table_translator 固顶候选无拼音 comment，编码区预览经此字典取
+     * 高亮词的精确读音，保证首候选与编码区严格同源（缺陷修复）。
+     * 文件缺失/解析失败时空字典降级，预览回退既有链路，不阻断输入。
+     */
+    private val customPhrasePinyins: Map<String, String> by lazy {
+        try {
+            val file = File(File(filesDir, "rime"), "custom_phrase_t9.txt")
+            if (file.exists()) PinyinHintProvider.parseCustomPhrasePinyins(file.readText())
+            else emptyMap()
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    /**
      * 最近一次 renderContext 是否处于「无活跃编码」态（input 为空）。
      * LLM 续写的追加窗口以此为准而非「预测态」（menu 非空且 input 为空）：
      * 句末标点上屏时引擎会主动清预测、predict.db 未收录的词 menu 也为空，
@@ -1283,7 +1300,9 @@ class ZiYouInputMethodService : InputMethodService() {
         // 编码区同源同步（仅候选栏悬浮层，键盘视图不绘制编码）：九宫格按候选
         // 读音+实际击键还原预览，确保编码区与候选区拼音一致；全键盘回退到 Rime 原始 preedit
         val preview = if (currentKeyboardType != KeyboardType.NINE_GRID) null
-            else PinyinHintProvider.buildPreview(context, keyRecordStack.confirmedRawLength())
+            else PinyinHintProvider.buildPreview(
+                context, keyRecordStack.confirmedRawLength(), customPhrasePinyins
+            )
         preeditOverlay?.setText(preview ?: context?.composition?.preedit)
         // 左侧拼音侧栏：有候选拼音则展示拼音，否则展示自定义符号
         // 仅在九宫格模式下更新拼音候选；数字键盘侧栏始终为符号模式

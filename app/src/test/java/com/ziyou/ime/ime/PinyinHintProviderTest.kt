@@ -382,4 +382,61 @@ class PinyinHintProviderTest {
         )
         assertEquals("ni'hao", PinyinHintProvider.buildPreview(ctx))
     }
+
+    // ===== 自定义短语读音字典（根治固顶候选与编码区脱钩）=====
+
+    @Test
+    fun buildPreview_customPhraseMap_beatsSiblingScanning() {
+        // 缺陷根治场景：高亮「你好」无 comment，兄弟候选含错误读音 ni gan
+        // （同码读音空间多成员）；读音字典按词命中精确读音，优先于扫描
+        val ctx = context(
+            input = "64426",
+            candidates = listOf(
+                candidate("你好", ""),
+                candidate("拟稿", "ni gan"),
+                candidate("尼好", "ni hao")
+            ),
+            highlighted = 0
+        )
+        val map = mapOf("你好" to "ni hao")
+        assertEquals("ni'hao", PinyinHintProvider.buildPreview(ctx, 0, map))
+    }
+
+    @Test
+    fun buildPreview_customPhraseMap_singleChar() {
+        // 单字固顶：输 96 高亮「我」，字典命中 wo（非本地表字母序首匹配）
+        val ctx = context(
+            input = "96",
+            candidates = listOf(candidate("我", ""), candidate("握", "wo")),
+            highlighted = 0
+        )
+        assertEquals("wo", PinyinHintProvider.buildPreview(ctx, 0, mapOf("我" to "wo")))
+    }
+
+    @Test
+    fun buildPreview_customPhraseMap_missFallsBackToScanning() {
+        // 字典未收录的词仍走兄弟扫描兜底（字典不是唯一读音源）
+        val ctx = context(
+            input = "64426",
+            candidates = listOf(candidate("尼好", ""), candidate("你好", "ni hao")),
+            highlighted = 0
+        )
+        assertEquals("ni'hao", PinyinHintProvider.buildPreview(ctx, 0, mapOf("你好" to "ni hao")))
+    }
+
+    @Test
+    fun parseCustomPhrasePinyins_parsesFourthColumnWithTolerance() {
+        val content = """
+            # 注释行跳过
+            你好	64426	870	ni hao
+            我	96	1000	wo
+            旧格式三列条目	96	500
+            非法拼音丢弃	28	100	bu8
+            你好	999	1	重复取首条
+        """.trimIndent()
+        val map = PinyinHintProvider.parseCustomPhrasePinyins(content)
+        assertEquals(2, map.size)
+        assertEquals("ni hao", map["你好"])
+        assertEquals("wo", map["我"])
+    }
 }

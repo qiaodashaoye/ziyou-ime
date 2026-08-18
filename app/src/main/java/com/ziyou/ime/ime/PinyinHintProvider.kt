@@ -68,10 +68,17 @@ object PinyinHintProvider {
      * 这样编码区与候选区始终同源：选“你”后编码区展示 你hao（主流输入法行为）。
      *
      * @param confirmedRawLength 引擎已确认段在原始输入串中占用的字符数（来自九宫格状态机）
+     * @param customPhrasePinyins 自定义短语读音字典（词→拼音，音节空格分隔），
+     *        由调用方经 [parseCustomPhrasePinyins] 解析 custom_phrase_t9.txt 第四列得到；
+     *        table_translator 候选无拼音 comment，高亮固顶词经此字典取精确读音
      * @return 预览串（未确认音节间以 ' 分隔）；无可用内容或确认偏移不可信（降级态）
      *         返回 null，由调用方回退到 Rime 原始 preedit。
      */
-    fun buildPreview(context: ContextProto?, confirmedRawLength: Int = 0): String? {
+    fun buildPreview(
+        context: ContextProto?,
+        confirmedRawLength: Int = 0,
+        customPhrasePinyins: Map<String, String> = emptyMap()
+    ): String? {
         if (context == null) return null
         val confirmed = confirmedPrefix(context.composition).orEmpty()
         // 确认偏移不可信（如同步失败后栈已降级清空）时返回 null，回退 Rime 原始 preedit
@@ -81,7 +88,7 @@ object PinyinHintProvider {
         if (segments.isEmpty()) return confirmed.takeIf { it.isNotEmpty() }
         // 高亮候选的读音音节队列，供数字段逐音节消费对齐
         // （分段确认后候选仅覆盖未确认部分，与未确认输入天然对齐）
-        val syllables = ArrayDeque(highlightedSyllables(context))
+        val syllables = ArrayDeque(highlightedSyllables(context, customPhrasePinyins))
         val body = segments.joinToString("'") { seg ->
             if (seg.all { it in '2'..'9' }) {
                 renderDigitRun(seg, syllables)
@@ -129,33 +136,40 @@ object PinyinHintProvider {
     /**
      * 提取高亮候选（无高亮时取首位）的读音音节列表；无可用读音源返回空。
      * comment 先经 [normalizePinyinComment] 归一化（兼容［］包裹与星号/∞ 标记）；
-     * 高亮候选 comment 不可用时经 [usableComment] 在菜单内回退扫描。
+     * 高亮候选 comment 不可用时经 [usableComment] 按「自定义短语读音字典 →
+     * 菜单内回退扫描」顺序选取读音源。
      */
-    private fun highlightedSyllables(context: ContextProto): List<String> {
+    private fun highlightedSyllables(
+        context: ContextProto,
+        customPhrasePinyins: Map<String, String>
+    ): List<String> {
         val menu = context.menu ?: return emptyList()
         val candidates = menu.candidates
         if (candidates.isEmpty()) return emptyList()
         val index = menu.highlightedCandidateIndex.takeIf { it in candidates.indices } ?: 0
-        val source = usableComment(candidates, index) ?: return emptyList()
+        val source = usableComment(candidates, index, customPhrasePinyins) ?: return emptyList()
         return source.split('\'', ' ')
             .filter { seg -> seg.isNotEmpty() && seg.all { it.isLetter() } }
     }
 
     /**
-     * 预览读音 comment 源选择：高亮候选优先；不可用时菜单内回退扫描。
-     *
-     * 高亮候选 comment 不可用的典型场景：
-     * - custom_phrase 数字编码短语（table_translator 候选无拼音 comment，
-     *   librime 词条格式仅三列，见 table_db.cc）；
-     * - 用户词/联想句被 is_in_user_dict 改写为星号/∞ 标记。
-     * 回退策略：同码候选共享读音空间，优先取**同字数**候选的可用 comment
-     * （等长候选音节数必然一致，与高亮词读音最贴近），其次任意可用
-     * comment；均优于本地 T9 表字母序还原（其首匹配几乎从不等于引擎首词
-     * 读音，如 64426 还原为 mi'han 而非 ni'hao）。
+     * 预览读音源选择（按精度降序）：
+     * 1. 高亮候选自身 comment（归一化后可用则最优，与候选严格同源）；
+     * 2. 自定义短语读音字典按高亮词命中（custom_phrase 固顶候选的 comment
+     *    为空/数字码，读音字典由客户端从短语表第四列解析，词→音一一对应）；
+     * 3. 菜单内同字数候选可用 comment（同码候选共享读音空间，但**不等于**
+     *    高亮词读音——如 64426 空间含 ni'hao/ni'gan/mi'han，仅作降级兜底）；
+     * 4. 任意可用 comment；均未命中时返回 null，由调用链回退本地 T9 表。
      */
-    private fun usableComment(candidates: Array<CandidateProto>, index: Int): String? {
-        normalizePinyinComment(candidates[index].comment)?.let { return it }
-        val highlightedLength = candidates[index].text.length
+    private fun usableComment(
+        candidates: Array<CandidateProto>,
+        index: Int,
+        customPhrasePinyins: Map<String, String>
+    ): String? {
+        val highlighted = candidates[index]
+        normalizePinyinComment(highlighted.comment)?.let { return it }
+        customPhrasePinyins[highlighted.text]?.let { return it }
+        val highlightedLength = highlighted.text.length
         for (candidate in candidates) {
             if (candidate.text.length == highlightedLength) {
                 normalizePinyinComment(candidate.comment)?.let { return it }
@@ -165,6 +179,30 @@ object PinyinHintProvider {
             normalizePinyinComment(candidate.comment)?.let { return it }
         }
         return null
+    }
+
+    /**
+     * 解析 custom_phrase_t9.txt 的第四列拼音注释，构建 词→读音 字典。
+     *
+     * librime 词条解析仅读前三列（table_db.cc rime_table_entry_parser），
+     * 第四列为客户端专用读音源：table_translator 候选无拼音 comment，
+     * 固顶短语高亮时经本字典取精确读音，保证编码区与首候选严格同源。
+     * 容错：注释行/空行跳过；少于四列的旧格式条目忽略；拼音含非字母
+     * （数字/标记码）丢弃；同词重复取首条。
+     */
+    fun parseCustomPhrasePinyins(content: String): Map<String, String> {
+        val result = LinkedHashMap<String, String>()
+        for (line in content.lineSequence()) {
+            if (line.isBlank() || line.startsWith("#")) continue
+            val parts = line.split("\t")
+            if (parts.size < 4) continue
+            val word = parts[0].trim()
+            val pinyin = parts[3].trim()
+            if (word.isEmpty() || pinyin.isEmpty()) continue
+            if (!pinyin.all { it == ' ' || it.isLetter() }) continue
+            result.putIfAbsent(word, pinyin)
+        }
+        return result
     }
 
     /**
