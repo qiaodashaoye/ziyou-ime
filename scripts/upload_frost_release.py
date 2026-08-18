@@ -101,13 +101,16 @@ def main():
         print("[dry-run] 结束")
         return 0
 
-    # 1. 创建或复用 Release
+    # 1. 创建或复用 Release(注意:Gitee 对不存在的 tag 返回 200 + JSON null,非 404)
+    release = None
     try:
-        release = _api("GET", f"/repos/{OWNER}/{REPO}/releases/tags/{TAG}", token)
-        print(f"Release 已存在(id={release['id']}),复用")
+        release = _api("GET", f"/repos/{OWNER}/{REPO}/releases/tags/{TAG}?access_token={token}", token)
     except urllib.error.HTTPError as e:
         if e.code != 404:
             raise
+    if release:
+        print(f"Release 已存在(id={release['id']}),复用")
+    else:
         release = _api("POST", f"/repos/{OWNER}/{REPO}/releases", token, data={
             "access_token": token,
             "tag_name": TAG,
