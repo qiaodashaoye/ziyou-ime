@@ -14,6 +14,7 @@ import android.view.MotionEvent
 import android.view.View
 import com.ziyou.ime.core.skin.SkinColor
 import com.ziyou.ime.core.skin.SkinKeyStyle
+import com.ziyou.ime.sdk.input.EnterKeyBehavior
 import com.ziyou.ime.skin.SkinManager
 import com.ziyou.ime.skin.SkinTheme
 import kotlin.math.abs

@@ -1,4 +1,4 @@
-package com.ziyou.ime.ime
+package com.ziyou.ime.sdk.input
 
 import android.text.InputType
 import android.view.inputmethod.EditorInfo

@@ -33,6 +33,7 @@ import com.ziyou.ime.core.prediction.AutoPunctPolicy
 import com.ziyou.ime.core.prediction.CandidateFusion
 import com.ziyou.ime.daemon.RimeEngine
 import com.ziyou.ime.core.t9.KeyRecordStack
+import com.ziyou.ime.sdk.input.EnterKeyBehavior
 import com.ziyou.ime.data.ClipboardHistoryRepository
 import com.ziyou.ime.data.SymbolRepository
 import com.ziyou.ime.di.AppContainer
