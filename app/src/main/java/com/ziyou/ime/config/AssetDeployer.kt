@@ -23,6 +23,15 @@ object AssetDeployer {
     private const val PREDICT_DB = "predict.db"
 
     /**
+     * 白霜迁移用户词库迁移（方案 3.3/6.3）：方案改名 luna_pinyin → rime_frost 后
+     * userdb 不会自动继承，部署阶段一次性整目录复制（leveldb 目录拷贝即有效，
+     * 词键为「编码+词」与方案名无关）。源目录保留不动，兼作 L4 数据级
+     * 回滚备份（方案 6.4；如需回滚，复制回即可）。
+     */
+    private const val LEGACY_USER_DB = "luna_pinyin.userdb"
+    private const val FROST_USER_DB = "rime_frost.userdb"
+
+    /**
      * 已移出主程序包的历史内置词库（2026-08 起改为扩展词库按需下载）。
      * 部署只覆盖不删除，升级后需主动清理旧安装残留，释放约 46MB 磁盘；
      * 这些文件不再被 luna_pinyin.dict.yaml 的 import_tables 引用，
@@ -105,12 +114,43 @@ object AssetDeployer {
             // 部署 librime-predict 联想词库到用户目录（predictor 默认从 user dir 解析 predict.db）
             copyAssetFile(context, PREDICT_DB, File(userDir, PREDICT_DB))
 
+            // 白霜迁移：旧方案用户词库一次性迁移（幂等，失败不阻断部署）
+            migrateUserDb(userDir)
+
             saveDeployedVersion(context, versionCode)
             Log.i(TAG, "资源部署完成，版本=$versionCode")
             true
         } catch (e: IOException) {
             Log.e(TAG, "资源部署失败: ${e.message}", e)
             false
+        }
+    }
+
+    /**
+     * 用户词库一次性迁移：luna_pinyin.userdb → rime_frost.userdb。
+     * 幂等守卫：目标已存在则跳过（含旧版已迁移/用户已有 frost 自造词场景，
+     * 绝不覆盖）；源不存在则 no-op。采用复制而非移动：luna 回滚方案
+     * 仍引用源 userdb，且源目录留存即 L4 数据级备份（方案 6.4）。
+     * 失败时清理半成品目标目录，下次升版部署自动重试。
+     */
+    private fun migrateUserDb(userDir: File) {
+        val source = File(userDir, LEGACY_USER_DB)
+        val target = File(userDir, FROST_USER_DB)
+        // leveldb 用户词库是目录；防御异常形态（同名文件）直接跳过
+        if (!source.exists() || !source.isDirectory) return
+        if (target.exists()) {
+            Log.d(TAG, "用户词库迁移跳过：$FROST_USER_DB 已存在")
+            return
+        }
+        try {
+            source.copyRecursively(target)
+            Log.i(TAG, "用户词库迁移完成: $LEGACY_USER_DB → $FROST_USER_DB（源目录保留作回滚备份）")
+        } catch (e: IOException) {
+            Log.w(TAG, "用户词库迁移失败(不阻断部署): ${e.message}")
+            // 清理不完整的复制残留，避免下次被 target.exists() 误判为已迁移
+            if (target.exists()) {
+                target.deleteRecursively()
+            }
         }
     }
 

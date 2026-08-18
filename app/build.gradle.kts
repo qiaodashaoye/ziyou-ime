@@ -32,8 +32,8 @@ android {
         // 16KB 页面对齐已通过链接参数启用，满足 Android 16 对 target 36 应用的强制要求
         targetSdk = 36
         // versionCode 变更会触发 AssetDeployer 重新部署（schema 变更/predict.db 需随升版生效）
-        // v4：白霜拼音（rime-frost）词库迁移 Phase 1 —— 新增 rime_frost 方案与核心词表
-        versionCode = 4
+        // v5：白霜迁移 Phase 3 —— 主词库双后端 + userdb 一次性迁移
+        versionCode = 5
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
