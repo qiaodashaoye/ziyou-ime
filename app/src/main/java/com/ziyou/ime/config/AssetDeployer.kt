@@ -155,8 +155,11 @@ object AssetDeployer {
         val target = File(userDir, FROST_USER_DB)
         // leveldb 用户词库是目录；防御异常形态（同名文件）直接跳过
         if (!source.exists() || !source.isDirectory) return
-        if (target.exists()) {
-            Log.d(TAG, "用户词库迁移跳过：$FROST_USER_DB 已存在")
+        // 守卫条件：目标**已有内容**才跳过（含旧版已迁移/用户已有 frost 自造词，
+        // 绝不覆盖）。引擎可能在迁移功能上线前已预创建空目录，空目录不应
+        // 阻断迁移（潜在风险修复）
+        if (target.exists() && target.isDirectory && target.list()?.isNotEmpty() == true) {
+            Log.d(TAG, "用户词库迁移跳过：$FROST_USER_DB 已有内容")
             return
         }
         try {
