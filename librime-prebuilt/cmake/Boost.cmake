@@ -66,4 +66,13 @@ set(BOOST_INCLUDE_LIBRARIES
     uuid
     vmd)
 
+# witogram 内嵌 kenlm 额外需要的 boost 子集：ptr_container（stream/chain）、
+# thread（multi_progress，mutex 为 header-only 实现）、random（sampler）、
+# program_options（lm/common/size_option，编译型库，经 witogram objs 补链
+# 目标随合并静态库一并打包）。必须在 add_subdirectory 前追加，否则
+# 模块化 Boost 不会提供对应目标。
+if(WITH_WITOGRAM)
+  list(APPEND BOOST_INCLUDE_LIBRARIES ptr_container thread random program_options)
+endif()
+
 add_subdirectory("${PREBUILT_ROOT}/boost" boost EXCLUDE_FROM_ALL)

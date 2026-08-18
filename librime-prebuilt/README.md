@@ -157,15 +157,16 @@ cd ..
 
 ---
 
-## 5. 可选插件（Lua / Octagram / Predict）
+## 5. 可选插件（Lua / Octagram / Predict / Witogram）
 
-ziyou-ime 的 JNI 层通过 CMake 开关 `WITH_LUA` / `WITH_OCTAGRAM` / `WITH_PREDICT` 决定是否声明模块依赖。若要启用，需要**同时**：
+ziyou-ime 的 JNI 层通过 CMake 开关 `WITH_LUA` / `WITH_OCTAGRAM` / `WITH_PREDICT` / `WITH_WITOGRAM` 决定是否声明模块依赖。若要启用，需要**同时**：
 
-1. **在本模块中把对应插件编译进 `librime.a`**。`librime-predict` 已在仓库根 `.gitmodules` 登记为子模块（版本随索引里的 commit 固定），干净克隆只需初始化；`lua` / `octagram` 仍按需手工克隆到 `plugins/` 下：
+1. **在本模块中把对应插件编译进 `librime.a`**。`librime-predict` 与 `librime-witogram` 已在仓库根 `.gitmodules` 登记为子模块（版本随索引里的 commit 固定），干净克隆只需初始化；`lua` / `octagram` 仍按需手工克隆到 `plugins/` 下：
 
    ```bash
-   # predict：在仓库根执行一次即可（版本由子模块 commit 固定）
+   # predict / witogram：在仓库根执行一次即可（版本由子模块 commit 固定）
    git submodule update --init --recursive librime-prebuilt/plugins/librime-predict
+   git submodule update --init --recursive librime-prebuilt/plugins/librime-witogram
 
    # lua / octagram：按需手工克隆
    git clone https://github.com/hchunhui/librime-lua        librime-prebuilt/plugins/librime-lua
@@ -177,8 +178,14 @@ ziyou-ime 的 JNI 层通过 CMake 开关 `WITH_LUA` / `WITH_OCTAGRAM` / `WITH_PR
 
    ```bash
    make lua                 # 等价于 WITH_LUA=ON ./build.sh
-   # 或组合：WITH_LUA=ON WITH_OCTAGRAM=ON ./build.sh
+   make witogram            # 等价于 WITH_WITOGRAM=ON ./build.sh
+   # 或组合：WITH_LUA=ON WITH_PREDICT=ON WITH_WITOGRAM=ON ./build.sh
    ```
+
+   witogram 是 octagram 的演进替代（.gram 直读无损 + .klm/KenLM 扩展，GPL-3.0），
+   移动端适配要点：`KENLM_MAX_ORDER=8` 预设、boost ptr_container/thread/random
+   头文件子集、glog INTERFACE include 收窄（防 config.h 截胡）；完整分析见
+   `docs/librime-witogram集成可行性分析报告.md`。
 
 2. **在 app 的构建中打开同名开关**（见 `ziyou-ime/app/build.gradle.kts`）：
 

@@ -26,6 +26,9 @@ extern void rime_require_module_lua();
 #ifdef WITH_OCTAGRAM
 extern void rime_require_module_octagram();
 #endif
+#ifdef WITH_WITOGRAM
+extern void rime_require_module_witogram();
+#endif
 #ifdef WITH_PREDICT
 extern void rime_require_module_predict();
 #endif
@@ -37,6 +40,9 @@ static void declare_librime_module_dependencies() {
 #endif
 #ifdef WITH_OCTAGRAM
   rime_require_module_octagram();
+#endif
+#ifdef WITH_WITOGRAM
+  rime_require_module_witogram();
 #endif
 #ifdef WITH_PREDICT
   rime_require_module_predict();

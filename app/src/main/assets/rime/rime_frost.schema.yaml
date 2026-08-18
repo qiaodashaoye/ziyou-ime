@@ -10,13 +10,16 @@
 #         melt_eng 英文次翻译器、emoji/简繁 simplifier；
 #         追加 ziyou 的 predictor + predict_translator 联想链（对齐既有能力）。
 #   移除：radical_lookup / frost_aux（辅助码，二期）、chaifen / mars /
-#         chinese_english（opencc 表二期补齐）、grammar 段（octagram 三期）。
+#         chinese_english（opencc 表二期补齐）。
+#   恢复：grammar 段 —— 随 WITH_WITOGRAM 编入（librime-witogram，octagram
+#         演进替代）；未编入/模型缺失时 poet 静默降级，无运行时风险
+#         （librime poet.cc Grammar::Require 判空保护）。
 #   简繁开关统一为 ziyou 现有 `simplification` 选项（上游为 traditionalization）。
 
 schema:
   schema_id: rime_frost
   name: 白霜拼音
-  version: "2026-08-18.ziyou1"
+  version: "2026-08-18.ziyou2"
   author:
     - Dvel
     - gaboolic
@@ -166,6 +169,7 @@ pin_cand_filter:
 # 主翻译器，拼音
 translator:
   dictionary: rime_frost        # 挂载词库 rime_frost.dict.yaml
+  grammar_penalty: -4           # 整句语法惩罚（对齐上游；需 grammar 信号方生效）
   max_homophones: 4
   max_homographs: 4
   max_sentences: 3
@@ -179,6 +183,15 @@ translator:
     - xform/([jqxy])v/$1u/      # 显示为 ju qu xu yu
     - xform/([nl])v/$1v/        # 显示为 nv lv
     - xform/([nl])ue/$1ve/      # 显示为 nve lve
+
+# 语法模型（witogram / octagram 兼容配置段）：
+#   language 指向 grammar/zh-moqi.gram（随 assets 部署）。上游白霜依赖
+#   non_collocation_penalty 做整句组词惩罚：默认 -12 对白霜词库惩罚过重，
+#   上游调为 -4（见 rime-frost 上游 schema 注释）。模型缺失时该段仅产生
+#   日志提示，不影响基础输入。
+grammar:
+  language: zh-moqi
+  non_collocation_penalty: -4
 
 # 次翻译器，英文
 melt_eng:

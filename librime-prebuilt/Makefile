@@ -7,7 +7,7 @@
 # 该 Makefile 提供 `make librime` 等构建入口，构建产物
 # 直接安装到 ziyou-ime/libs/ 目录，供 app 的 JNI 层链接。
 
-.PHONY: all librime clean distclean lua octagram predict
+.PHONY: all librime clean distclean lua octagram predict witogram
 
 # 默认目标：编译全部 ABI 的 librime.a
 all: librime
@@ -25,6 +25,9 @@ octagram:
 
 predict:
 	WITH_PREDICT=ON ./build.sh
+
+witogram:
+	WITH_WITOGRAM=ON ./build.sh
 
 # 只清理各 ABI 的中间构建目录（保留已安装到 libs/ 的产物与下载的 boost）
 clean:

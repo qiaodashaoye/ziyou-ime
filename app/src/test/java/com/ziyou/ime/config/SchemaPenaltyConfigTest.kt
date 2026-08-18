@@ -25,6 +25,8 @@ class SchemaPenaltyConfigTest {
     companion object {
         private val LUNA = File("src/main/assets/rime/luna_pinyin.schema.yaml")
         private val T9 = File("src/main/assets/rime/t9.schema.yaml")
+        private val FROST = File("src/main/assets/rime/rime_frost.schema.yaml")
+        private val GRAM_MODEL = File("src/main/assets/rime/grammar/zh-moqi.gram")
 
         /** 三条模糊音规则（平翘舌 + 前后鼻音双向），两方案必须一致 */
         private val FUZZY_PATTERNS = listOf(
@@ -155,6 +157,44 @@ class SchemaPenaltyConfigTest {
         assertFalse(
             "t9 不得挂载 lua_filter@*is_in_user_dict",
             T9.readText().contains("lua_filter@*is_in_user_dict")
+        )
+    }
+
+    @Test
+    fun `白霜方案必须保留 grammar 段（整句组词惩罚依赖）`() {
+        // 上游白霜依赖 grammar 段的 non_collocation_penalty 做整句组词惩罚：
+        // 默认 -12 对白霜词库惩罚过重，上游调为 -4；language 指向的
+        // zh-moqi 模型本身很小，但缺失该段会使惩罚机制整体失效。
+        // witogram/octagram 未编入时 poet.cc 判空静默降级，保留无害。
+        assertTrue("rime_frost.schema.yaml 不存在", FROST.exists())
+        val lines = FROST.readLines().map { it.trim() }
+        assertTrue(
+            "rime_frost 缺少 grammar/language: zh-moqi —— 缺失后 non_collocation_penalty 不生效",
+            lines.contains("language: zh-moqi")
+        )
+        assertTrue(
+            "rime_frost 缺少 non_collocation_penalty: -4 —— 默认 -12 对白霜词库惩罚过重",
+            lines.contains("non_collocation_penalty: -4")
+        )
+        assertTrue(
+            "rime_frost translator 缺少 grammar_penalty: -4（对齐上游整句语法惩罚）",
+            lines.any { it.startsWith("grammar_penalty: -4") }
+        )
+    }
+
+    @Test
+    fun `语法模型文件必须随 assets 部署`() {
+        // witogram 经 FallbackResourceResolver 回退 shared dir 解析
+        // grammar/zh-moqi.gram；AssetDeployer 递归拷贝 assets/rime 落位。
+        // 模型丢失时 grammar 段仅产生日志提示，但惩罚排序退化为默认权重，
+        // 属于静默体验降级，故在单测层拦截。
+        assertTrue(
+            "assets/rime/grammar/zh-moqi.gram 缺失 —— grammar 段将静默降级",
+            GRAM_MODEL.exists()
+        )
+        assertTrue(
+            "zh-moqi.gram 体积异常（预期 ~7MB，实际 ${GRAM_MODEL.length()} 字节），疑似文件损坏或误替换",
+            GRAM_MODEL.length() in 5_000_000..10_000_000
         )
     }
 }

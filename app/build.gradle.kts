@@ -32,8 +32,8 @@ android {
         // 16KB 页面对齐已通过链接参数启用，满足 Android 16 对 target 36 应用的强制要求
         targetSdk = 36
         // versionCode 变更会触发 AssetDeployer 重新部署（schema 变更/predict.db 需随升版生效）
-        // v12：T9 卸载 is_in_user_dict（用户词 comment 改写致预览脱钩修复）
-        versionCode = 12
+        // v13：rime_frost 接入 witogram 语法模型（grammar 段 + zh-moqi.gram 需重部署生效）
+        versionCode = 13
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -52,6 +52,11 @@ android {
                 // 支撑 rime-frost 方案的 lua_translator/lua_filter 组件；
                 // 同样必须与 librime-prebuilt 侧 WITH_LUA 开关一致（见迁移方案 3.1）
                 arguments("-DWITH_LUA=ON")
+                // 启用 librime-witogram 模块依赖声明（rime_require_module_witogram），
+                // 支撑 rime_frost 方案 grammar 段的整句组词惩罚；必须与
+                // librime-prebuilt 侧 WITH_WITOGRAM 开关一致（见 docs/
+                // librime-witogram集成可行性分析报告.md）
+                arguments("-DWITH_WITOGRAM=ON")
             }
         }
     }

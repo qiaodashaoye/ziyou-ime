@@ -22,6 +22,14 @@ function(bundle_static_library tgt_name bundled_tgt_name)
       set(_input_link_libraries INTERFACE_LINK_LIBRARIES)
     endif()
     get_target_property(public_dependencies ${input_target} ${_input_link_libraries})
+    # 补充收集 INTERFACE-only 依赖：部分第三方静态库（如 witogram 内嵌的
+    # sentencepiece-static）以 target_link_libraries(... INTERFACE ...) 声明
+    # 依赖（absl 别名目标链），仅存于 INTERFACE_LINK_LIBRARIES，不读则
+    # 合并产物缺符号。
+    get_target_property(_iface_dependencies ${input_target} INTERFACE_LINK_LIBRARIES)
+    if(_iface_dependencies)
+      list(APPEND public_dependencies ${_iface_dependencies})
+    endif()
     foreach(dependency ${public_dependencies})
       if(TARGET ${dependency})
         get_target_property(alias ${dependency} ALIASED_TARGET)

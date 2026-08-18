@@ -13,7 +13,8 @@
 #   ANDROID_PLATFORM               目标 API level（默认 24，与 minSdk 对齐）
 #   LIBRIME_SOURCE_DIR             librime 源码目录（默认 ./librime，子模块）
 #   LIBRIME_VERSION                当 LIBRIME_SOURCE_DIR 不存在时用于 clone 的 tag/commit/branch
-#   WITH_LUA / WITH_OCTAGRAM / WITH_PREDICT  设为 ON 以编译对应可选插件
+#   WITH_LUA / WITH_OCTAGRAM / WITH_PREDICT / WITH_WITOGRAM
+#                                     设为 ON 以编译对应可选插件
 #
 # 产物:
 #   ../libs/<abi>/librime.a       合并后的静态库
@@ -42,6 +43,7 @@ LIBRIME_VERSION="${LIBRIME_VERSION:-master}"
 WITH_LUA="${WITH_LUA:-OFF}"
 WITH_OCTAGRAM="${WITH_OCTAGRAM:-OFF}"
 WITH_PREDICT="${WITH_PREDICT:-OFF}"
+WITH_WITOGRAM="${WITH_WITOGRAM:-OFF}"
 
 BUILD_ROOT="${SCRIPT_DIR}/build"
 INSTALL_DIR="${ZIYOU_IME_DIR}/libs"
@@ -211,6 +213,32 @@ ensure_lua_sources() {
 ensure_lua_sources
 
 # ---------------------------------------------------------------------------
+# witogram 源码准备：librime-witogram 以 git submodule 形式纳管（含嵌套
+# 子模块 third_party/kenlm 与 third_party/sentencepiece）。fresh clone 后
+# 嵌套子模块为空，此处幂等初始化；已就绪时为零开销。
+# ---------------------------------------------------------------------------
+ensure_witogram_sources() {
+  if [ "${WITH_WITOGRAM}" != "ON" ]; then
+    return
+  fi
+  local plugin_dir="${SCRIPT_DIR}/plugins/librime-witogram"
+  if [ ! -f "${plugin_dir}/CMakeLists.txt" ]; then
+    echo "错误: 启用 WITH_WITOGRAM 需先引入 librime-witogram 子模块：" >&2
+    echo "  git submodule update --init --recursive librime-prebuilt/plugins/librime-witogram" >&2
+    exit 1
+  fi
+  if [ ! -f "${plugin_dir}/third_party/kenlm/CMakeLists.txt" ]; then
+    echo ">> 初始化 librime-witogram 嵌套子模块 (kenlm / sentencepiece) ..."
+    if ! git -C "${plugin_dir}" submodule update --init --recursive --depth=1; then
+      echo "错误: witogram 嵌套子模块拉取失败，请检查网络后重试。" >&2
+      exit 1
+    fi
+  fi
+}
+
+ensure_witogram_sources
+
+# ---------------------------------------------------------------------------
 # 逐 ABI 构建
 # ---------------------------------------------------------------------------
 JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
@@ -235,7 +263,8 @@ for ABI in "${ABIS[@]}"; do
     -DPREBUILT_INSTALL_DIR="${INSTALL_DIR}" \
     -DWITH_LUA="${WITH_LUA}" \
     -DWITH_OCTAGRAM="${WITH_OCTAGRAM}" \
-    -DWITH_PREDICT="${WITH_PREDICT}"
+    -DWITH_PREDICT="${WITH_PREDICT}" \
+    -DWITH_WITOGRAM="${WITH_WITOGRAM}"
 
   # 触发合并静态库（bundling_target 为 ALL 目标）
   "${CMAKE_BIN}" --build "${BUILD_DIR}" --parallel "${JOBS}"

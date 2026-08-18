@@ -12,6 +12,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(WITH_LUA "Enable Lua module" OFF)
 option(WITH_OCTAGRAM "Enable Octagram module" OFF)
 option(WITH_PREDICT "Enable Predict module" OFF)
+option(WITH_WITOGRAM "Enable Witogram grammar module" OFF)
 option(WITH_OPENCC "Enable OpenCC module" OFF)
 
 # librime 头文件和静态库路径
@@ -45,6 +46,9 @@ endif()
 if(WITH_PREDICT)
     add_definitions(-DWITH_PREDICT)
 endif()
+if(WITH_WITOGRAM)
+    add_definitions(-DWITH_WITOGRAM)
+endif()
 if(WITH_OPENCC)
     add_definitions(-DWITH_OPENCC)
 endif()
@@ -71,7 +75,9 @@ else()
         "See librime-prebuilt/README.md for build instructions.")
 endif()
 
-# 链接系统库
+# 链接系统库（z：witogram 内嵌 kenlm 的 gzip 解压路径依赖 zlib，
+# NDK sysroot 提供静态 libz.a）
 target_link_libraries(rime_jni
     log
+    z
 )

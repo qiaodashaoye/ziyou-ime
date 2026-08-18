@@ -14,8 +14,12 @@
 # sherpa-onnx 预编译 AAR（语音识别，经 scripts/fetch-sherpa-onnx.sh 下载）
 /app/libs/*.aar
 
-# librime-prebuilt 构建产物
-librime-prebuilt/superbuild/
+# librime-prebuilt 构建产物（用 /* 而非 /，以便下方例外规则生效）
+librime-prebuilt/superbuild/*
+# 例外：superbuild 的 CMake 工程定义是版本化构建逻辑（与 build.sh 同等
+# 地位），非可再生产物，必须入库（witogram 集成依赖其中的插件登记/
+# KENLM_MAX_ORDER/glog 接口收窄等定制）
+!librime-prebuilt/superbuild/CMakeLists.txt
 librime-prebuilt/boost/
 librime-prebuilt/boost-*.tar.xz
 # build.sh 安装到 libs/include 的依赖头文件（已合并进 librime.a，
