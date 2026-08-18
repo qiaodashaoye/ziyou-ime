@@ -27,11 +27,15 @@ object AssetDeployer {
      * 部署只覆盖不删除，升级后需主动清理旧安装残留，释放约 46MB 磁盘；
      * 这些文件不再被 luna_pinyin.dict.yaml 的 import_tables 引用，
      * 用户重新下载时写入 ext_dicts/ 目录，与本清理无冲突。
+     *
+     * 注意：cn_dicts/others.dict.yaml 曾在此清单，白霜迁移（2026-08）后
+     * 该文件名被 frost 杂项补充表复用并重新入包，继续清理会导致部署后
+     * 立即被删、rime_frost 编译失败（真机冒烟实证），故移除；
+     * 同名旧文件会被 copyAssetsRecursive 覆盖，无残留风险。
      */
     private val LEGACY_BUILTIN_DICTS = listOf(
         "cn_dicts/ext.dict.yaml",
-        "cn_dicts/tencent.dict.yaml",
-        "cn_dicts/others.dict.yaml"
+        "cn_dicts/tencent.dict.yaml"
     )
 
     fun deployIfNeeded(context: Context): Boolean {
