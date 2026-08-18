@@ -18,6 +18,15 @@
 librime-prebuilt/superbuild/
 librime-prebuilt/boost/
 librime-prebuilt/boost-*.tar.xz
+# build.sh 安装到 libs/include 的依赖头文件（已合并进 librime.a，
+# 与 .a 同为可再生产物；app JNI 仅需已跟踪的 rime 公共头文件）
+/libs/include/glog/
+/libs/include/gtest/
+/libs/include/leveldb/
+/libs/include/marisa/
+/libs/include/marisa.h
+/libs/include/opencc/
+/libs/include/yaml-cpp/
 
 # 发布签名（严禁入库）
 /keystore.properties
