@@ -144,4 +144,17 @@ class SchemaPenaltyConfigTest {
             zeroIdx > digitIdx
         )
     }
+
+    @Test
+    fun `九键不得挂载 is_in_user_dict（comment 改写切断预览读音源）`() {
+        // 回归守护：is_in_user_dict 把 user_phrase 的 comment 改写为 *，
+        // 用户词高亮时 PinyinHintProvider 读音源降级到兄弟扫描，曾复现
+        // 64426 高亮「你好」但预览显示 ni'gan 的脱钩（用户词升权修复
+        // max_homophones:4 后用户词频繁首位，触发面扩大）。九键预览
+        // 完整性优先于用户词标记；全拼 rime_frost 挂载不受影响（无预览依赖）
+        assertFalse(
+            "t9 不得挂载 lua_filter@*is_in_user_dict",
+            T9.readText().contains("lua_filter@*is_in_user_dict")
+        )
+    }
 }

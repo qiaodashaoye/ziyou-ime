@@ -32,8 +32,8 @@ android {
         // 16KB 页面对齐已通过链接参数启用，满足 Android 16 对 target 36 应用的强制要求
         targetSdk = 36
         // versionCode 变更会触发 AssetDeployer 重新部署（schema 变更/predict.db 需随升版生效）
-        // v11：默认方案切 rime_frost + cn_en 中英混输补齐
-        versionCode = 11
+        // v12：T9 卸载 is_in_user_dict（用户词 comment 改写致预览脱钩修复）
+        versionCode = 12
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

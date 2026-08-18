@@ -82,4 +82,8 @@
 # 兄弟扫描（64426 修复 ni'gan→ni'hao）、单字字典命中、字典未命中
 # 回退扫描、parseCustomPhrasePinyins 第四列解析容错（旧三列格式/
 # 非法拼音/重复词））
-596
+# 当前实测：:core-logic 340 + :app 257（2026-08-18，全绿、0 跳过；
+# 用户词预览脱钩回归守护：SchemaPenaltyConfigTest ×1（T9 不得挂载
+# is_in_user_dict——comment 改写为星号会切断预览读音源，用户词升权
+# 修复后触发面扩大））
+597

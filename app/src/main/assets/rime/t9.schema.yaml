@@ -63,7 +63,10 @@ engine:
     - predict_translator # librime-predict：翻译 prediction 段的预测候选
     - lua_translator@*force_gc        # 步进 GC，抑制大词库 + lua 的内存增长
   filters:
-    - lua_filter@*is_in_user_dict     # 用户词 * / 联想句 ∞ 标记（顺序：先于 corrector）
+    # 注意：is_in_user_dict 在九键刻意不挂载——它把 user_phrase 的 comment
+    # 改写为 *，会切断编码区预览的读音源（用户词高亮时 usableComment 降级
+    # 到兄弟扫描，曾复现 ni'gan 脱钩）；九键预览完整性优先于用户词标记，
+    # 全拼 rime_frost 保留该标记。SchemaPenaltyConfigTest 防回归门禁。
     - lua_filter@*corrector           # 错音错字提示（corrections 四列表，双写 rime_user）
     - simplifier@emoji                # Emoji 变换（emoji 开关控制，默认关）
     - simplifier@zh_trad
@@ -146,14 +149,6 @@ translator:
   dictionary: rime_frost
   enable_user_dict: true
   enable_sentence: true
-  # 候选容量参数（用户词升权缺陷修复）：librime 默认 max_homophones=1
-  # （script_translator.h），同码仅保留权重最高候选——九键一码多音下
-  # 同码候选密度远高于全拼，初次上屏的用户词（commit 权重有限）会被
-  # 白霜语料高频词直接挤出候选，表现为「学过的词不提升/不出现」。
-  # 取值对齐全拼 rime_frost 的上游调参（frost 全拼实测配置）；
-  # max_homographs 非 script_translator 参数，不配置。
-  max_homophones: 4
-  max_sentences: 3
   # 性能红线：此处刻意不开启 enable_correction。九键编码经 derive 映射后棱镜
   # 数字节点极稠密，而 NearSearchCorrector::ToleranceSearch（容错度硬编码 5）在
   # BuildSyllableGraph 中对每个顶点做邻键替换 BFS：数字键的邻键（keyboard_map）
@@ -185,9 +180,6 @@ emoji:
   option_name: emoji
   opencc_config: emoji.json
   inherit_comment: false       # emoji 候选空注释，防污染拼音提示
-
-# 用户词典标记（is_in_user_dict.lua 读取本开关；缺失时脚本默认 true）
-is_in_user_dict: true
 
 # 错音错字提示格式（corrector.lua 占位符，命中的纠错注音直接作 comment）
 corrector: "{comment}"
