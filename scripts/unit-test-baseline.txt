@@ -77,4 +77,9 @@
 # T9 首候选脱钩缺陷回归新增 PinyinHintProviderTest ×3：custom_phrase
 # 数字码无 comment 扫描同字数兄弟候选（64426 修复 mi'han→ni'hao）、
 # 用户词星号标记扫描下一可用 comment、同字数优先防单字读音越级错位）
-592
+# 当前实测：:core-logic 340 + :app 256（2026-08-18，全绿、0 跳过；
+# 固顶候选脱钩根治新增 PinyinHintProviderTest ×4：读音字典优先于
+# 兄弟扫描（64426 修复 ni'gan→ni'hao）、单字字典命中、字典未命中
+# 回退扫描、parseCustomPhrasePinyins 第四列解析容错（旧三列格式/
+# 非法拼音/重复词））
+596
