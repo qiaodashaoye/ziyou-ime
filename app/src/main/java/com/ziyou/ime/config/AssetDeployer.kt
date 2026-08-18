@@ -44,7 +44,11 @@ object AssetDeployer {
      */
     private val LEGACY_BUILTIN_DICTS = listOf(
         "cn_dicts/ext.dict.yaml",
-        "cn_dicts/tencent.dict.yaml"
+        "cn_dicts/tencent.dict.yaml",
+        // 2026-08 评估移除的九键自建短语表（31 条全部被白霜词表收录，固顶冗余）：
+        // 与上方 ext/tencent 不同，此项为真实移除而非外移，重建走 ext_dicts
+        // 扩展词库通道，不会以同名 assets 文件复用（无 others.dict.yaml 式撞车风险）
+        "custom_phrase_t9.txt"
     )
 
     fun deployIfNeeded(context: Context): Boolean {

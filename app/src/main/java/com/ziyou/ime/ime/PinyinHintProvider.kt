@@ -184,11 +184,14 @@ object PinyinHintProvider {
     /**
      * 解析 custom_phrase_t9.txt 的第四列拼音注释，构建 词→读音 字典。
      *
+     * 当前无调用方：custom_phrase_t9 已于 2026-08 评估移除（31 条全部被白霜
+     * 词表收录，固顶冗余）；保留本方法与 buildPreview 的 customPhrasePinyins
+     * 参数作为兼容能力——若未来重建数字编码短语表（个性化固顶需求），
+     * 可直接复用本链路避免再蹈 table 候选无拼音 comment 的读音脱钩坑。
+     *
      * librime 词条解析仅读前三列（table_db.cc rime_table_entry_parser），
-     * 第四列为客户端专用读音源：table_translator 候选无拼音 comment，
-     * 固顶短语高亮时经本字典取精确读音，保证编码区与首候选严格同源。
-     * 容错：注释行/空行跳过；少于四列的旧格式条目忽略；拼音含非字母
-     * （数字/标记码）丢弃；同词重复取首条。
+     * 第四列为客户端专用读音源。容错：注释行/空行跳过；少于四列的旧格式
+     * 条目忽略；拼音含非字母（数字/标记码）丢弃；同词重复取首条。
      */
     fun parseCustomPhrasePinyins(content: String): Map<String, String> {
         val result = LinkedHashMap<String, String>()

@@ -59,7 +59,6 @@ engine:
     - fallback_segmentor
   translators:
     - punct_translator
-    - table_translator@custom_phrase  # 数字编码自定义短语（custom_phrase_t9.txt，自建）
     - script_translator
     - predict_translator # librime-predict：翻译 prediction 段的预测候选
     - lua_translator@*force_gc        # 步进 GC，抑制大词库 + lua 的内存增长
@@ -168,14 +167,10 @@ translator:
   preedit_format:
     - xform/([nljqxy])v/$1ü/
 
-# 自定义短语：custom_phrase_t9.txt（frost 上游缺此文件，字由自建，数字编码）
-custom_phrase:
-  dictionary: ""
-  user_dict: custom_phrase_t9
-  db_class: stabledb
-  enable_completion: false
-  enable_sentence: false
-  initial_quality: 99
+# 自定义短语说明：custom_phrase_t9 已于 2026-08 评估后移除——31 条短语全部
+# 已被白霜核心词表收录（权重 0~179 万，语料重统计），固顶冗余且曾引发
+# 编码区读音脱钩链（table 候选无拼音 comment）；固顶需求由白霜词频天然
+# 承担，个性化固顶未来走 ext_dicts 扩展词库通道。见评估报告。
 
 # Emoji（对齐全拼 rime_frost 的 emoji 配置；表文件随 assets 部署）
 emoji:
