@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.android.library)
+    `maven-publish`
 }
 
 /**
@@ -77,6 +78,11 @@ android {
             isReturnDefaultValues = true
         }
     }
+
+    // 注册 release 变体为可发布组件（maven-publish 的 components["release"] 前置条件）
+    publishing {
+        singleVariant("release")
+    }
 }
 
 dependencies {
@@ -89,3 +95,26 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.mockk)
 }
+
+// ===== AAR 发布（docs/SDK模块拆分重构方案.md §6.2）=====
+// 坐标：com.ziyou:rime-sdk:<version>，版本经 -PrimeSdk.version=x.y.z 覆盖；
+// 与宿主 versionCode 解耦（部署版本由宿主经 RimeSdkConfig.deployVersion 显式传入）。
+// 本地验收：./gradlew :rime-sdk:publishToMavenLocal
+group = "com.ziyou"
+version = (project.findProperty("rimeSdk.version") as String?) ?: "0.1.0-SNAPSHOT"
+
+afterEvaluate {
+    publishing {
+        publications {
+            create<MavenPublication>("release") {
+                from(components["release"])
+                artifactId = "rime-sdk"
+                pom {
+                    name.set("ZiYou Rime SDK")
+                    description.set("librime 交互与输入法通用基础能力（引擎/JNI/输入管线/状态服务）")
+                }
+            }
+        }
+    }
+}
+

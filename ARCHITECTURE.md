@@ -5,10 +5,13 @@
 
 ## 架构概览
 
-字由输入法按 **Gradle 多模块** 组织：`:app`（Android 应用 + JNI/引擎集成 + UI + 业务域持久化）
-与 `:core-logic`（纯 Kotlin 逻辑库，无 Android UI / 无 JNI 依赖）。依赖方向 `:app → :core-logic` 单向、
-由编译器强制。`:app` 内部沿用经典的 **五层引擎栈**（UI → IME → Core → JNI → Engine），
-并横向扩展四个**业务域**（等级体系、扩展词库、九宫格 T9 输入、技能插件），可复测的纯逻辑下沉到 `:core-logic`：
+字由输入法按 **Gradle 多模块** 组织（SDK 拆分重构后，蓝图与迁移记录见
+[docs/SDK模块拆分重构方案.md](docs/SDK模块拆分重构方案.md)）：`:app`（Android 应用：UI + 业务域）
+依赖 `:rime-sdk`（底层 SDK：librime 交互 + JNI/native + 通用输入基础能力，可打包 AAR 独立集成），
+单向、由编译器强制。五层引擎栈（UI → IME → Core → JNI → Engine）中 Core/JNI/Engine 三层与
+通用输入管线物理位于 `:rime-sdk`；`:app` 内横向扩展四个**业务域**（等级体系、扩展词库、
+九宫格 T9 输入、技能插件），T9 状态机与 prediction 纯逻辑随输入管线位于 `:rime-sdk`，
+其余业务纯逻辑位于 `:app`（原 `:core-logic` 模块已撤销分流）：
 
 ```
 ┌───────────────────────────── :app 模块 ──────────────────────────────┐
@@ -58,13 +61,23 @@
 │  LevelStats(热路径)  │  DictDownloader     │  T9PinYinUtils*(双向映射)   │
 │  LevelEngine*(计分)  │  DictModels         │  SideSymbolRepository       │
 └────────────────────┴────────────────────┴───────────────────────────┘
-      *标注项已下沉到 :core-logic 模块（纯逻辑）；第四个业务域 skill/ 技能插件
+      *标注项中 KeyRecordStack/T9PinYinUtils 已随输入管线迁入 :rime-sdk，
+      LevelEngine 随业务分流留 :app；第四个业务域 skill/ 技能插件
       （SkillManager · SkillBridge · SkillRuntime · SkillPackageInstaller ·
-      SkillWebViewFactory）见下文「技能插件系统」一节，其纯校验逻辑位于 :core-logic 的 core/skill
+      SkillWebViewFactory）见下文「技能插件系统」一节，其纯校验逻辑位于 :app 的 core/skill
 ```
 
-**依赖方向**：`:app` → `:core-logic`（单向）；`:app` 内 UI → IME → Core → JNI → Engine（单向向下）。
-业务域由 IME 层（输入热路径）与 UI 层（管理界面）调用，纯逻辑经 `:core-logic` 复用，持久化与引擎调用仍落在 `:app`。
+> **SDK 拆分后的物理布局（P1~P5 已落地）**：上图中 Core 层（RimeApi/SimpleRimeImpl/
+> RimeDispatcher/RimeEngine/RimeSession/RimeConfigManager/AssetDeployer）、JNI 层、Engine 层
+> 与通用输入管线（sdk/input：InputSession + CommitSink/InputHostAdapter + EnterKeyBehavior；
+> sdk/state：PreeditController/CandidatesService/SchemaService 状态服务）位于 `:rime-sdk`，
+> 门面为 `RimeSdk`/`RimeSdkConfig`；JNI 源码在 `rime-sdk/src/main/jni/librime_jni/`，
+> CMake 链入仓库根 `libs/<abi>/librime.a`（相对路径因目录深度不变未改）。
+> 迁移期约束：迁入类保持原包名（`com.ziyou.ime.core/daemon/config`），JNI 符号零改动。
+
+**依赖方向**：`:app` → `:rime-sdk`（单向，编译器强制）；引擎栈内部 UI → IME → Core → JNI → Engine（单向向下）。
+业务域由 IME 层（输入热路径）与 UI 层（管理界面）调用，经 `RimeSdk` 门面与状态服务获取输入数据；
+上屏目的地经 `CommitSink` 由宿主注入（依赖反转，SDK 不感知 `InputConnection`），持久化与业务编排在 `:app`。
 
 ## 设计原则
 
@@ -103,9 +116,11 @@ JNI 层使用 C++ RAII 避免资源泄漏：`SessionHolder`（会话）、`CStri
 - `commitListeners`：编辑器路径上屏后的横切监听（如等级计分），输入热路径（InputLogicController）
   不硬编码业务单例，回调参数仅为脱敏码点数。
 
-### 8. 纯逻辑模块化
-无 Android/JNI 依赖的纯逻辑（T9 映射、九宫格状态机、等级计分）下沉到独立 `:core-logic` 模块。
-依赖方向 `:app → :core-logic` 由编译器强制，纯逻辑得以脱离 Android 运行时做快速单元测试。
+### 8. 纯逻辑模块化与 SDK 拆分
+引擎交互与输入法通用能力（T9 映射、九宫格状态机、输入管线、prediction 纯逻辑）位于 `:rime-sdk`
+（可打包 AAR 独立集成）；业务纯逻辑（等级计分、技能校验等）位于 `:app`。
+依赖方向 `:app → :rime-sdk` 由编译器强制，边界清晰且纯逻辑可脱离 Android 运行时做快速单元测试
+（原 `:core-logic` 模块已撤销，内容按「能力 vs 内容/业务」分流）。
 
 ## 模块详细说明
 
@@ -269,7 +284,7 @@ onDestroy()
   经 `Callbacks` 上抛按键/切换/侧栏等交互，`install()` 返回构造好的视图引用供 Service 持有。
 - **PinyinHintProvider**（`ime/PinyinHintProvider.kt`）：九宫格拼音候选与编码区预览的纯逻辑（依赖 `ContextProto` 与 `T9PinYinUtils`），可独立单测。
 - **DisplayModeController**（`ime/DisplayModeController.kt`）：停靠/悬浮形态解析（手动覆盖 > 总开关 > 横屏自动）、
-  形态切换与悬浮窗口 insets（几何计算委托 :core-logic 的 `FloatingPanelGeometry`）；经 `Host` 回调 Service 重建视图与重同步引擎。
+  形态切换与悬浮窗口 insets（几何计算委托 :app 的 `FloatingPanelGeometry`）；经 `Host` 回调 Service 重建视图与重同步引擎。
 - **SkillPanelCoordinator**（`ime/SkillPanelCoordinator.kt`）：技能面板生命周期（打开/关闭/WebView 释放）与三态布局编排
   （键盘叠层 / 提升挂载 / 收缩态，高度守恒）；经 `Host` 访问容器引用并切换 `commitTarget` 输入路由。
 
@@ -310,9 +325,9 @@ Android KeyEvent.keyCode → KeyCode.androidKeyCodeToRimeKeyCode() → X11 Keysy
 
 ### 业务域模块
 
-#### 等级体系 (level/ + :core-logic)
+#### 等级体系 (level/)
 ```
-LevelEngine     纯函数计分引擎（无状态无 IO）；**位于 :core-logic 模块 `com.ziyou.ime.core.level`**，
+LevelEngine     纯函数计分引擎（无状态无 IO）；**位于 :app `com.ziyou.ime.core.level`**（SDK 拆分时随业务分流），
                 已解耦对 ThemeManager 的依赖（主题名以字面量声明）：分段计分、连续签到奖励、1–10 级门槛、主题/音效解锁规则
 LevelRepository （:app，level/）SharedPreferences 持久化（LevelState 单一数据源）：accumulate 结算积分、checkInToday 幂等签到
 LevelStats      （:app，level/）热路径入口：onCommit 仅 O(1) 原子自增，达 50 次提交/200 字阈值或 flush 时后台异步落盘
@@ -337,15 +352,15 @@ DictManagerViewModel / DictManagerActivity  Compose 管理界面：分类浏览�
   杜绝恶意 `id`（如 `../../`）拼接文件名造成的路径穿越写盘；`catalog.json` 可选提供 `sha256`，
   `DictDownloader` 下载后校验，不匹配则删除并拒绝安装，防止镜像投毒/传输篡改的词库注入主词库（`sha256` 为空则跳过，向后兼容）。
 
-#### 九宫格 T9 支撑 (:core-logic + :app)
-- **T9PinYinUtils**（:core-logic，`com.ziyou.ime.util`）：T9 数字键 ↔ 拼音双向映射（`t9KeyToPinyin` 由长到短匹配去重，`pinyin2Key` O(1) 反查，
+#### 九宫格 T9 支撑 (:rime-sdk + :app)
+- **T9PinYinUtils**（:rime-sdk，`com.ziyou.ime.util`）：T9 数字键 ↔ 拼音双向映射（`t9KeyToPinyin` 由长到短匹配去重，`pinyin2Key` O(1) 反查，
   `getT9Composition` 编码格式化）。对外统一以「数字键 2–9」为规范表示，内部转「组代表字母」查表。
-- **KeyRecordStack**（:core-logic，`com.ziyou.ime.core.t9`，含 `ReplaceCommand` / `InputKey`）：九宫格输入状态机。核心不变式 —— **列表顺序 == Rime 编码串逻辑顺序**：
+- **KeyRecordStack**（:rime-sdk，`com.ziyou.ime.core.t9`，含 `ReplaceCommand` / `InputKey`）：九宫格输入状态机。核心不变式 —— **列表顺序 == Rime 编码串逻辑顺序**：
   键入数字追加 `T9Key`；选定拼音用 `PinyinKey` **原地替换**首个 T9Key 段（使已锁定拼音始终排在剩余数字之前）；
   智能退格解锁尾部拼音还原为数字段。返回 `ReplaceCommand(caretPos, length, replacement)` 供 `RimeApi.replaceKey`。
 - **SideSymbolRepository**（:app，`com.ziyou.ime.data`）：拼音侧栏自定义符号（SharedPreferences + JSON 持久化，默认常用标点）。
 
-#### 应用更新 (update/ + :core-logic/util)
+#### 应用更新 (update/ + :app/util)
 基于蒲公英（Pgyer）应用分发平台的 in-app 更新（API 2.0，文档见 https://www.pgyer.com/doc/view/api）：
 ```
 UpdateConfig        接入配置（API Key/App Key，未配置时更新功能整体关闭）与频控/限流常量
@@ -360,7 +375,7 @@ UpdateDialogHelper  纯代码弹窗：新版本提示 / 下载进度 / 安装权
   避免抢占启动期资源）；结果暂存为待更新快照，由前台 Activity（设置页/引导页）弹窗，
   每进程最多一次；键盘输入法服务不参与任何更新逻辑，不干扰输入热路径；
 - **版本对比**：优先数字版本号（远端 buildVersionNo vs 本地 versionCode），缺失时回退
-  versionName 逐段比较（:core-logic `AppVersionUtils`，含单测）；
+  versionName 逐段比较（:app `AppVersionUtils`，含单测）；
 - **失败处理**：检测失败计入频控避免反复重试；下载失败清理 .part 半成品并提示重试；
   「忽略该版本」仅屏蔽自动提示，手动检查仍展示；
 - 下载地址不经固定白名单（蒲公英 CDN 域名动态），以鉴权 API 响应为信任源，仅卡 HTTPS 协议。
@@ -389,7 +404,7 @@ UpdateDialogHelper  纯代码弹窗：新版本提示 / 下载进度 / 安装权
 #### 联想优化层（LLM 缓存/流式/预热/预取/攒批，docs/联想功能优化调研与方案.md Phase 0~3）
 在引擎联想与 LLM 续写之上的横切增强，全部受 LLM 预测开关管辖、热路径零磁盘 IO：
 ```
-:core-logic core/prediction（纯逻辑，全部单测覆盖）
+:rime-sdk core/prediction（纯逻辑，全部单测覆盖）
   ContextLruCache    扩容 256 + snapshot/restore/recentKeys（持久化与预热支撑）
   StreamCandidateText 流式候选增量行解析（任意截断分片与整包解析等价）
   AdoptionRecord     采纳词对攒批（1~4 字纯汉字计数，500×8 容量，运行时不排序）
@@ -405,7 +420,7 @@ UpdateDialogHelper  纯代码弹窗：新版本提示 / 下载进度 / 安装权
 隐私口径：持久化仅限候选词与脱敏词对计数，不含编辑器原文；`reset()` 不再清缓存
 （跨会话复用），词窗口与限流窗口仍随会话清空。
 
-#### 技能插件系统 (skill/ + :core-logic/core/skill + assets/skill_runtime)
+#### 技能插件系统 (skill/ + :app/core/skill + assets/skill_runtime)
 基于 WebView 沙箱的可扩展技能面板（计算器/天气/星座等小工具，开发者指南见
 [docs/技能插件开发指南.md](docs/技能插件开发指南.md)）：
 ```
@@ -417,7 +432,7 @@ SkillWebViewFactory   安全基线统一收口：资源全量拦截（仅放行�
 SkillBridge           JS 单入口窄面 Bridge（__IMESkillNative.postMessage），全异步 Promise，异常全量兑底不波及 IME
 SkillRuntime          能力实现层：权限检查、storage（串行 IO 线程读写，限额 1MB）、fetch 代理
                       （HTTPS + 域名白名单小写/IDN 归一化 + 禁重定向 + 频控/限额）、剪贴板、输入路由
-core/skill/*          纯校验逻辑（:core-logic 可单测）：SkillManifestValidator（含 HOST_API_VERSION）、
+core/skill/*          纯校验逻辑（:app 可单测）：SkillManifestValidator（含 HOST_API_VERSION）、
                       ZipEntryValidator、SkillVersionComparator、SkillPermission
 ```
 - 面板由 IME 层 `SkillPanelCoordinator` 编排三态布局（键盘叠层 / needs_input 提升挂载 / 收缩态，IME 窗口总高守恒）；
@@ -430,7 +445,7 @@ core/skill/*          纯校验逻辑（:core-logic 可单测）：SkillManifest
 - 形态解析优先级：手动覆盖（本次服务生命周期） > 悬浮总开关 > 横屏自动悬浮（`DisplayModeManager` 持久化）；
 - 悬浮时内容包裹进 `FloatingPanelContainer`（拖拽/位置持久化/停靠按钮），键盘/候选/编码区统一缩放；
 - 窗口 insets：内容 inset 压到容器底部（宿主应用视键盘高度为 0，游戏画面不被顶起），
-  触摸区域裁剪为面板矩形、面板外穿透；几何计算下沉 :core-logic 的 `FloatingPanelGeometry`（纯逻辑可单测）；
+  触摸区域裁剪为面板矩形、面板外穿透；几何计算位于 :app 的 `FloatingPanelGeometry`（纯逻辑可单测）；
 - 全局禁用全屏提取模式（`onEvaluateFullscreenMode() = false`），横屏下保留原应用画面。
 
 ## 数据流
@@ -497,16 +512,17 @@ JNI 回调经 `SharedFlow.tryEmit()` 线程安全传递；引擎初始化的资�
 
 ## 测试策略
 
-纯逻辑下沉到 `:core-logic` 后可脱离 Android 运行时做 JVM 单元测试；`:app` 侧对不依赖 framework 的纯逻辑也做单测。
+纯逻辑按归属分流后可脱离 Android 运行时做 JVM 单元测试：`:rime-sdk` 侧覆盖引擎交互与 T9/prediction 纯逻辑，`:app` 侧覆盖业务纯逻辑。
 
 | 模块 | 测试类 | 用例数 | 覆盖 |
 |------|--------|--------|------|
-| `:core-logic` | `T9PinYinUtilsTest` | 7 | T9↔拼音双向映射、去重保序、非法输入、往返一致性 |
-| `:core-logic` | `KeyRecordStackTest` | 7 | 选词原地替换、多音节偏移、智能退格还原、非法/不匹配 |
-| `:core-logic` | `LevelEngineTest` | 11 | 分段计分/封顶、签到奖励、等级判定与进度、权益解锁 |
+| `:rime-sdk` | `T9PinYinUtilsTest` | 7 | T9↔拼音双向映射、去重保序、非法输入、往返一致性 |
+| `:rime-sdk` | `KeyRecordStackTest` | 7 | 选词原地替换、多音节偏移、智能退格还原、非法/不匹配 |
+| `:rime-sdk` | `StateServicesTest` | 8 | PreeditState 空值规范/字段映射、CandidatesSnapshot 联想态判定 |
+| `:app` | `LevelEngineTest` | 11 | 分段计分/封顶、签到奖励、等级判定与进度、权益解锁 |
 | `:app` | `PinyinHintProviderTest` | 13 | 数字段还原拼音、回退 comment、预览优先高亮候选、空上下文 |
 
-运行：`./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest`（用例总数以 `scripts/unit-test-baseline.txt` 为准，发布脚本会比对实测值，低于基线即失败）。
+运行：`./gradlew :rime-sdk:testDebugUnitTest :app:testDebugUnitTest`（用例总数以 `scripts/unit-test-baseline.txt` 为准，发布脚本会比对实测值，低于基线即失败）。
 引擎接口化后，涉及引擎的逻辑可通过 `AppContainer.overrideRimeEngine()` 注入 fake 实现进行测试。
 
 ## 关键设计决策
@@ -540,20 +556,22 @@ Rime 只组织光标之前的编码片段。若把选定拼音追加到编码串
 `ZiYouInputMethodService`、设置页、词库页原先都硬依赖 `RimeSession` 全局单例，无法注入替身、难以测试。
 抽出 `RimeEngine` 接口并经 `AppContainer` 提供后，调用方依赖接口，测试可注入 fake，且为未来多引擎/多会话留出空间。
 
-### 8. 为什么拆出 :core-logic 模块？
-纯逻辑与 Android/JNI 混在单模块时，任何改动都触发整模块（含 NDK 链路）重编译，且纯逻辑难以隔离测试。
-下沉到 `:core-logic` 后，依赖边界由编译器强制（`:app → :core-logic`），纯逻辑可快速 JVM 单测，增量构建更友好。
+### 8. 为什么拆出 :rime-sdk 模块（原 :core-logic 的演进）？
+引擎交互与 Android/JNI 混在单模块时，任何改动都触发整模块（含 NDK 链路）重编译，且引擎能力无法被其他应用复用。
+拆出 `:rime-sdk` 后，依赖边界由编译器强制（`:app → :rime-sdk`），纯逻辑可快速 JVM 单测、增量构建更友好，
+且 SDK 可打包 AAR 独立集成；原 `:core-logic` 的业务纯逻辑随分流回归 `:app`。
 
 ## 如何扩展
 
 ### 添加新的 JNI 函数
-1. 在 `rime_jni.cc` 添加 `Java_com_ziyou_ime_core_RimeNative_yourNewMethod` 导出函数
+1. 在 `rime-sdk/src/main/jni/librime_jni/rime_jni.cc` 添加 `Java_com_ziyou_ime_core_RimeNative_yourNewMethod` 导出函数
 2. 在 `RimeNative.kt` 声明对应 `@JvmStatic external fun`
 3. 在 `RimeApi.kt` 增接口方法，`SimpleRimeImpl.kt` 中经 `dispatcher.dispatch` 实现
 
 ### 添加可复用纯逻辑
-无 Android/JNI 依赖的算法/状态机/计分等逻辑应放入 `:core-logic`（如 `com.ziyou.ime.util` / `core.t9` / `core.level`），
-并在同模块 `src/test` 下补单元测试；`:app` 通过 `implementation(project(":core-logic"))` 依赖，切勿反向依赖。
+按「能力 vs 业务」分流：输入法通用能力（引擎交互、T9、候选/编码语义）放 `:rime-sdk`，
+业务纯逻辑（计分、技能校验等）放 `:app`，均应在同模块 `src/test` 下补单元测试；
+`:app` 通过 `api(project(":rime-sdk"))` 依赖，切勿反向依赖。
 
 ### 添加新的键盘布局
 1. 在 `KeyboardType` 枚举追加一项

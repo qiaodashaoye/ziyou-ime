@@ -7,7 +7,7 @@
 - **输入引擎**：librime（从源码交叉编译并合并为单个静态库，完全独立）
 - **界面**：键盘/候选区使用纯 Canvas 绘制（传统 View）；设置内的等级页、扩展词库页使用 Jetpack Compose (Material3)
 - **语言**：Kotlin + Kotlin 协程，JNI 层 C++17（RAII 资源管理）
-- **架构**：Gradle 多模块（`:app` + 纯逻辑库 `:core-logic`）；五层引擎栈 + 业务域；引擎经 `RimeEngine` 接口 + 轻量 DI 容器（`AppContainer`）解耦，核心纯逻辑独立单元测试
+- **架构**：Gradle 多模块（`:app` + 底层 SDK `:rime-sdk`，可打包 AAR 独立集成）；五层引擎栈 + 业务域；引擎经 `RimeEngine` 接口 + 轻量 DI 容器（`AppContainer`）解耦，核心纯逻辑独立单元测试
 
 ## 特性一览
 
@@ -22,7 +22,7 @@
 - **编码区职责分离**：编码区（preedit）与候选词列表拆分为独立视图，垂直堆叠、互不干扰
 - **单线程安全**：所有 Rime 调用通过专属协程 Dispatcher 顺序执行，规避 librime 非线程安全问题
 - **隐私优先**：等级统计仅记录脱敏聚合计数（字数/天数），绝不记录任何输入内容，数据仅存本机
-- **模块化与可测试**：纯逻辑（T9 映射、九宫格状态机、等级计分）下沉到独立 `:core-logic` 模块并覆盖单元测试；引擎接口化（`RimeEngine`）+ DI 容器便于替换与测试
+- **模块化与可测试**：引擎交互与通用输入能力（T9 映射、九宫格状态机、输入管线、prediction）位于 `:rime-sdk`，业务纯逻辑（等级计分等）位于 `:app`，均覆盖单元测试；引擎接口化（`RimeEngine`）+ DI 容器便于替换与测试
 
 ## 支持的输入方案
 
@@ -42,7 +42,7 @@
 - **NDK** r26+（用于编译 JNI 层，推荐 r26c）
 - **CMake** 3.22.1
 - **Kotlin / AGP / Compose**：Kotlin 2.2（由 AGP 内置 Kotlin 提供）、Android Gradle Plugin 9.x、Compose BOM 2026.02.01（Material3）
-- **Gradle 模块**：`:app`（应用 + JNI/引擎集成 + UI）与 `:core-logic`（纯 Kotlin 逻辑库，`com.android.library` 形态，无 Android UI / 无 JNI 依赖）
+- **Gradle 模块**：`:app`（应用：UI + 业务域）与 `:rime-sdk`（底层 SDK：librime 交互 + JNI/native + 通用输入基础能力，`com.android.library` 形态，可经 maven-publish 打包 AAR）
 
 > 当前构建仅打包 `arm64-v8a` ABI（见 [`app/build.gradle.kts`](app/build.gradle.kts) 的 `abiFilters`）。
 > 如需其它 ABI，请同时编译对应的 `librime.a` 并在 `abiFilters` 中追加。
@@ -89,8 +89,8 @@ libs/
 # 安装到设备
 adb install app/build/outputs/apk/debug/app-debug.apk
 
-# 运行单元测试（纯逻辑模块 + App）
-./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest
+# 运行单元测试（SDK 模块 + App）
+./gradlew :rime-sdk:testDebugUnitTest :app:testDebugUnitTest
 ```
 
 ### 4. 启用输入法
@@ -186,17 +186,17 @@ android {
 
 ### 模块化构建
 
-项目按 Gradle 多模块组织，依赖方向单向向下（`:app → :core-logic`，由编译器强制边界）：
+项目按 Gradle 多模块组织，依赖方向单向向下（`:app → :rime-sdk`，由编译器强制边界）：
 
-- `:app`：Android 应用，包含 JNI/引擎集成、IME 服务、UI 与业务域持久化，依赖 `:core-logic`
-- `:core-logic`：纯 Kotlin 逻辑库（`com.android.library` 形态，复用 AGP 内置 Kotlin），不含任何 Android UI / JNI 依赖，承载 T9 映射、九宫格状态机、等级计分等可独立单测的纯逻辑
+- `:app`：Android 应用，包含 IME 服务、UI 与业务域持久化，依赖 `:rime-sdk`
+- `:rime-sdk`：底层 SDK（`com.android.library` 形态），承载五层引擎栈的 Core/JNI/Engine 层与通用输入管线（InputSession/状态服务/RimeSdk 门面），含 T9 状态机与 prediction 纯逻辑，可打包 AAR 独立集成（见 docs/SDK模块拆分重构方案.md）
 
 ```bash
-# 仅编译/测试纯逻辑模块
-./gradlew :core-logic:testDebugUnitTest
+# 仅编译/测试 SDK 模块
+./gradlew :rime-sdk:testDebugUnitTest
 
 # 编译并测试整个工程
-./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest
+./gradlew :rime-sdk:testDebugUnitTest :app:testDebugUnitTest
 ```
 
 > 首次同步会拉取 `com.android.library` 插件 marker；离线环境请先在联网时同步一次。
@@ -279,20 +279,21 @@ ziyou-ime/
 │       │   │   ├── PinyinSideBarView.kt   # 九宫格拼音/符号侧栏
 │       │   │   ├── SimpleCandidatesView.kt # 候选词横条
 │       │   │   ├── PreeditOverlayView.kt  # 编码区（与候选词分离）
-│       │   │   ├── KeyboardType.kt / KeyCode.kt
+│       │   │   ├── KeyboardType.kt
 │       │   ├── data/SideSymbol.kt          # 侧栏符号仓库（SharedPreferences）
 │       │   ├── dict/                       # 扩展词库：DictManager / DictDownloader / DictModels
 │       │   ├── level/                      # 等级持久化：LevelRepository / LevelStats / LevelState
 │       │   └── ui/                         # SettingsActivity / LevelActivity / DictManagerActivity(+VM)
-│       ├── jni/librime_jni/               # C++/JNI 层
-│       │   ├── rime_jni.cc / config.cc / session.h / jni-utils.h / objconv.h / helper-types.h
-│       │   └── CMakeLists.txt            # Native 构建配置
 │       └── res/                           # Android 资源（含 input_method.xml）
-├── core-logic/                        # 纯逻辑模块（无 Android UI / 无 JNI 依赖，可独立单测）
-│   └── src/{main,test}/java/com/ziyou/ime/
-│       ├── util/T9PinYinUtils.kt          # T9 ↔ 拼音双向映射
-│       ├── core/t9/KeyRecordStack.kt      # 九宫格输入状态机（+ ReplaceCommand / InputKey）
-│       └── core/level/LevelEngine.kt      # 等级计分纯引擎（无状态无 IO）
+├── rime-sdk/                          # 底层 SDK 模块（librime 交互 + 通用输入能力，交付 AAR）
+│   └── src/{main,test}/
+│       ├── jni/librime_jni/               # C++/JNI 层（rime_jni.cc / config.cc / CMakeLists.txt）
+│       └── java/com/ziyou/ime/
+│           ├── core/                       # RimeNative / RimeApi / Proto / Dispatcher + t9 + prediction
+│           ├── daemon/                     # RimeEngine / RimeSession / RimeDeployStep
+│           ├── config/                     # AssetDeployer / RimeConfigManager
+│           ├── sdk/                        # RimeSdk 门面 + input/InputSession + state 状态服务
+│           └── util/T9PinYinUtils.kt      # T9 ↔ 拼音双向映射
 ├── dicts-repo/                        # 扩展词库源仓库（catalog.json + dicts/*.dict.yaml）
 ├── libs/                              # 预编译 librime（按 ABI 分目录，由 librime-prebuilt 生成）
 ├── librime-prebuilt/                  # librime 预编译模块（源码交叉编译 + 合并为 librime.a）
