@@ -356,6 +356,63 @@ ziyou-ime/
 clang-format -i ../ziyou-ime-sdk/src/main/jni/librime_jni/*.cc ../ziyou-ime-sdk/src/main/jni/librime_jni/*.h
 ```
 
+## 致谢与开源项目
+
+字由输入法站在众多优秀开源项目的肩膀之上，在此向所有原作者与社区贡献者致以诚挚的感谢。
+
+### 输入引擎与插件
+
+| 项目 | 用途 | 许可证 | 仓库 |
+|------|------|--------|------|
+| librime | Rime 输入引擎核心，源码交叉编译合并为单个静态库 `librime.a` | GPL-3.0 | [rime/librime](https://github.com/rime/librime) |
+| librime-predict | 引擎级联想插件，基于 `predict.db` 做下一词预测 | BSD-3-Clause | [rime/librime-predict](https://github.com/rime/librime-predict) |
+| librime-lua | Lua 脚本插件，支撑方案内的 Lua 扩展逻辑 | BSD-3-Clause | [hchunhui/librime-lua](https://github.com/hchunhui/librime-lua) |
+| Lua 5.4 | librime-lua 内嵌的脚本解释器源码 | MIT | [lua.org](https://www.lua.org/) |
+| librime-witogram | 语法模型插件，挂载 `zh-moqi.gram` 提升整句组句质量 | GPL-3.0 | [amzxyz/librime-witogram](https://github.com/amzxyz/librime-witogram) |
+| KenLM | witogram 内嵌的高性能 N-gram 语言模型推理框架 | LGPL-2.1 | [kpu/kenlm](https://github.com/kpu/kenlm) |
+| SentencePiece | witogram 内嵌的分词组件 | Apache-2.0 | [google/sentencepiece](https://github.com/google/sentencepiece) |
+
+### librime 静态链接依赖（经 ziyou-ime-sdk 内 `librime-prebuilt` 工具链从源码交叉编译并合并进 `librime.a`）
+
+| 项目 | 用途 | 许可证 | 仓库 |
+|------|------|--------|------|
+| Boost | librime 核心依赖（regex / signals2 等模块化头文件库） | BSL-1.0 | [boostorg/boost](https://github.com/boostorg/boost) |
+| glog | 引擎日志库 | BSD-3-Clause | [google/glog](https://github.com/google/glog) |
+| yaml-cpp | Rime 方案/词库 YAML 配置解析 | MIT | [jbeder/yaml-cpp](https://github.com/jbeder/yaml-cpp) |
+| LevelDB | 用户词库/用户词典存储 | BSD-3-Clause | [google/leveldb](https://github.com/google/leveldb) |
+| marisa-trie | 词库前缀树（Trie）数据结构 | BSD-2-Clause / LGPL-2.1（双许可） | [s-ytsutk/marisa-trie](https://github.com/s-ytsutk/marisa-trie) |
+| OpenCC | 开放中文转换（繁简转换） | Apache-2.0 | [BYVoid/OpenCC](https://github.com/BYVoid/OpenCC) |
+
+### 语音识别
+
+| 项目 | 用途 | 许可证 | 仓库 |
+|------|------|--------|------|
+| sherpa-onnx | 本地流式语音识别引擎（预编译 AAR 1.13.3） | Apache-2.0 | [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) |
+| streaming-zipformer 中文/中英双语模型 | 按需下载的流式识别模型权重（HuggingFace `csukuangfj/*` 仓库） | Apache-2.0（随各自仓库许可分发） | [sherpa-onnx 模型库](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) |
+
+### Android / JVM 依赖（版本集中于 [`gradle/libs.versions.toml`](gradle/libs.versions.toml)）
+
+| 项目 | 用途 | 许可证 | 仓库 |
+|------|------|--------|------|
+| Kotlin & kotlinx.coroutines | 主开发语言与协程异步调度（Rime 单线程 Dispatcher） | Apache-2.0 | [JetBrains/kotlin](https://github.com/JetBrains/kotlin) · [kotlinx.coroutines](https://github.com/Kotlin/kotlinx.coroutines) |
+| Jetpack Compose (Material3) | 等级/词库/技能/皮肤等设置页面 UI | Apache-2.0 | [compose-multiplatform](https://github.com/JetBrains/compose-multiplatform) |
+| AndroidX（core-ktx / appcompat / lifecycle / preference / webkit / customview） | 设置页、偏好存储、技能面板 WebView 沙箱、候选区无障碍 | Apache-2.0 | [androidx](https://developer.android.com/jetpack/androidx) |
+| JUnit / MockK / org.json | 单元测试框架与 JSON 解析测试依赖 | EPL-1.0 / Apache-2.0 / MIT-style | [junit4](https://github.com/junit-team/junit4) · [mockk](https://github.com/mockk/mockk) · [org.json](https://github.com/stleary/JSON-java) |
+
+### Rime 方案与词库内容
+
+| 项目 | 用途 | 仓库 |
+|------|------|------|
+| 白霜拼音 rime-frost | 默认全拼方案及其词库；随附 `zh-moqi.gram` 语法模型（万象生态 N-gram 训练数据，致谢 [amzxyz/RIME-LMDG](https://github.com/amzxyz/RIME-LMDG)） | [gaboolic/rime-frost](https://github.com/gaboolic/rime-frost) |
+| 雾凇拼音 rime-ice | 朙月拼音简体词库基础与中英文词库数据来源（致谢 Dvel） | [iDvel/rime-ice](https://github.com/iDvel/rime-ice) |
+| 融合拼音 rime-melt | `melt_eng` 英文辅助方案（致谢 tumuyan 及拼写派生贡献者 @Mirtle） | [tumuyan/rime-melt](https://github.com/tumuyan/rime-melt) |
+| 清华大学开源词库 THUOCL | 中文基础词库数据来源之一 | [thunlp/THUOCL](https://github.com/thunlp/THUOCL) |
+| google-10000-english | 英文词库常见两万词来源 | [first20hours/google-10000-english](https://github.com/first20hours/google-10000-english) |
+| Rime 官方方案 | 朙月拼音、仓颉五代、essay 词频表等基础方案 | [rime/rime](https://github.com/rime) |
+
+> 上述许可证信息以各项目仓库内 LICENSE 文件为准。本项目以 GPL-3.0-or-later 发布，
+> 与 librime 及其 GPL 插件（witogram）的许可要求保持一致。
+
 ## 许可证
 
 本项目以 GPL-3.0-or-later 许可证开源（librime 同为 GPL-3.0）。
