@@ -20,6 +20,9 @@ import com.ziyou.ime.sdk.input.CommitSink
 import com.ziyou.ime.sdk.input.EnterKeyBehavior
 import com.ziyou.ime.sdk.input.InputHostAdapter
 import com.ziyou.ime.sdk.input.InputSession
+import com.ziyou.ime.sdk.state.CandidatesService
+import com.ziyou.ime.sdk.state.PreeditController
+import com.ziyou.ime.sdk.state.SchemaService
 import kotlinx.coroutines.CoroutineScope
 
 /**
@@ -114,8 +117,21 @@ class InputLogicController(
         override fun renderContext(context: ContextProto?) = callbacks.renderContext(context)
     }
 
+    /** SDK 状态服务：编码区快照（StateFlow 事实源，视图可订阅）。 */
+    val preeditController = PreeditController.newInstance(engine)
+
+    /** SDK 状态服务：候选词快照与选/删/翻页操作。 */
+    val candidatesService = CandidatesService.newInstance(engine)
+
+    /** SDK 状态服务：方案/选项/用户数据。 */
+    val schemaService = SchemaService.newInstance(engine)
+
     /** 通用输入管线（SDK）：按键事务、候选/翻页/T9 消歧、分段确认同步。 */
-    private val session = InputSession(engine, scope, keyRecordStack, hostAdapter)
+    private val session = InputSession(
+        engine, scope, keyRecordStack, hostAdapter,
+        preeditController = preeditController,
+        candidatesService = candidatesService
+    )
 
     /**
      * 宿主编辑器上屏 sink：commitText/deleteSurroundingText/回车语义落地，

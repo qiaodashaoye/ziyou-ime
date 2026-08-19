@@ -8,6 +8,8 @@ import com.ziyou.ime.core.t9.KeyRecordStack
 import com.ziyou.ime.core.t9.ReplaceCommand
 import com.ziyou.ime.daemon.RimeEngine
 import com.ziyou.ime.ime.KeyCode
+import com.ziyou.ime.sdk.state.CandidatesService
+import com.ziyou.ime.sdk.state.PreeditController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -68,7 +70,9 @@ class InputSession(
     private val engine: RimeEngine,
     private val scope: CoroutineScope,
     private val keyRecordStack: KeyRecordStack,
-    private val host: InputHostAdapter
+    private val host: InputHostAdapter,
+    private val preeditController: PreeditController? = null,
+    private val candidatesService: CandidatesService? = null
 ) {
 
     companion object {
@@ -147,6 +151,8 @@ class InputSession(
                 }
                 // 更新按键前高亮缓存（供下一次按键的分段确认同步）
                 lastHighlightedCandidate = highlightedCandidate(result.context)
+                // 同步 SDK 状态服务快照（编码区/候选词 StateFlow 事实源）
+                refreshStateServices(result.context)
                 // 用随批量结果返回的上下文刷新候选词与编码区UI；若引擎已启用
                 // librime-predict，commit 后的预测词会出现在 context.menu 中随本次刷新一并展示
                 withContext(Dispatchers.Main) {
@@ -455,6 +461,12 @@ class InputSession(
         host.currentCommitSink()?.commitText(text)
     }
 
+    /** 引擎上下文变更后同步 SDK 状态服务快照（未装配服务时为空操作）。 */
+    private fun refreshStateServices(context: ContextProto?) {
+        preeditController?.refreshFrom(context)
+        candidatesService?.refreshFrom(context)
+    }
+
     /**
      * 是否为会追加编码串的键（超限防护的限制对象）：无修饰键的可打印 ASCII，
      * 含数字/字母/撇号分词符；排除空格（T9 选首候选）与 XK_* 功能键（退格/回车/方向等）。
@@ -473,6 +485,8 @@ class InputSession(
             lastInputLength = context?.input?.length ?: 0
             // 同步按键前高亮缓存（选词/翻页等旁路后的最新高亮）
             lastHighlightedCandidate = highlightedCandidate(context)
+            // 同步 SDK 状态服务快照（选词/翻页/T9 消歧等旁路后的最新态）
+            refreshStateServices(context)
             withContext(Dispatchers.Main) {
                 host.renderContext(context)
             }

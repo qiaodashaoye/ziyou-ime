@@ -161,9 +161,6 @@ dependencies {
     // api 传递：app 侧既有代码直接 import com.ziyou.ime.core/daemon/config 包（迁移期包名不变）
     api(project(":rime-sdk"))
 
-    // ===== 内部模块：纯逻辑层（无 Android UI / 无 JNI 依赖）=====
-    implementation(project(":core-logic"))
-
     // ===== AndroidX Core =====
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)

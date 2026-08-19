@@ -118,7 +118,7 @@ sum_test_results() {
 
 if [ "${SKIP_TESTS}" -eq 0 ]; then
   echo ">> 运行全量单元测试 ..."
-  ./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest
+  ./gradlew :rime-sdk:testDebugUnitTest :app:testDebugUnitTest
 
   if [ ! -f "${BASELINE_FILE}" ]; then
     echo "错误: 缺少用例数基线文件 ${BASELINE_FILE}。" >&2
@@ -131,7 +131,7 @@ if [ "${SKIP_TESTS}" -eq 0 ]; then
   fi
 
   RESULT_XML=()
-  for M in core-logic app; do
+  for M in rime-sdk app; do
     for XML in "${ROOT_DIR}/${M}/build/test-results/testDebugUnitTest"/*.xml; do
       [ -f "${XML}" ] && RESULT_XML+=("${XML}")
     done
