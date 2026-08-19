@@ -5,6 +5,10 @@
 > 上层模块只负责 UI 展示、用户交互与业务逻辑（等级、扩展词库、技能、皮肤、更新、语音、AI 增强等）。
 >
 > 现状基线见 [ARCHITECTURE.md](../ARCHITECTURE.md)；本文档为重构蓝图，落地后回写 ARCHITECTURE.md。
+>
+> **后续演进（已落地）**：P5 之后 `:rime-sdk` 进一步独立为隔壁工程 `ziyou-rime-sdk`
+> （自主打包 AAR，坐标 `com.ziyou:rime-sdk`），ziyou-ime 经坐标依赖 +
+> `includeBuild` composite 消费；第三方集成文档见 `ziyou-rime-sdk/INTEGRATION.md`。
 
 ---
 

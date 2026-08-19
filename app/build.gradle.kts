@@ -157,9 +157,11 @@ androidComponents {
 
 dependencies {
 
-    // ===== 内部模块：底层 SDK（librime 交互 + 通用输入基础能力，含 JNI/native）=====
-    // api 传递：app 侧既有代码直接 import com.ziyou.ime.core/daemon/config 包（迁移期包名不变）
-    api(project(":rime-sdk"))
+    // ===== 底层 SDK（librime 交互 + 通用输入基础能力，含 JNI/native）=====
+    // 独立工程 ziyou-rime-sdk 交付，坐标 com.ziyou:rime-sdk；
+    // 本地开发经 settings.gradle.kts 的 includeBuild 自动替换为源码工程，
+    // CI/外部构建可改为 mavenLocal/私有仓库消费 AAR
+    api("com.ziyou:rime-sdk:0.1.0-SNAPSHOT")
 
     // ===== AndroidX Core =====
     implementation(libs.androidx.core.ktx)

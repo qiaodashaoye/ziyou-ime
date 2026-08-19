@@ -24,4 +24,8 @@ dependencyResolutionManagement {
 
 rootProject.name = "ziyou-ime"
 include(":app")
-include(":rime-sdk")
+
+// 底层 SDK 已独立成隔壁工程 ziyou-rime-sdk（交付坐标 com.ziyou:rime-sdk，AAR）。
+// composite build：app 对坐标 com.ziyou:rime-sdk 的依赖自动替换为本地工程源码，
+// 无需先 publish；对外集成方则直接使用 publishToMavenLocal/私有仓库产出的 AAR。
+includeBuild("../ziyou-rime-sdk")

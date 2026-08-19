@@ -118,7 +118,15 @@ sum_test_results() {
 
 if [ "${SKIP_TESTS}" -eq 0 ]; then
   echo ">> 运行全量单元测试 ..."
-  ./gradlew :rime-sdk:testDebugUnitTest :app:testDebugUnitTest
+  # SDK 已独立为隔壁工程 ziyou-rime-sdk（composite build 引入），其测试需在
+  # 工程目录内单独触发（included build 的任务不能经主构建路径直接执行）
+  SDK_DIR="${ROOT_DIR}/../ziyou-rime-sdk"
+  if [ ! -d "${SDK_DIR}" ]; then
+    echo "错误: 未找到 SDK 独立工程 ${SDK_DIR}（settings.gradle.kts includeBuild 依赖）。" >&2
+    exit 1
+  fi
+  (cd "${SDK_DIR}" && ./gradlew testDebugUnitTest)
+  ./gradlew :app:testDebugUnitTest
 
   if [ ! -f "${BASELINE_FILE}" ]; then
     echo "错误: 缺少用例数基线文件 ${BASELINE_FILE}。" >&2
@@ -131,10 +139,9 @@ if [ "${SKIP_TESTS}" -eq 0 ]; then
   fi
 
   RESULT_XML=()
-  for M in rime-sdk app; do
-    for XML in "${ROOT_DIR}/${M}/build/test-results/testDebugUnitTest"/*.xml; do
-      [ -f "${XML}" ] && RESULT_XML+=("${XML}")
-    done
+  for XML in "${SDK_DIR}/build/test-results/testDebugUnitTest"/*.xml \
+             "${ROOT_DIR}/app/build/test-results/testDebugUnitTest"/*.xml; do
+    [ -f "${XML}" ] && RESULT_XML+=("${XML}")
   done
   if [ "${#RESULT_XML[@]}" -eq 0 ]; then
     echo "错误: 未找到 Gradle 测试报告（*/build/test-results/testDebugUnitTest/*.xml），无法核对用例数。" >&2
