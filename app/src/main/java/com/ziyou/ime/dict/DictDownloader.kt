@@ -1,5 +1,6 @@
 package com.ziyou.ime.dict
 
+import android.util.Base64
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,8 +27,12 @@ object DictDownloader {
     private const val READ_TIMEOUT = 30_000
     private const val BUFFER_SIZE = 8192
 
-    /** Gitee 仓库原始文件基础 URL */
-    private const val BASE_URL = "https://gitee.com/qiaodashaoye/ziyou-ime-dicts/raw/main"
+    /** catalog.json 拉取地址（Gitee API v5 contents 端点，匿名可访问）。
+     *  注意：仓库 /raw/ 端点对匿名请求返回 451（内容审查拦截），不可用作目录源；
+     *  API 端点返回 {"content": <base64>, "encoding": "base64"} 包装，需二次解码。
+     *  词库文件本身走 catalog 内声明的 Release 附件链接（见 ALLOWED_HOSTS 注释）。 */
+    private const val CATALOG_URL =
+        "https://gitee.com/api/v5/repos/qiaodashaoye/ziyou-ime-dicts/contents/catalog.json"
 
     /** 下载源域名白名单：catalog 中的 url 与每一跳重定向都必须命中，
      *  防目录被篡改后外链投毒（与技能 fetch 代理的白名单基线对齐）。
@@ -55,12 +60,12 @@ object DictDownloader {
 
     /**
      * 拉取远程词库目录
-     * @return 解析后的 DictCatalog，失败返回 null
+     * @return 解析后的 DictCatalog，失败返回 null（失败原因见 logcat，tag=[TAG]）
      */
     suspend fun fetchCatalog(): DictCatalog? = withContext(Dispatchers.IO) {
         var connection: HttpURLConnection? = null
         try {
-            connection = openTrustedConnection("$BASE_URL/catalog.json")
+            connection = openTrustedConnection(CATALOG_URL)
 
             val responseCode = connection.responseCode
             if (responseCode != HttpURLConnection.HTTP_OK) {
@@ -68,10 +73,11 @@ object DictDownloader {
                 return@withContext null
             }
 
-            val jsonStr = connection.inputStream.use {
+            // API 端点响应为包装 JSON：解码 content 字段得到 catalog.json 原文
+            val wrapperStr = connection.inputStream.use {
                 readBoundedText(it, MAX_CATALOG_BYTES, truncate = false)
             }
-            parseCatalog(jsonStr)
+            parseCatalog(unwrapApiContent(wrapperStr))
         } catch (e: IOException) {
             Log.e(TAG, "拉取 catalog 网络异常: ${e.message}", e)
             null
@@ -319,6 +325,19 @@ object DictDownloader {
             url = requireTrustedUrl(URL(url, location).toString())
         }
         throw IOException("重定向次数超限（>$MAX_REDIRECTS）")
+    }
+
+    /**
+     * 解包 Gitee API v5 contents 端点响应：取 content 字段并按 encoding 解码。
+     * encoding 非 base64（端点行为变更）时拒绝，避免把包装 JSON 当 catalog 解析。
+     */
+    private fun unwrapApiContent(wrapperStr: String): String {
+        val wrapper = JSONObject(wrapperStr)
+        val encoding = wrapper.optString("encoding", "")
+        val content = wrapper.getString("content")
+        if (encoding != "base64") throw IOException("contents 端点编码非预期: $encoding")
+        // android.util.Base64 兼容 minSdk 24（java.util.Base64 需 API 26）；DEFAULT 容忍换行
+        return String(Base64.decode(content, Base64.DEFAULT), Charsets.UTF_8)
     }
 
     /**
