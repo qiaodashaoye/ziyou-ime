@@ -95,4 +95,7 @@
 # SDK 拆分 P1~P3：:core-logic 撤销分流（T9/prediction/引擎层 → rime-sdk，
 # 业务纯逻辑 → app），用例随类迁移总数不变；新增 StateServicesTest ×8
 # （PreeditState 空值规范/字段映射、CandidatesSnapshot 联想态判定）
-607
+# 当前实测：:rime-sdk 171 + :app 439（2026-08-19，全绿、0 跳过；
+# SDK 集成审计：KeyRecordStackTest ×3（trailingT9Digits 纯数字/锁定后/
+# 分词符隔断），支撑 InputSession.t9PinyinCandidates 黑盒查询口）
+610
