@@ -72,20 +72,11 @@ cd ../ziyou-ime-sdk && ./gradlew assembleRelease
 cp build/outputs/aar/ime-sdk-release.aar ../ziyou-ime/app/libs/ime-sdk-release.aar
 ```
 
-> AAR 内含 `jni/arm64-v8a/librime_jni.so`（librime.a 已静态链入）与 consumer
-> ProGuard 规则（自动应用）；`files()` 为直接文件依赖，无需 flatDir/仓库解析。
-
-#### SDK AAR 获取（第三方集成）
-
-| 渠道 | 方式 | 适用场景 |
-|------|------|---------|
-| Maven Local | 克隆 ziyou-ime-sdk 后执行 `./gradlew publishToMavenLocal`，宿主 `repositories { mavenLocal() }` + `implementation("com.ziyou:ime-sdk:0.1.0-SNAPSHOT")` | 本地开发/联调 |
-| 私有 Maven 仓库 | Nexus/Artifactory/阿里云效等上传 AAR + POM + sources.jar，宿主配仓库 URL 后同坐标引用 | 团队/正式发布 |
-| GitHub Packages | `maven { url = uri("https://maven.pkg.github.com/<owner>/ziyou-ime-sdk") }`（需 token） | 开源分发 |
-
-> 注：JitPack 不适用——其从源码即时构建，而 SDK 依赖 277MB 预编译 `librime.a`
-> 与多个 git 子模块，需自行托管二进制产物。集成步骤详见 ziyou-ime-sdk 工程的
-> `INTEGRATION.md`（依赖配置/初始化/API 示例/排查）。
+> **无需下载或构建 SDK**：`app/libs/ime-sdk-release.aar` 已随仓入库，`files()` 为直接文件依赖
+> （无需 flatDir/仓库解析），克隆本仓后即可离线构建。AAR 内含 `jni/arm64-v8a/librime_jni.so`
+> （librime.a 已静态链入）与 consumer ProGuard 规则（自动应用）。
+> 仅当需要升级 SDK 时，由 SDK 维护者在 ziyou-ime-sdk 工程重新编译并覆盖该文件
+> （见上文「更新 app/libs 内的 SDK AAR」，`scripts/build-release.sh` 会自动同步）。
 
 > 当前构建默认仅打包 `arm64-v8a` ABI（见 [`app/build.gradle.kts`](app/build.gradle.kts) 的 `abiFilters`，
 > 可用 `-Pziyou.abis=` 覆盖）。如需其它 ABI，请同时编译对应的 `librime.a`。
@@ -97,13 +88,15 @@ cp build/outputs/aar/ime-sdk-release.aar ../ziyou-ime/app/libs/ime-sdk-release.a
 ```bash
 git clone <repository-url>
 cd ziyou-ime
-# SDK 为隔壁独立工程，需与本仓同级目录放置
-git clone <sdk-repository-url> ../ziyou-ime-sdk
 ```
 
-### 2. 准备 librime 预编译库
+> SDK 产物 `app/libs/ime-sdk-release.aar` 已随仓入库，克隆后无需额外拉取或构建 SDK。
+> 仅在参与 SDK 源码开发时，才需要将隔壁工程 `ziyou-ime-sdk` 克隆到与本仓同级目录。
 
-预编译库构建工具链 `librime-prebuilt/` 位于 ziyou-ime-sdk 工程内（产物直接安装到该工程 `libs/`，日常 App 开发通常已就位，无需重编）：
+### 2. 准备 librime 预编译库（仅 SDK 开发者）
+
+日常 App 开发**无需此步**：librime 已静态链入随仓的 SDK AAR。仅当参与 SDK 源码开发时，
+预编译库构建工具链 `librime-prebuilt/` 位于 ziyou-ime-sdk 工程内（产物直接安装到该工程 `libs/`，通常已就位，无需重编）：
 
 ```bash
 cd ../ziyou-ime-sdk/librime-prebuilt
@@ -291,8 +284,9 @@ ziyou-ime/
 ├── ARCHITECTURE.md                    # 架构设计文档
 └── build.gradle.kts / settings.gradle.kts / gradle.properties
 
-../ziyou-ime-sdk/                      # 隔壁独立 SDK 工程（坐标 com.ziyou:ime-sdk，交付 AAR，
-│                                      #  主工程以本地文件 AAR 消费（app/libs/ime-sdk-release.aar））
+../ziyou-ime-sdk/                      # 隔壁独立 SDK 工程（坐标 com.ziyou:ime-sdk，交付 AAR；
+│                                      #  主工程以本地文件 AAR 消费：app/libs/ime-sdk-release.aar
+│                                      #  随仓入库，零外部仓库依赖、离线可构建）
 ├── librime-prebuilt/                  # librime 源码编译链（build.sh / superbuild / 插件子模块）
 ├── libs/                              # 产物：<abi>/librime.a + include + LIBRIME_MANIFEST.txt
 └── src/{main,test}/
