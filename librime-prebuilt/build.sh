@@ -278,3 +278,40 @@ done
 echo ""
 echo ">> 全部完成。产物位于: ${INSTALL_DIR}"
 ls -R "${INSTALL_DIR}" 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# 能力清单（与 ziyou-rime-sdk 的跨仓契约）
+# ---------------------------------------------------------------------------
+# SDK 工程 build.gradle.kts 的 -DWITH_* 开关必须与 librime.a 实际编入的插件
+# 一一配对，否则链接报 undefined symbol。每次重编后生成/刷新本清单，
+# 提交入库并同步到 ziyou-rime-sdk/libs/LIBRIME_MANIFEST.txt，由 SDK 侧
+# scripts/verify_librime.sh 以此为基线校验。
+# 取目录的 git short hash；非独立仓库（非子模块）时明示，避免误报外层仓库 hash
+git_short_hash() {
+  local top
+  top="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" || { echo "unknown"; return; }
+  if [ "$(cd "$1" && pwd)" = "$top" ]; then
+    git -C "$1" rev-parse --short HEAD
+  else
+    echo "tracked-by-parent-repo"
+  fi
+}
+MANIFEST="${INSTALL_DIR}/LIBRIME_MANIFEST.txt"
+{
+  echo "# librime 预编译库能力清单（build.sh 自动生成，勿手改）"
+  echo "generated_at=$(date '+%Y-%m-%d %H:%M:%S %z')"
+  echo "abis=$(IFS=,; echo "${ABIS[*]}")"
+  echo "android_platform=${ANDROID_PLATFORM}"
+  echo "WITH_LUA=${WITH_LUA}"
+  echo "WITH_OCTAGRAM=${WITH_OCTAGRAM}"
+  echo "WITH_PREDICT=${WITH_PREDICT}"
+  echo "WITH_WITOGRAM=${WITH_WITOGRAM}"
+  # build.sh 暂不支持 OpenCC 编入（JNI CMake 预留开关），清单恒记 OFF，
+  # 保证 SDK 侧 verify_librime.sh 逐键可读（键缺失会触发 pipefail 中止）
+  echo "WITH_OPENCC=OFF"
+  echo "librime_commit=$(git_short_hash "${LIBRIME_SOURCE_DIR}")"
+  echo "librime_lua_commit=$(git_short_hash "${SCRIPT_DIR}/plugins/librime-lua")"
+  echo "librime_predict_commit=$(git_short_hash "${SCRIPT_DIR}/plugins/librime-predict")"
+  echo "librime_witogram_commit=$(git_short_hash "${SCRIPT_DIR}/plugins/librime-witogram")"
+} > "${MANIFEST}"
+echo ">> 能力清单已写入: ${MANIFEST}（请连同 librime.a 同步到 ziyou-rime-sdk）"
