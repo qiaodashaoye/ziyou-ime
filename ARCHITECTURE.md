@@ -67,7 +67,8 @@
       SkillWebViewFactory）见下文「技能插件系统」一节，其纯校验逻辑位于 :app 的 core/skill
 ```
 
-> **SDK 拆分后的物理布局（P1~P5 已落地）**：上图中 Core 层（RimeApi/SimpleRimeImpl/
+> **SDK 拆分后的物理布局（P1~P5 已落地，并已进一步独立成隔壁工程 `ziyou-rime-sdk`，
+> 本仓经坐标依赖 + `includeBuild` composite 消费）**：上图中 Core 层（RimeApi/SimpleRimeImpl/
 > RimeDispatcher/RimeEngine/RimeSession/RimeConfigManager/AssetDeployer）、JNI 层、Engine 层
 > 与通用输入管线（sdk/input：InputSession + CommitSink/InputHostAdapter + EnterKeyBehavior；
 > sdk/state：PreeditController/CandidatesService/SchemaService 状态服务）位于 `:rime-sdk`，
