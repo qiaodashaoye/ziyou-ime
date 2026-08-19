@@ -83,7 +83,7 @@ object DictManager {
 
     /**
      * 切换主词库后端（仅持久化偏好；生效需调用方随后触发
-     * `RimeSession.redeploy`，其部署步骤会按新后端重写主词库）。
+     * `RimeSdk.redeploy`，其部署步骤会按新后端重写主词库）。
      */
     fun setBackend(context: Context, backend: DictBackend) {
         context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -337,7 +337,7 @@ object DictManager {
      * 保留基础 import_tables，动态追加已启用的扩展词库
      *
      * 此方法在以下时机调用：
-     * 1. 应用启动时（RimeSession.initialize 中，AssetDeployer 之后）
+     * 1. 应用启动时（引擎启动流程中，AssetDeployer 之后）
      * 2. 词库安装/卸载/启用/禁用后
      * 3. 后端切换后的 redeploy（部署步骤重走本方法）
      *

@@ -19,7 +19,7 @@ import com.ziyou.ime.voice.SpeechRecognizerEngine
  *
  * 目的：把"全局单例硬依赖"收敛到唯一可替换的装配点——
  * 调用方（IME 服务 / 设置页 / 词库页）经 [AppContainer] 获取 [RimeEngine] 等协作对象，
- * 而非直接引用 [RimeSession] 等单例；测试时可通过 [overrideRimeEngine] 注入 fake 实现。
+ * 而非直接引用 SDK 内部单例（已收 internal）；测试时可通过 [overrideRimeEngine] 注入 fake 实现。
  *
  * 装配职责：
  * - 经 [RimeSdk.init] 装配引擎启动前的部署步骤（SDK 通用资源部署 →
@@ -62,7 +62,7 @@ object AppContainer {
         RimeSdk.engine
     }
 
-    /** Rime 引擎（默认生产实现为 [RimeSession]，可被测试覆盖）。 */
+    /** Rime 引擎（默认生产实现为 [RimeSdk] 门面后的引擎单例，可被测试覆盖）。 */
     val rimeEngine: RimeEngine
         get() = rimeEngineOverride ?: defaultEngine
 

@@ -15,7 +15,7 @@ import java.io.File
  * 启用切换与跨版本持久化。与 dict.yaml 扩展词库的本质差异：
  * - dict.yaml 注入 import_tables 由 Rime 部署期编译；predict.db 是引擎直读的
  *   只读二进制（predictor 从用户目录解析），**只能整体替换**、无法与基础库合并；
- * - 替换后经 [com.ziyou.ime.daemon.RimeSession.redeploy] 重启引擎生效；
+ * - 替换后经 [com.ziyou.ime.sdk.RimeSdk.redeploy] 重启引擎生效；
  * - 安装记录独立于 ext_dicts.json（[CONFIG_FILE]）：DictManager.regenerateMainDict
  *   会把已安装条目写进 import_tables，predict.db 条目混入会污染主词库。
  *
@@ -43,7 +43,7 @@ object PredictDbManager {
 
     // ===== 路径访问 =====
 
-    /** 用户目录（与 RimeSession.getUserDataDir 同口径：filesDir/rime_user） */
+    /** 用户目录（与 AssetDeployer.getUserDataDir 同口径：filesDir/rime_user） */
     private fun getUserDir(context: Context): File = File(context.filesDir, "rime_user")
 
     /** 下载产物与安装记录的根目录（与 DictManager.ext_dicts 同级：filesDir/rime） */

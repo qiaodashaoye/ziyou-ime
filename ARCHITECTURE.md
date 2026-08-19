@@ -72,8 +72,8 @@
 > RimeDispatcher/RimeEngine/RimeSession/RimeConfigManager/AssetDeployer）、JNI 层、Engine 层
 > 与通用输入管线（sdk/input：InputSession + CommitSink/InputHostAdapter + EnterKeyBehavior；
 > sdk/state：PreeditController/CandidatesService/SchemaService 状态服务）位于 `:rime-sdk`，
-> 门面为 `RimeSdk`/`RimeSdkConfig`；JNI 源码在 `rime-sdk/src/main/jni/librime_jni/`，
-> CMake 链入仓库根 `libs/<abi>/librime.a`（相对路径因目录深度不变未改）。
+> 门面为 `RimeSdk`/`RimeSdkConfig`；JNI 源码在 SDK 工程 `src/main/jni/librime_jni/`，
+> CMake 链入 SDK 工程根 `libs/<abi>/librime.a`（预编译产物不入 git，支持 -DRIME_LIBS_DIR 覆盖）。
 > 迁移期约束：迁入类保持原包名（`com.ziyou.ime.core/daemon/config`），JNI 符号零改动。
 
 **依赖方向**：`:app` → `:rime-sdk`（单向，编译器强制）；引擎栈内部 UI → IME → Core → JNI → Engine（单向向下）。
@@ -109,7 +109,7 @@ JNI 层使用 C++ RAII 避免资源泄漏：`SessionHolder`（会话）、`CStri
 输入热路径（`onCommit`）仅做 O(1) 内存自增，达阈值或生命周期节点才后台异步落盘，避免频繁 IO 影响输入流畅度（见等级体系）。
 
 ### 7. 引擎接口化 + 依赖注入
-引擎能力抽象为 `RimeEngine`（生命周期）与 `RimeApi`（操作）两个接口，生产实现分别为 `RimeSession`（`object`）与 `SimpleRimeImpl`。
+引擎能力抽象为 `RimeEngine`（生命周期）与 `RimeApi`（操作）两个接口，生产实现分别为 `RimeSession`（`object`，已收 internal）与 `SimpleRimeImpl`（internal）。外部统一经 SDK 门面 `RimeSdk` 使用。
 调用方经 `di/AppContainer`（组合根）获取 `RimeEngine`，依赖接口而非全局单例；测试可用 `overrideRimeEngine()` 注入替身。
 组合根另承担两项装配，使依赖方向保持单向：
 - `RimeSession.deploySteps`：引擎启动前的部署步骤（`RimeDeployStep`：资源部署 → 扩展词库注入），
@@ -218,11 +218,11 @@ interface RimeApi {
 
 #### RimeEngine 接口 + AppContainer（DI 组合根）
 `daemon/RimeEngine.kt` 将引擎生命周期抽象为接口（`api` / `messageFlow` / `initialized` / `initialize` / `redeploy` / `destroy`）。
-`di/AppContainer` 作为轻量 DI 容器（组合根）暴露 `rimeEngine: RimeEngine`，默认生产实现为 `RimeSession`，
+`di/AppContainer` 作为轻量 DI 容器（组合根）暴露 `rimeEngine: RimeEngine`，默认生产实现经 `RimeSdk.init` 装配（门面后为 internal 的 `RimeSession`），
 并提供 `overrideRimeEngine()` 供测试注入替身。IME 服务经 `AppContainer.rimeEngine` 使用引擎，依赖接口而非单例。
 
-#### RimeSession（RimeEngine 生产实现，生命周期单例）
-`daemon/RimeSession.kt`（`object`，实现 `RimeEngine`）统一管理引擎生命周期，供 IME 服务与设置页共用，避免双重初始化：
+#### RimeSession（RimeEngine 生产实现，生命周期单例，SDK internal）
+`daemon/RimeSession.kt`（`internal object`，实现 `RimeEngine`）统一管理引擎生命周期，外部经 `RimeSdk` 门面（init/start/redeploy/shutdown）使用，供 IME 服务与设置页共用，避免双重初始化：
 - `initialize(context, fullCheck)`：**在 `Dispatchers.IO` 上**按序执行 `deploySteps`（由组合根装配：
   资源部署 `AssetDeployer` → 注入扩展词库 `DictManager.regenerateMainDict`，daemon 层不直接依赖二者）
   → 启动引擎（带超时保护），避免阻塞主线程
@@ -255,8 +255,8 @@ librime 通知回调
 ```
 onCreate()
   ├─ LevelStats.init(applicationContext)         # 等级计分初始化
-  ├─ serviceScope.launch { RimeSession.initialize(fullCheck=needsDeploy) }
-  └─ 监听 RimeSession.messageFlow
+  ├─ serviceScope.launch { RimeSdk.start(fullCheck=needsDeploy) }
+  └─ 监听 RimeSdk.engine.messageFlow
 onCreateInputView()
   ├─ 根容器(垂直 LinearLayout)
   ├─ 候选容器: PreeditOverlayView(顶) + SimpleCandidatesView(下)

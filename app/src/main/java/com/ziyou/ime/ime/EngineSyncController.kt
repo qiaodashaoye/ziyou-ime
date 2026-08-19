@@ -226,7 +226,7 @@ class EngineSyncController(
     /**
      * 等待 Rime 引擎就绪（初始化完成）。
      *
-     * 词库下载/启用后 [com.ziyou.ime.daemon.RimeSession.redeploy] 会销毁并重建引擎，
+     * 词库下载/启用后 [com.ziyou.ime.sdk.RimeSdk.redeploy] 会销毁并重建引擎，
      * 窗口期内 `rime.api` 直接抛 IllegalStateException。所有非热路径的引擎访问
      * （状态同步、模式切换）先经本方法等待，避免在重部署期间直接失败且无重试。
      *

@@ -67,7 +67,7 @@ class ZiYouInputMethodService : InputMethodService() {
     /** 服务协程作用域，生命周期跟随Service */
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
-    /** Rime 引擎（经 DI 容器获取，便于替换/测试；生产实现为 RimeSession 单例）。 */
+    /** Rime 引擎（经 DI 容器获取，便于替换/测试；生产实现为 RimeSdk 门面后的引擎单例）。 */
     private val rime: RimeEngine get() = AppContainer.rimeEngine
 
     /** 键盘容器：承载当前键盘视图，便于在不同布局之间切换 */
@@ -1413,7 +1413,7 @@ class ZiYouInputMethodService : InputMethodService() {
                 if (message.status != "start" && RimeNative.isLoaded) {
                     RimeNative.trimNativeHeap()
                 }
-                // 词库下载/启用后 RimeSession.redeploy 会整体重建引擎，方案与选项全部复位。
+                // 词库下载/启用后 RimeSdk.redeploy 会整体重建引擎，方案与选项全部复位。
                 // 待引擎就绪后重新同步当前键盘的方案与中英文状态（latest-wins 统一调度），
                 // 否则九宫格停留在默认方案上，中/数切换等按键表现为“失效”。
                 engineSync.scheduleEngineSync(EngineSyncController.ENGINE_READY_TIMEOUT_MS)

@@ -105,7 +105,7 @@ class SettingsActivity : AppCompatActivity() {
     /** 正在下载中的模型 id（防重复点击并发写同一 .part 损坏文件） */
     private val downloadingModelIds = mutableSetOf<String>()
 
-    /** Rime 引擎（经 DI 容器获取，依赖接口而非 RimeSession 单例） */
+    /** Rime 引擎（经 DI 容器获取，依赖接口而非 SDK 内部单例） */
     private val rime get() = AppContainer.rimeEngine
 
     override fun onCreate(savedInstanceState: Bundle?) {

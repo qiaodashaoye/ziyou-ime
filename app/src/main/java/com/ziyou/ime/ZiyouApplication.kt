@@ -15,7 +15,7 @@ import kotlinx.coroutines.launch
 /**
  * 字由输入法 应用入口
  * 负责全局初始化；进程启动时按需后台预热 Rime 引擎（资源部署 + 词库编译），
- * 使首次选择输入法或版本升级后键盘拉起时引擎已就绪，其余初始化延迟到 RimeSession 中异步执行
+ * 使首次选择输入法或版本升级后键盘拉起时引擎已就绪，其余初始化延迟到引擎启动流程中异步执行
  */
 class ZiyouApplication : Application() {
 
@@ -54,7 +54,7 @@ class ZiyouApplication : Application() {
      * - 本输入法已被用户启用：键盘随时可能拉起，引擎保持热态。
      * 其余进程启动（如仅跑更新检测）不加载引擎，避免无谓的内存与电量开销。
      *
-     * 与 IME 服务/设置页的 initialize 幂等兼容：[com.ziyou.ime.daemon.RimeSession]
+     * 与 IME 服务/设置页的 initialize 幂等兼容：[com.ziyou.ime.sdk.RimeSdk]
      * 内部 lifecycleMutex + isInitialized 守卫保证不会双重初始化。
      */
     private fun prewarmRimeEngineIfNeeded() {

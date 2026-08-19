@@ -192,13 +192,11 @@ class FakeRimeApi : RimeApi {
     var syncResult = true
     override suspend fun syncUserData(): Boolean = syncResult
 
-    // ===== 消息流 =====
+    // ===== 消息流（fake 自持，不依赖 SDK 内部枢纽；需断言消息时可直接 tryEmit）=====
 
-    override val messageFlow: SharedFlow<RimeMessage>
-        get() = RimeMessageHandlerProxy.messageFlow
-}
+    private val _messageFlow = MutableSharedFlow<RimeMessage>(replay = 1, extraBufferCapacity = 16)
+    override val messageFlow: SharedFlow<RimeMessage> get() = _messageFlow
 
-/** RimeMessageHandler 的只读代理（测试中不实际使用消息流） */
-private object RimeMessageHandlerProxy {
-    val messageFlow: SharedFlow<RimeMessage> = MutableSharedFlow(replay = 0)
+    /** 测试辅助：向订阅者广播一条引擎消息（对齐 RimeSdk.engine.messageFlow 契约）。 */
+    fun emitMessage(message: RimeMessage) { _messageFlow.tryEmit(message) }
 }
