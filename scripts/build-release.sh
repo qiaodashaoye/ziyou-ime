@@ -81,7 +81,7 @@ echo ">> 签名密钥库: ${STORE_FILE}"
 
 # ---------------------------------------------------------------------------
 # 1. Native 预编译库（可选重建；工具链 librime-prebuilt/ 已随 SDK 工程迁移，
-#    librime.a 静态链入 librime_jni.so，app 经 composite build 间接获得）
+#    librime.a 静态链入 librime_jni.so，app 经 mavenLocal AAR 坐标消费）
 # ---------------------------------------------------------------------------
 SDK_DIR="${ROOT_DIR}/../ziyou-ime-sdk"
 if [ "${REBUILD_NATIVE}" -eq 1 ]; then
@@ -122,13 +122,15 @@ sum_test_results() {
 
 if [ "${SKIP_TESTS}" -eq 0 ]; then
   echo ">> 运行全量单元测试 ..."
-  # SDK 已独立为隔壁工程 ziyou-ime-sdk（composite build 引入），其测试需在
-  # 工程目录内单独触发（included build 的任务不能经主构建路径直接执行）
+  # SDK 已独立为隔壁工程 ziyou-ime-sdk（主工程经 AAR 消费），其测试需在
+  # 工程目录内单独触发
   if [ ! -d "${SDK_DIR}" ]; then
-    echo "错误: 未找到 SDK 独立工程 ${SDK_DIR}（settings.gradle.kts includeBuild 依赖）。" >&2
+    echo "错误: 未找到 SDK 独立工程 ${SDK_DIR}（app 经 mavenLocal 消费其 AAR，需本地存在并 publish）。" >&2
     exit 1
   fi
-  (cd "${SDK_DIR}" && ./gradlew testDebugUnitTest)
+  # 测试 + 刷新 mavenLocal AAR（主工程经坐标 com.ziyou:ime-sdk 解析，
+  # 必须先 publish 才能拿到 SDK 最新源码的产物）
+  ( cd "${SDK_DIR}" && ./gradlew testDebugUnitTest publishToMavenLocal )
   ./gradlew :app:testDebugUnitTest
 
   if [ ! -f "${BASELINE_FILE}" ]; then

@@ -8,7 +8,7 @@
 - **输入引擎**：librime（源码交叉编译合并为单个静态库 `librime.a`，已启用 predict / witogram 插件）
 - **界面**：键盘/候选区/功能面板使用纯 Canvas 绘制（传统 View）；设置内的等级页、词库页、技能页、皮肤页等使用 Jetpack Compose (Material3)
 - **语言**：Kotlin 2.2 + Kotlin 协程，JNI 层 C++17（RAII 资源管理）
-- **架构**：本仓 `:app` 单模块 + 隔壁独立 SDK 工程 `ziyou-ime-sdk`（坐标 `com.ziyou:ime-sdk`，经 composite build 源码消费，对外交付 AAR）；引擎经 `RimeEngine` 接口 + 轻量 DI 容器（`AppContainer`）解耦，纯逻辑覆盖 JVM 单元测试
+- **架构**：本仓 `:app` 单模块 + 隔壁独立 SDK 工程 `ziyou-ime-sdk`（坐标 `com.ziyou:ime-sdk`，以 AAR 坐标依赖消费，经 mavenLocal/私有仓库解析）；引擎经 `RimeEngine` 接口 + 轻量 DI 容器（`AppContainer`）解耦，纯逻辑覆盖 JVM 单元测试
 
 ## 特性一览
 
@@ -62,7 +62,19 @@
 - **NDK** r26+（用于编译 JNI 层，推荐 r26c）
 - **CMake** 3.22.1
 - **Kotlin / AGP / Compose**：Kotlin 2.2.10、Android Gradle Plugin 9.3.1、Compose BOM 2026.06.01（Material3）、Coroutines 1.11.0（版本集中在 [`gradle/libs.versions.toml`](gradle/libs.versions.toml)）
-- **Gradle 模块**：本仓仅 `:app`；底层 SDK 为隔壁独立工程 `ziyou-ime-sdk`（`com.android.library` 形态，经 `settings.gradle.kts` 的 `includeBuild` composite 以源码消费，可经 maven-publish 打包 AAR）
+- **Gradle 模块**：本仓仅 `:app`；底层 SDK 为隔壁独立工程 `ziyou-ime-sdk`（`com.android.library` 形态，经 maven-publish 打包 AAR），主工程经 `settings.gradle.kts` 的 mavenLocal（限 `com.ziyou` 组）以 AAR 坐标消费，**无源码级联编**；如需源码联调临时改回 `includeBuild("../ziyou-ime-sdk")`
+
+#### SDK AAR 获取（第三方集成）
+
+| 渠道 | 方式 | 适用场景 |
+|------|------|---------|
+| Maven Local | 克隆 ziyou-ime-sdk 后执行 `./gradlew publishToMavenLocal`，宿主 `repositories { mavenLocal() }` + `implementation("com.ziyou:ime-sdk:0.1.0-SNAPSHOT")` | 本地开发/联调 |
+| 私有 Maven 仓库 | Nexus/Artifactory/阿里云效等上传 AAR + POM + sources.jar，宿主配仓库 URL 后同坐标引用 | 团队/正式发布 |
+| GitHub Packages | `maven { url = uri("https://maven.pkg.github.com/<owner>/ziyou-ime-sdk") }`（需 token） | 开源分发 |
+
+> 注：JitPack 不适用——其从源码即时构建，而 SDK 依赖 277MB 预编译 `librime.a`
+> 与多个 git 子模块，需自行托管二进制产物。集成步骤详见 ziyou-ime-sdk 工程的
+> `INTEGRATION.md`（依赖配置/初始化/API 示例/排查）。
 
 > 当前构建默认仅打包 `arm64-v8a` ABI（见 [`app/build.gradle.kts`](app/build.gradle.kts) 的 `abiFilters`，
 > 可用 `-Pziyou.abis=` 覆盖）。如需其它 ABI，请同时编译对应的 `librime.a`。
@@ -118,7 +130,7 @@ ziyou-ime-sdk/libs/
 # 安装到设备
 adb install app/build/outputs/apk/debug/app-debug.apk
 
-# 运行单元测试（SDK + App；composite build 下 SDK 任务需在其工程目录内触发）
+# 运行单元测试（SDK + App；主工程经 AAR 消费 SDK，SDK 测试需在其工程目录内触发）
 (cd ../ziyou-ime-sdk && ./gradlew testDebugUnitTest) && ./gradlew :app:testDebugUnitTest
 ```
 
@@ -269,7 +281,7 @@ ziyou-ime/
 └── build.gradle.kts / settings.gradle.kts / gradle.properties
 
 ../ziyou-ime-sdk/                      # 隔壁独立 SDK 工程（坐标 com.ziyou:ime-sdk，交付 AAR，
-│                                      #  经 settings.gradle.kts includeBuild composite 消费）
+│                                      #  主工程经 mavenLocal AAR 坐标消费）
 ├── librime-prebuilt/                  # librime 源码编译链（build.sh / superbuild / 插件子模块）
 ├── libs/                              # 产物：<abi>/librime.a + include + LIBRIME_MANIFEST.txt
 └── src/{main,test}/
@@ -289,7 +301,7 @@ ziyou-ime/
 | 依赖 | 用途 |
 |------|------|
 | librime（预编译静态库） | Rime 输入引擎（已静态链入 SDK 的 librime_jni.so，含 predict/witogram 插件） |
-| `com.ziyou:ime-sdk`（隔壁工程，composite/AAR） | 引擎交互 + 通用输入能力：T9 映射 / 九宫格状态机 / 输入管线 / 状态服务 |
+| `com.ziyou:ime-sdk`（隔壁工程 AAR，mavenLocal/私有仓库） | 引擎交互 + 通用输入能力：T9 映射 / 九宫格状态机 / 输入管线 / 状态服务 |
 | sherpa-onnx 1.13.3（本地 AAR） | 本地流式语音识别引擎 |
 | Kotlin Coroutines 1.11 | 异步与单线程 Dispatcher |
 | Jetpack Compose (Material3) | 等级/词库/技能/皮肤等设置页面 |
@@ -326,7 +338,7 @@ ziyou-ime/
 # 编译检查
 ./gradlew :app:assembleDebug
 
-# 单元测试（SDK + app；composite 下 SDK 测试需在其工程目录内触发）
+# 单元测试（SDK + app；SDK 测试需在其工程目录内触发）
 (cd ../ziyou-ime-sdk && ./gradlew testDebugUnitTest) && ./gradlew :app:testDebugUnitTest
 
 # 代码格式化（JNI 层，源码位于 SDK 工程）

@@ -11,7 +11,7 @@ This file provides guidance to Qoder (qoder.com) when working with code in this 
 ./gradlew :app:assembleDebug
 
 # 全部单元测试（纯 JVM，无需设备；用例数基线见 scripts/unit-test-baseline.txt，只增不减；
-# composite build 下 SDK（隔壁工程 ziyou-ime-sdk）的测试需在其目录内触发）
+# 主工程经 AAR 消费 SDK；SDK 工程（隔壁 ziyou-ime-sdk）的测试需在其目录内触发）
 (cd ../ziyou-ime-sdk && ./gradlew testDebugUnitTest) && ./gradlew :app:testDebugUnitTest
 
 # 运行单个测试类 / 单个方法
@@ -32,12 +32,12 @@ cd ../ziyou-ime-sdk/librime-prebuilt && make librime   # 可选插件: make lua 
 
 - Gradle 9.5 + AGP 9.x，daemon 需 **JDK 21**（`gradle.properties` 已固定 `org.gradle.java.installations.paths` 指向 Android Studio JBR，并关闭 auto-detect；不要改回自动探测，IDE 同捆 JRE 缺 jlink 会导致构建失败）。
 - NDK r26+ / CMake 3.22.1；当前仅打包 `arm64-v8a`（`app/build.gradle.kts` 的 `abiFilters`）。
-- JNI 链接发生在隔壁工程 ziyou-ime-sdk（librime.a 静态链入 librime_jni.so，app 经 composite build 间接获得），其依赖的 `ziyou-ime-sdk/libs/arm64-v8a/librime.a` + `libs/include/rime_api.h` 由该工程内 `librime-prebuilt/` 生成并直接安装，通常已就位，勿删。
+- JNI 链接发生在隔壁工程 ziyou-ime-sdk（librime.a 静态链入 librime_jni.so，app 经 mavenLocal AAR 坐标消费），其依赖的 `ziyou-ime-sdk/libs/arm64-v8a/librime.a` + `libs/include/rime_api.h` 由该工程内 `librime-prebuilt/` 生成并直接安装，通常已就位，勿删。**SDK 源码变更后必须在 ziyou-ime-sdk 重新 `./gradlew publishToMavenLocal`，主工程才能感知。**
 - 语音识别依赖 `app/libs/sherpa-onnx-1.13.3.aar`（不入 git；缺失时跑 `scripts/fetch-sherpa-onnx.sh` 下载，默认走 GitHub Release，备选 hf-mirror 镜像）。
 
 ## 架构大图
 
-主工程仅 `:app` 单模块，经坐标 `com.ziyou:ime-sdk` 依赖隔壁独立 SDK 工程 `ziyou-ime-sdk`（settings.gradle.kts `includeBuild` composite 自动替换为源码；对外交付 AAR）。依赖方向由编译器强制单向：**`:app` → ime-sdk**。
+主工程仅 `:app` 单模块，经坐标 `com.ziyou:ime-sdk` 依赖隔壁独立 SDK 工程 `ziyou-ime-sdk`（settings.gradle.kts mavenLocal 限 com.ziyou 组解析 AAR，无源码级联编；源码联调可临时改回 includeBuild）。依赖方向由编译器强制单向：**`:app` → ime-sdk**。
 
 - **`ziyou-ime-sdk`（隔壁工程）**：引擎交互 + 通用输入能力。承载五层引擎栈的 Core/JNI/Engine 层：`RimeSdk` 门面、`RimeEngine`/`RimeApi`（实现 `RimeSession`/`SimpleRimeImpl` 均已 internal）、`InputSession` 输入管线（Mutex 事务串行）、`PreeditController`/`CandidatesService`/`SchemaService` 状态服务、T9 状态机（`KeyRecordStack`/`T9PinYinUtils`）、JNI 层（`src/main/jni/librime_jni/`，RAII）与 librime-prebuilt 编译链。**引擎交互类新代码一律去这里。**
 - **`:app`**：UI + 业务域：

@@ -158,9 +158,9 @@ androidComponents {
 dependencies {
 
     // ===== 底层 SDK（librime 交互 + 通用输入基础能力，含 JNI/native）=====
-    // 独立工程 ziyou-ime-sdk 交付，坐标 com.ziyou:ime-sdk；
-    // 本地开发经 settings.gradle.kts 的 includeBuild 自动替换为源码工程，
-    // CI/外部构建可改为 mavenLocal/私有仓库消费 AAR
+    // 独立工程 ziyou-ime-sdk 交付的 AAR，坐标 com.ziyou:ime-sdk；
+    // 经 settings.gradle.kts 的 mavenLocal（限 com.ziyou 组）解析：
+    // SDK 变更后需先在 ziyou-ime-sdk 执行 ./gradlew publishToMavenLocal
     api("com.ziyou:ime-sdk:0.1.0-SNAPSHOT")
 
     // ===== AndroidX Core =====
