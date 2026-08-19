@@ -7,7 +7,7 @@
 - **输入引擎**：librime（从源码交叉编译并合并为单个静态库，完全独立）
 - **界面**：键盘/候选区使用纯 Canvas 绘制（传统 View）；设置内的等级页、扩展词库页使用 Jetpack Compose (Material3)
 - **语言**：Kotlin + Kotlin 协程，JNI 层 C++17（RAII 资源管理）
-- **架构**：Gradle 多模块（`:app` + 底层 SDK `:rime-sdk`，可打包 AAR 独立集成）；五层引擎栈 + 业务域；引擎经 `RimeEngine` 接口 + 轻量 DI 容器（`AppContainer`）解耦，核心纯逻辑独立单元测试
+- **架构**：Gradle 多模块（`:app` + 底层 SDK `:ime-sdk`，可打包 AAR 独立集成）；五层引擎栈 + 业务域；引擎经 `RimeEngine` 接口 + 轻量 DI 容器（`AppContainer`）解耦，核心纯逻辑独立单元测试
 
 ## 特性一览
 
@@ -22,7 +22,7 @@
 - **编码区职责分离**：编码区（preedit）与候选词列表拆分为独立视图，垂直堆叠、互不干扰
 - **单线程安全**：所有 Rime 调用通过专属协程 Dispatcher 顺序执行，规避 librime 非线程安全问题
 - **隐私优先**：等级统计仅记录脱敏聚合计数（字数/天数），绝不记录任何输入内容，数据仅存本机
-- **模块化与可测试**：引擎交互与通用输入能力（T9 映射、九宫格状态机、输入管线、prediction）位于 `:rime-sdk`，业务纯逻辑（等级计分等）位于 `:app`，均覆盖单元测试；引擎接口化（`RimeEngine`）+ DI 容器便于替换与测试
+- **模块化与可测试**：引擎交互与通用输入能力（T9 映射、九宫格状态机、输入管线、prediction）位于 `:ime-sdk`，业务纯逻辑（等级计分等）位于 `:app`，均覆盖单元测试；引擎接口化（`RimeEngine`）+ DI 容器便于替换与测试
 
 ## 支持的输入方案
 
@@ -42,7 +42,7 @@
 - **NDK** r26+（用于编译 JNI 层，推荐 r26c）
 - **CMake** 3.22.1
 - **Kotlin / AGP / Compose**：Kotlin 2.2（由 AGP 内置 Kotlin 提供）、Android Gradle Plugin 9.x、Compose BOM 2026.02.01（Material3）
-- **Gradle 模块**：`:app`（应用：UI + 业务域）与 `:rime-sdk`（底层 SDK：librime 交互 + JNI/native + 通用输入基础能力，`com.android.library` 形态，可经 maven-publish 打包 AAR）
+- **Gradle 模块**：`:app`（应用：UI + 业务域）与 `:ime-sdk`（底层 SDK：librime 交互 + JNI/native + 通用输入基础能力，`com.android.library` 形态，可经 maven-publish 打包 AAR）
 
 > 当前构建仅打包 `arm64-v8a` ABI（见 [`app/build.gradle.kts`](app/build.gradle.kts) 的 `abiFilters`）。
 > 如需其它 ABI，请同时编译对应的 `librime.a` 并在 `abiFilters` 中追加。
@@ -58,26 +58,26 @@ cd ziyou-ime
 
 ### 2. 准备 librime 预编译库
 
-项目自带 `librime-prebuilt/` 模块，可**独立**从源码交叉编译 librime 并生成所需的静态库：
+预编译库构建工具链 `librime-prebuilt/` 位于 ziyou-ime-sdk 工程内（产物直接安装到该工程 `libs/`，日常 App 开发通常已就位，无需重编）：
 
 ```bash
-cd librime-prebuilt
-make librime          # 编译并把产物安装到 ../libs/
-cd ..
+cd ../ziyou-ime-sdk/librime-prebuilt
+make librime          # 编译并把产物安装到 ziyou-ime-sdk/libs/
+cd ../../ziyou-ime
 ```
 
 该模块把 librime 及其全部依赖（boost、glog、yaml-cpp、leveldb、marisa、opencc）
-从源码交叉编译并**合并为单个 `librime.a`**。编译完成后 `libs/` 目录结构：
+从源码交叉编译并**合并为单个 `librime.a`**。编译完成后 `ziyou-ime-sdk/libs/` 目录结构：
 
 ```
-libs/
+ziyou-ime-sdk/libs/
 ├── include/
 │   └── rime_api.h          # librime 头文件
 └── arm64-v8a/
     └── librime.a           # arm64 静态库（已合并全部依赖）
 ```
 
-> 详细步骤、可选插件与版本兼容性说明见 [`librime-prebuilt/README.md`](librime-prebuilt/README.md)。
+> 详细步骤、可选插件与版本兼容性说明见 ziyou-ime-sdk 工程内 `librime-prebuilt/README.md`。
 > 若已有来自其它来源的 `librime.a` 与 `rime_api.h`，按上述目录结构放入即可，App 侧无需改动。
 
 ### 3. 编译运行
@@ -90,7 +90,7 @@ libs/
 adb install app/build/outputs/apk/debug/app-debug.apk
 
 # 运行单元测试（SDK 模块 + App）
-./gradlew :rime-sdk:testDebugUnitTest :app:testDebugUnitTest
+./gradlew :ime-sdk:testDebugUnitTest :app:testDebugUnitTest
 ```
 
 ### 4. 启用输入法
@@ -158,7 +158,7 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 ### CMake 构建配置
 
-JNI 层的 CMake 配置位于 [`app/src/main/jni/librime_jni/CMakeLists.txt`](app/src/main/jni/librime_jni/CMakeLists.txt)，
+JNI 层的 CMake 配置位于隔壁工程 ziyou-ime-sdk（`src/main/jni/librime_jni/CMakeLists.txt`），
 通过 `option()` 控制可选模块编译链接：
 
 ```cmake
@@ -168,7 +168,7 @@ option(WITH_PREDICT "Enable Predict module" OFF)
 option(WITH_OPENCC "Enable OpenCC module" OFF)
 ```
 
-在 `app/build.gradle.kts` 中启用可选模块：
+在 ziyou-ime-sdk 的 `build.gradle.kts` 中启用可选模块：
 
 ```kotlin
 android {
@@ -182,21 +182,21 @@ android {
 }
 ```
 
-启用某模块时，还需将对应的静态库（如 `librime-lua.a`）放入 `libs/<abi>/`。
+启用某模块时，需经 ziyou-ime-sdk 内 `librime-prebuilt/build.sh` 以对应 `WITH_*=ON` 重编（插件会合并进 librime.a 并直接安装到 `ziyou-ime-sdk/libs/<abi>/`）。
 
 ### 模块化构建
 
-项目按 Gradle 多模块组织，依赖方向单向向下（`:app → :rime-sdk`，由编译器强制边界）：
+项目按 Gradle 多模块组织，依赖方向单向向下（`:app → :ime-sdk`，由编译器强制边界）：
 
-- `:app`：Android 应用，包含 IME 服务、UI 与业务域持久化，依赖 `:rime-sdk`
-- `:rime-sdk`：底层 SDK（`com.android.library` 形态），承载五层引擎栈的 Core/JNI/Engine 层与通用输入管线（InputSession/状态服务/RimeSdk 门面），含 T9 状态机与 prediction 纯逻辑，可打包 AAR 独立集成（见 docs/SDK模块拆分重构方案.md）
+- `:app`：Android 应用，包含 IME 服务、UI 与业务域持久化，依赖 `:ime-sdk`
+- `:ime-sdk`：底层 SDK（`com.android.library` 形态），承载五层引擎栈的 Core/JNI/Engine 层与通用输入管线（InputSession/状态服务/RimeSdk 门面），含 T9 状态机与 prediction 纯逻辑，可打包 AAR 独立集成（见 docs/SDK模块拆分重构方案.md）
 
 ```bash
 # 仅编译/测试 SDK 模块
-./gradlew :rime-sdk:testDebugUnitTest
+./gradlew :ime-sdk:testDebugUnitTest
 
 # 编译并测试整个工程
-./gradlew :rime-sdk:testDebugUnitTest :app:testDebugUnitTest
+./gradlew :ime-sdk:testDebugUnitTest :app:testDebugUnitTest
 ```
 
 > 首次同步会拉取 `com.android.library` 插件 marker；离线环境请先在联网时同步一次。
@@ -285,7 +285,7 @@ ziyou-ime/
 │       │   ├── level/                      # 等级持久化：LevelRepository / LevelStats / LevelState
 │       │   └── ui/                         # SettingsActivity / LevelActivity / DictManagerActivity(+VM)
 │       └── res/                           # Android 资源（含 input_method.xml）
-├── rime-sdk/                          # 底层 SDK 模块（librime 交互 + 通用输入能力，交付 AAR）
+├── ime-sdk/                          # 底层 SDK 模块（librime 交互 + 通用输入能力，交付 AAR）
 │   └── src/{main,test}/
 │       ├── jni/librime_jni/               # C++/JNI 层（rime_jni.cc / config.cc / CMakeLists.txt）
 │       └── java/com/ziyou/ime/
@@ -295,8 +295,6 @@ ziyou-ime/
 │           ├── sdk/                        # RimeSdk 门面 + input/InputSession + state 状态服务
 │           └── util/T9PinYinUtils.kt      # T9 ↔ 拼音双向映射
 ├── dicts-repo/                        # 扩展词库源仓库（catalog.json + dicts/*.dict.yaml）
-├── libs/                              # 预编译 librime（按 ABI 分目录，由 librime-prebuilt 生成）
-├── librime-prebuilt/                  # librime 预编译模块（源码交叉编译 + 合并为 librime.a）
 ├── docs/                              # 设计文档（如 等级体系可行性方案）
 ├── ARCHITECTURE.md                    # 架构设计文档
 ├── build.gradle.kts / settings.gradle.kts / gradle.properties

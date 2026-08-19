@@ -5,7 +5,7 @@
 #       低于本文件记录的基线即判定失败。
 #
 # 更新方式：
-#   (cd ../ziyou-rime-sdk && ./gradlew testDebugUnitTest) && ./gradlew :app:testDebugUnitTest
+#   (cd ../ziyou-ime-sdk && ./gradlew testDebugUnitTest) && ./gradlew :app:testDebugUnitTest
 #   把实测总数写到下面（首个纯数字行即基线，其余行为注释）；
 #   发布脚本 build-release.sh 自动累加两工程 XML 报告。
 #
@@ -91,11 +91,11 @@
 # witogram 集成守护：SchemaPenaltyConfigTest ×2（白霜 grammar 段
 # 不变量：language/zh-moqi + non_collocation_penalty/-4 +
 # grammar_penalty/-4；zh-moqi.gram 随 assets 部署且体积区间校验））
-# 当前实测：:rime-sdk 168 + :app 439（2026-08-19，全绿、0 跳过；
-# SDK 拆分 P1~P3：:core-logic 撤销分流（T9/prediction/引擎层 → rime-sdk，
+# 当前实测：:ime-sdk 168 + :app 439（2026-08-19，全绿、0 跳过；
+# SDK 拆分 P1~P3：:core-logic 撤销分流（T9/prediction/引擎层 → ime-sdk，
 # 业务纯逻辑 → app），用例随类迁移总数不变；新增 StateServicesTest ×8
 # （PreeditState 空值规范/字段映射、CandidatesSnapshot 联想态判定）
-# 当前实测：:rime-sdk 171 + :app 439（2026-08-19，全绿、0 跳过；
+# 当前实测：:ime-sdk 171 + :app 439（2026-08-19，全绿、0 跳过；
 # SDK 集成审计：KeyRecordStackTest ×3（trailingT9Digits 纯数字/锁定后/
 # 分词符隔断），支撑 InputSession.t9PinyinCandidates 黑盒查询口）
 610

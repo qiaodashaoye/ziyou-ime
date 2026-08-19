@@ -30,7 +30,7 @@ import kotlinx.coroutines.CoroutineScope
  *
  * SDK 拆分后（docs/SDK模块拆分重构方案.md §3.3）：通用输入管线（按键事务串行、
  * processKeyBulk、候选/翻页/T9 消歧、分段确认状态机同步）下沉到
- * [InputSession]（:rime-sdk）；本类只保留**业务**职责：
+ * [InputSession]（:ime-sdk）；本类只保留**业务**职责：
  * - [CommitTarget] 上屏改道路由（技能面板输入框）；
  * - 编辑器 [CommitSink] 实现（InputConnection + 回车语义 + 上屏监听）；
  * - [commitListeners] / [commitTextObservers] 横切回调（等级计分 / LLM 续写）；

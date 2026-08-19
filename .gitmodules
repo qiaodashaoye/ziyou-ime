@@ -1,9 +1,0 @@
-[submodule "librime-prebuilt/librime"]
-	path = librime-prebuilt/librime
-	url = https://github.com/rime/librime.git
-[submodule "librime-prebuilt/plugins/librime-lua"]
-	path = librime-prebuilt/plugins/librime-lua
-	url = https://github.com/hchunhui/librime-lua
-[submodule "librime-prebuilt/plugins/librime-witogram"]
-	path = librime-prebuilt/plugins/librime-witogram
-	url = https://github.com/levelel/librime-witogram.git

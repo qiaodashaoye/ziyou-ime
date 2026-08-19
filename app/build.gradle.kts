@@ -14,7 +14,7 @@ val keystoreProperties = Properties().apply {
 }
 
 // 发布 ABI 列表可通过 -Pziyou.abis=arm64-v8a,armeabi-v7a 覆盖；
-// librime_jni.so 由 :rime-sdk 模块编译（librime.a 经 libs/<abi>/ 链入），
+// librime_jni.so 由 :ime-sdk 模块编译（librime.a 经 libs/<abi>/ 链入），
 // 此处 abiFilters 仅约束最终 APK 打包的 ABI 集合
 val releaseAbis = (project.findProperty("ziyou.abis") as String?)
     ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
@@ -158,10 +158,10 @@ androidComponents {
 dependencies {
 
     // ===== 底层 SDK（librime 交互 + 通用输入基础能力，含 JNI/native）=====
-    // 独立工程 ziyou-rime-sdk 交付，坐标 com.ziyou:rime-sdk；
+    // 独立工程 ziyou-ime-sdk 交付，坐标 com.ziyou:ime-sdk；
     // 本地开发经 settings.gradle.kts 的 includeBuild 自动替换为源码工程，
     // CI/外部构建可改为 mavenLocal/私有仓库消费 AAR
-    api("com.ziyou:rime-sdk:0.1.0-SNAPSHOT")
+    api("com.ziyou:ime-sdk:0.1.0-SNAPSHOT")
 
     // ===== AndroidX Core =====
     implementation(libs.androidx.core.ktx)

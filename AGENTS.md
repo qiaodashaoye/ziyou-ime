@@ -23,15 +23,15 @@ This file provides guidance to Qoder (qoder.com) when working with code in this 
 # JNI 层格式化
 clang-format -i app/src/main/jni/librime_jni/*.cc app/src/main/jni/librime_jni/*.h
 
-# 重建 librime 预编译静态库（产物安装到 libs/<abi>/librime.a，日常开发不需要）
-cd librime-prebuilt && make librime   # 可选插件: make lua / octagram / predict / witogram
+# 重建 librime 预编译静态库（工具链已迁至 ziyou-ime-sdk，产物安装到其 libs/<abi>/librime.a，日常开发不需要）
+cd ../ziyou-ime-sdk/librime-prebuilt && make librime   # 可选插件: make lua / octagram / predict / witogram
 ```
 
 构建环境要点：
 
 - Gradle 9.5 + AGP 9.x，daemon 需 **JDK 21**（`gradle.properties` 已固定 `org.gradle.java.installations.paths` 指向 Android Studio JBR，并关闭 auto-detect；不要改回自动探测，IDE 同捆 JRE 缺 jlink 会导致构建失败）。
 - NDK r26+ / CMake 3.22.1；当前仅打包 `arm64-v8a`（`app/build.gradle.kts` 的 `abiFilters`）。
-- `:app` 的 JNI 链接依赖 `libs/arm64-v8a/librime.a` + `libs/include/rime_api.h`（由 `librime-prebuilt/` 生成，通常已就位，勿删）。
+- JNI 链接发生在隔壁工程 ziyou-ime-sdk（librime.a 静态链入 librime_jni.so，app 经 composite build 间接获得），其依赖的 `ziyou-ime-sdk/libs/arm64-v8a/librime.a` + `libs/include/rime_api.h` 由该工程内 `librime-prebuilt/` 生成并直接安装，通常已就位，勿删。
 - 语音识别依赖 `app/libs/sherpa-onnx-1.13.3.aar`（不入 git；缺失时跑 `scripts/fetch-sherpa-onnx.sh` 下载，默认走 GitHub Release，备选 hf-mirror 镜像）。
 
 ## 架构大图
@@ -60,6 +60,6 @@ Gradle 双模块，依赖方向由编译器强制单向：**`:app` → `:core-lo
 ## 其他入口
 
 - Rime 配置/方案：`app/src/main/assets/rime/`（方案清单在 `default.yaml` 的 `schema_list`；新增方案后需 fullCheck 重部署）。
-- 可选 Native 模块（Lua/Octagram/Predict/Witogram/OpenCC）：`app/build.gradle.kts` 加 CMake 参数（如 `-DWITH_PREDICT=ON`）+ 对应静态库放入 `libs/<abi>/`；librime-predict 与 librime-witogram 当前已启用。
+- 可选 Native 模块（Lua/Octagram/Predict/Witogram/OpenCC）：`ziyou-ime-sdk/build.gradle.kts` 加 CMake 参数（如 `-DWITH_PREDICT=ON`）+ 经 ziyou-ime-sdk 内 `librime-prebuilt/build.sh` 以对应 `WITH_*=ON` 重编 librime.a（产物直接安装到 `ziyou-ime-sdk/libs/<abi>/`）；librime-predict 与 librime-witogram 当前已启用。
 - 皮肤开发样例：`skins-dev/`（`pack.sh` 打包 `.zyskin`）；技能插件样例：`skills-dev/`（打包 `.skill`，开发指南见 `docs/技能插件开发指南.md`）。
 - 设计文档集中在 `docs/`；仓库内 `.qoder/agents/` 提供本项目专用 subagent（开发/评审/测试/性能审计等），复杂任务可委派。

@@ -7,9 +7,10 @@
 #
 # 选项:
 #   --abis <list>       逗号分隔的 ABI 列表（默认 arm64-v8a）
-#   --rebuild-native    先重建 librime 预编译库（调用 librime-prebuilt/build.sh，
-#                       复用其 NDK/CMake 自动探测逻辑，强制 WITH_PREDICT=ON
-#                       以与 app 侧 -DWITH_PREDICT=ON 保持一致）
+#   --rebuild-native    先重建 librime 预编译库（调用 ziyou-ime-sdk 内
+#                       librime-prebuilt/build.sh，复用其 NDK/CMake 自动探测
+#                       逻辑，强制 WITH_LUA/PREDICT/WITOGRAM=ON 以与
+#                       ziyou-ime-sdk build.gradle.kts 的 -DWITH_* 开关一致）
 #   --skip-tests        跳过单元测试（仅限本地快速验证，正式发布禁用）
 #
 # 产物:
@@ -17,7 +18,7 @@
 #
 # 前置条件:
 #   1. 根目录存在 keystore.properties（参考 keystore.properties.template）
-#   2. 每个目标 ABI 已有 libs/<abi>/librime.a（或使用 --rebuild-native）
+#   2. 每个目标 ABI 已有 ziyou-ime-sdk/libs/<abi>/librime.a（或使用 --rebuild-native）
 
 set -euo pipefail
 
@@ -79,17 +80,20 @@ fi
 echo ">> 签名密钥库: ${STORE_FILE}"
 
 # ---------------------------------------------------------------------------
-# 1. Native 预编译库（可选重建；NDK/CMake 探测复用 librime-prebuilt/build.sh）
+# 1. Native 预编译库（可选重建；工具链 librime-prebuilt/ 已随 SDK 工程迁移，
+#    librime.a 静态链入 librime_jni.so，app 经 composite build 间接获得）
 # ---------------------------------------------------------------------------
+SDK_DIR="${ROOT_DIR}/../ziyou-ime-sdk"
 if [ "${REBUILD_NATIVE}" -eq 1 ]; then
-  echo ">> 重建 librime 预编译库: ${ABI_ARR[*]}（WITH_PREDICT=ON）"
-  ( cd "${ROOT_DIR}/librime-prebuilt" && WITH_PREDICT=ON ./build.sh "${ABI_ARR[@]}" )
+  echo ">> 重建 librime 预编译库: ${ABI_ARR[*]}（WITH_LUA/PREDICT/WITOGRAM=ON，与 SDK 开关一致）"
+  ( cd "${SDK_DIR}/librime-prebuilt" && WITH_LUA=ON WITH_PREDICT=ON WITH_WITOGRAM=ON ./build.sh "${ABI_ARR[@]}" )
 fi
 
+# 存在性检查直指 SDK libs/（产物唯一落点）
 for ABI in "${ABI_ARR[@]}"; do
-  if [ ! -f "${ROOT_DIR}/libs/${ABI}/librime.a" ]; then
-    echo "错误: 缺少 libs/${ABI}/librime.a。" >&2
-    echo "请先执行: cd librime-prebuilt && WITH_PREDICT=ON ./build.sh ${ABI}" >&2
+  if [ ! -f "${SDK_DIR}/libs/${ABI}/librime.a" ]; then
+    echo "错误: 缺少 ziyou-ime-sdk/libs/${ABI}/librime.a。" >&2
+    echo "请先执行: cd ../ziyou-ime-sdk/librime-prebuilt && WITH_LUA=ON WITH_PREDICT=ON WITH_WITOGRAM=ON ./build.sh ${ABI}" >&2
     echo "或本脚本追加 --rebuild-native。" >&2
     exit 1
   fi
@@ -118,9 +122,8 @@ sum_test_results() {
 
 if [ "${SKIP_TESTS}" -eq 0 ]; then
   echo ">> 运行全量单元测试 ..."
-  # SDK 已独立为隔壁工程 ziyou-rime-sdk（composite build 引入），其测试需在
+  # SDK 已独立为隔壁工程 ziyou-ime-sdk（composite build 引入），其测试需在
   # 工程目录内单独触发（included build 的任务不能经主构建路径直接执行）
-  SDK_DIR="${ROOT_DIR}/../ziyou-rime-sdk"
   if [ ! -d "${SDK_DIR}" ]; then
     echo "错误: 未找到 SDK 独立工程 ${SDK_DIR}（settings.gradle.kts includeBuild 依赖）。" >&2
     exit 1

@@ -1,14 +1,14 @@
 # ziyou-ime SDK 模块拆分重构方案
 
-> 目标：将 `ziyou-ime` 拆分为「底层 SDK 模块（rime-sdk）」与「上层应用/业务模块（app）」两个独立 Gradle 模块。
+> 目标：将 `ziyou-ime` 拆分为「底层 SDK 模块（ime-sdk）」与「上层应用/业务模块（app）」两个独立 Gradle 模块。
 > SDK 封装与 librime 的全部交互及输入法通用基础能力，可打包为 AAR 供其他应用集成；
 > 上层模块只负责 UI 展示、用户交互与业务逻辑（等级、扩展词库、技能、皮肤、更新、语音、AI 增强等）。
 >
 > 现状基线见 [ARCHITECTURE.md](../ARCHITECTURE.md)；本文档为重构蓝图，落地后回写 ARCHITECTURE.md。
 >
-> **后续演进（已落地）**：P5 之后 `:rime-sdk` 进一步独立为隔壁工程 `ziyou-rime-sdk`
-> （自主打包 AAR，坐标 `com.ziyou:rime-sdk`），ziyou-ime 经坐标依赖 +
-> `includeBuild` composite 消费；第三方集成文档见 `ziyou-rime-sdk/INTEGRATION.md`。
+> **后续演进（已落地）**：P5 之后 `:ime-sdk` 进一步独立为隔壁工程 `ziyou-ime-sdk`
+> （自主打包 AAR，坐标 `com.ziyou:ime-sdk`），ziyou-ime 经坐标依赖 +
+> `includeBuild` composite 消费；第三方集成文档见 `ziyou-ime-sdk/INTEGRATION.md`。
 
 ---
 
@@ -40,9 +40,9 @@ SDK 化视角下的关键耦合点：
 │ 业务域       level/ · dict/ · skill/ · skin/ · update/ · voice/ · ai/ · data/  │
 │ 装配根       di/AppContainer（deploySteps、commitListeners 注入点）             │
 └──────────────────────────────┬────────────────────────────────────────────────┘
-                               │ api(project(":rime-sdk"))  单向依赖
+                               │ api(project(":ime-sdk"))  单向依赖
                                ▼
-┌──────────────────────────── :rime-sdk（底层 SDK 模块，交付 AAR）───────────────┐
+┌──────────────────────────── :ime-sdk（底层 SDK 模块，交付 AAR）───────────────┐
 │ 门面层       RimeSdk（初始化/关闭）· InputSession（通用输入管线）                │
 │ 服务层       CandidatesService（候选查询/翻页/选删）                              │
 │             PreeditController（编码区状态 StateFlow）                            │
@@ -57,7 +57,7 @@ SDK 化视角下的关键耦合点：
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**依赖方向**：`:app → :rime-sdk`（编译器强制单向）。`:core-logic` 模块撤销，内容按 §3.4 分流进两个模块。
+**依赖方向**：`:app → :ime-sdk`（编译器强制单向）。`:core-logic` 模块撤销，内容按 §3.4 分流进两个模块。
 
 **命名空间**：SDK 模块 Gradle namespace `com.ziyou.ime.sdk`（新增代码用新包）；
 迁移的既有类**保持原包名**（`com.ziyou.ime.core` / `daemon` / `config` 等），零 JNI 符号与调用点改动（见 §8 R1）。
@@ -66,7 +66,7 @@ SDK 化视角下的关键耦合点：
 
 ## 3. 模块划分建议
 
-### 3.1 `:rime-sdk` 迁入清单
+### 3.1 `:ime-sdk` 迁入清单
 
 | 现位置（:app） | 类 | 迁移理由 |
 |----------------|----|----------|
@@ -103,8 +103,8 @@ SDK 化视角下的关键耦合点：
 
 | 内容 | 去向 | 理由 |
 |------|------|------|
-| `util/T9PinYinUtils`、`core/t9/KeyRecordStack` | **:rime-sdk** | T9 是输入法通用能力，且 `InputSession` 直接依赖 |
-| `core/prediction/*`（LruCache/StreamCandidateText/AdoptionRecord） | **:rime-sdk** | 候选缓存/流式解析与引擎候选语义绑定，属通用增强 |
+| `util/T9PinYinUtils`、`core/t9/KeyRecordStack` | **:ime-sdk** | T9 是输入法通用能力，且 `InputSession` 直接依赖 |
+| `core/prediction/*`（LruCache/StreamCandidateText/AdoptionRecord） | **:ime-sdk** | 候选缓存/流式解析与引擎候选语义绑定，属通用增强 |
 | `core/level/LevelEngine` | **:app**（`level/` 包内） | 纯业务计分规则 |
 | `core/skill/*`、`core/markdown`、`core/floating/FloatingPanelGeometry`、`util/AppVersionUtils` | **:app** | 技能/渲染/悬浮形态/应用更新均为业务 |
 
@@ -305,10 +305,10 @@ UI/Main 线程 ──suspend──▶ SDK InputSession/Services ──dispatch�
 
 ### 6.1 CMake/JNI 迁移
 
-- `app/src/main/jni/librime_jni/` 整体移入 `rime-sdk/src/main/jni/librime_jni/`；
-  `externalNativeBuild { cmake { path = ... } }` 随 `android {}` 块移入 `rime-sdk/build.gradle.kts`。
+- `app/src/main/jni/librime_jni/` 整体移入 `ime-sdk/src/main/jni/librime_jni/`；
+  `externalNativeBuild { cmake { path = ... } }` 随 `android {}` 块移入 `ime-sdk/build.gradle.kts`。
 - CMake 中 `get_filename_component(... "${CMAKE_SOURCE_DIR}/../../../../../" ABSOLUTE)`
-  定位仓库根 `libs/`：`rime-sdk` 与 `app` 目录深度相同，**该相对路径无需修改**。
+  定位仓库根 `libs/`：`ime-sdk` 与 `app` 目录深度相同，**该相对路径无需修改**。
 - `librime.a` 仍由 `librime-prebuilt/build.sh` 产出到根 `libs/<abi>/`，位置不变；
   每个发布 ABI 必须先产出对应 `librime.a` 的既有规则不变。
 - 模块开关（`-DWITH_PREDICT/LUA/WITOGRAM=ON`）随 `externalNativeBuild.cmake.arguments`
@@ -316,17 +316,17 @@ UI/Main 线程 ──suspend──▶ SDK InputSession/Services ──dispatch�
 
 ### 6.2 AAR 产物形态
 
-- `:rime-sdk` 为 `com.android.library`，AAR 内含：Kotlin 类（classes.jar）、
+- `:ime-sdk` 为 `com.android.library`，AAR 内含：Kotlin 类（classes.jar）、
   `jni/<abi>/librime_jni.so`（librime.a 已静态链入 .so，消费方无需再碰静态库）、
   `consumer-rules.pro`、空或最小 assets（引擎方案/词库 assets 属内容，归宿主，见 §6.4）。
 - **JAR 形态说明**：纯 JAR 无法携带 `.so`，仅适用于「消费方自行集成 native 库」的
   特殊场景，不作为默认交付；默认且推荐形态为 AAR。
-- 发布：`maven-publish` 插件，坐标建议 `com.ziyou:rime-sdk:<version>`，
+- 发布：`maven-publish` 插件，坐标建议 `com.ziyou:ime-sdk:<version>`，
   独立版本号与宿主 `versionCode` 解耦（由此引出 §4.5 的 `deployVersion` 显式传参）。
 
 ### 6.3 Consumer ProGuard 规则
 
-新建 `rime-sdk/consumer-rules.pro`，自 `app/proguard-rules.pro` 迁入 JNI 保活规则：
+新建 `ime-sdk/consumer-rules.pro`，自 `app/proguard-rules.pro` 迁入 JNI 保活规则：
 
 ```proguard
 # JNI 反射查找的 Proto/回调类（objconv.h 缓存 jclass）
@@ -350,7 +350,7 @@ userdb 迁移钩子」，不感知具体文件。收益：其他集成方可自�
 | 阶段 | 内容 | 验证标准 |
 |------|------|----------|
 | **P0 基线保护** | 跑通 `./gradlew testDebugUnitTest`，确认 `scripts/unit-test-baseline.txt` 基线；git 建分支 `feat/sdk-split` | 基线绿 |
-| **P1 物理迁移** | 建 `:rime-sdk` 模块；按 §3.1 迁移 `core/` `daemon/` `RimeConfigManager` `AssetDeployer` `KeyCode` + JNI 目录；**包名保持不变**；`:app` 改 `implementation(project(":rime-sdk"))`（此阶段用 `api` 暴露以最小化调用点改动） | assembleDebug 通过；JNI 21 符号可加载；部署/输入冒烟 |
+| **P1 物理迁移** | 建 `:ime-sdk` 模块；按 §3.1 迁移 `core/` `daemon/` `RimeConfigManager` `AssetDeployer` `KeyCode` + JNI 目录；**包名保持不变**；`:app` 改 `implementation(project(":ime-sdk"))`（此阶段用 `api` 暴露以最小化调用点改动） | assembleDebug 通过；JNI 21 符号可加载；部署/输入冒烟 |
 | **P2 输入管线拆分** | 从 `InputLogicController` 抽出 `InputSession` + `CommitSink`（§3.3/§4.2）；app 留 `ZiYouInputController` 薄层 | 数据流 A/B 真机冒烟；单测迁移不降基线 |
 | **P3 状态服务化** | 落地 `PreeditController` / `CandidatesService` / `SchemaService`（§4.3~4.5）；`PreeditOverlayView` / `SimpleCandidatesView` 改订阅 StateFlow；`:core-logic` 按 §3.4 分流并删除该模块 | T9 消歧、联想态渲染、翻页选词回归通过；`AssetDeployer.migrateUserDb` 守卫语义专项用例通过 |
 | **P4 门面与收口** | 落地 `RimeSdk` / `RimeSdkConfig`；`AppContainer` 改为组装 `RimeSdkConfig` 并 `RimeSdk.init`；内部类标 `internal`/`@RestrictTo`；consumer-rules 迁位 | `overrideRimeEngine` 式测试替身仍可用；release 构建 R8 通过 |
@@ -383,10 +383,10 @@ userdb 迁移钩子」，不感知具体文件。收益：其他集成方可自�
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│ ① 引擎能力层     librime.a（witogram/lua/predict 已静态编入）+ JNI     │ → :rime-sdk
+│ ① 引擎能力层     librime.a（witogram/lua/predict 已静态编入）+ JNI     │ → :ime-sdk
 │                  模块注册声明（rime_require_module_*）+ CMake WITH_* 开关│
 ├──────────────────────────────────────────────────────────────────────┤
-│ ② 部署框架层     AssetDeployer 通用复制/版本对比/userdb 迁移框架        │ → :rime-sdk
+│ ② 部署框架层     AssetDeployer 通用复制/版本对比/userdb 迁移框架        │ → :ime-sdk
 ├──────────────────────────────────────────────────────────────────────┤
 │ ③ 内容资源层     assets/rime/**：schema/dict/lua/opencc/grammar/*.gram │ → :app（宿主）
 │                  predict.db —— 全部是产品内容，SDK 不携带              │
@@ -400,9 +400,9 @@ userdb 迁移钩子」，不感知具体文件。收益：其他集成方可自�
 
 | 事项 | 归属 | 一句话理由 |
 |------|------|-----------|
-| witogram 插件二进制（已链入 `librime.a`）与 JNI 模块注册 | **:rime-sdk** | 编译期能力，随 native 产物天然内聚，宿主无法也不应单独注入 |
-| `rime_jni.cc` 的 `declare_librime_module_dependencies()` 与 CMake `-DWITH_WITOGRAM=ON` | **:rime-sdk** | 与预编译库的 `WITH_*` 开关构成配对契约（不一致即 undefined symbol），只能由持有 .so 的模块维护 |
-| 部署框架（assets→files 复制、`deployVersion` 对比、userdb 迁移钩子） | **:rime-sdk** | 通用机制，与具体文件内容无关 |
+| witogram 插件二进制（已链入 `librime.a`）与 JNI 模块注册 | **:ime-sdk** | 编译期能力，随 native 产物天然内聚，宿主无法也不应单独注入 |
+| `rime_jni.cc` 的 `declare_librime_module_dependencies()` 与 CMake `-DWITH_WITOGRAM=ON` | **:ime-sdk** | 与预编译库的 `WITH_*` 开关构成配对契约（不一致即 undefined symbol），只能由持有 .so 的模块维护 |
+| 部署框架（assets→files 复制、`deployVersion` 对比、userdb 迁移钩子） | **:ime-sdk** | 通用机制，与具体文件内容无关 |
 | `assets/rime/**`（schema/dict/lua/opencc）与 `assets/rime/grammar/zh-moqi.gram` | **:app** | 产品内容：字由选什么词库、哪个默认方案、用什么语法模型，是业务决策 |
 | `rime_frost.schema.yaml` 的 grammar 段（`language: zh-moqi`、`non_collocation_penalty: -4`） | **:app** | 是 schema 内容的一部分；调参属于产品体验决策（上游 -12 对白霜惩罚过重才改 -4） |
 | 扩展词库下载/启停/`regenerateMainDict`、predict.db 回盖 | **:app**（经 `preDeploySteps` 注入 SDK） | 业务编排；依赖反转通道已在 §4.1 保留 |
@@ -440,7 +440,7 @@ SDK 通过**能力探测**保障兼容而非捆绑内容：建议在 `RimeApi` �
 - AAR 内只有能力（`librime_jni.so`，librime.a 已静态链入）+ 部署框架 + consumer-rules，
   **零内容 assets**；内容与 SDK 版本独立演进（词库热更新走既有扩展词库通道，不必发版）。
 - witogram 静态编入会抬升所有集成方的 .so 体积——若未来出现轻量需求，演进方案是
-  **SDK AAR 变体**（`rime-sdk-full` 全模块 / `rime-sdk-core` 仅基础），由
+  **SDK AAR 变体**（`ime-sdk-full` 全模块 / `ime-sdk-core` 仅基础），由
   `librime-prebuilt/build.sh` 的 `WITH_*` 组合产出多份 `librime.a` 支撑；
   当前单变体先行，变体矩阵列入 §10 后续演进。
 - 契约面：SDK 文档需声明「二进制能力清单（predict/lua/witogram）」与

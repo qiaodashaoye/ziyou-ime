@@ -1,2 +1,0 @@
-# 该目录用于放置可选的 librime 插件源码（librime-lua / librime-octagram /
-# librime-predict）。默认不启用；启用方式见 ../README.md 第 5 节。
