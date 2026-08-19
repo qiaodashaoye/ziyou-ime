@@ -51,8 +51,10 @@ object AssetDeployer {
         "custom_phrase_t9.txt"
     )
 
-    fun deployIfNeeded(context: Context): Boolean {
-        val currentVersion = getAppVersionCode(context)
+    fun deployIfNeeded(context: Context, deployVersionOverride: Long? = null): Boolean {
+        // SDK 独立版本化后宿主可显式传入部署版本（RimeSdkConfig.deployVersion），
+        // 未传时回退读宿主 versionCode，存量行为不变
+        val currentVersion = deployVersionOverride ?: getAppVersionCode(context)
         val deployedVersion = getDeployedVersion(context)
 
         if (currentVersion == deployedVersion) {
@@ -87,8 +89,9 @@ object AssetDeployer {
      * 首次安装（已部署版本为 0）或版本升级（新增/修改方案）均返回 true，
      * 供调用方据此决定是否让 Rime 执行完整维护（fullCheck）以编译新方案。
      */
-    fun needsDeploy(context: Context): Boolean {
-        return getAppVersionCode(context) != getDeployedVersion(context)
+    fun needsDeploy(context: Context, deployVersionOverride: Long? = null): Boolean {
+        val currentVersion = deployVersionOverride ?: getAppVersionCode(context)
+        return currentVersion != getDeployedVersion(context)
     }
 
     private fun performDeploy(context: Context, versionCode: Long): Boolean {

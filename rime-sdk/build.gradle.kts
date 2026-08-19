@@ -29,6 +29,9 @@ android {
     defaultConfig {
         minSdk = 24
 
+        // JNI 保活规则随 AAR 下发，集成方无需自行配置（§6.3）
+        consumerProguardFiles("consumer-rules.pro")
+
         ndk {
             abiFilters += releaseAbis
         }

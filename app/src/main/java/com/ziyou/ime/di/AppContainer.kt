@@ -4,13 +4,13 @@ import com.ziyou.ime.ZiyouApplication
 import com.ziyou.ime.ai.prediction.LlmPredictionConfig
 import com.ziyou.ime.ai.prediction.LlmPredictionCoordinator
 import com.ziyou.ime.ai.prediction.PowerNetworkProbe
-import com.ziyou.ime.config.AssetDeployer
 import com.ziyou.ime.daemon.RimeDeployStep
 import com.ziyou.ime.daemon.RimeEngine
-import com.ziyou.ime.daemon.RimeSession
 import com.ziyou.ime.dict.DictManager
 import com.ziyou.ime.dict.PredictDbManager
 import com.ziyou.ime.level.LevelStats
+import com.ziyou.ime.sdk.RimeSdk
+import com.ziyou.ime.sdk.RimeSdkConfig
 import com.ziyou.ime.voice.SherpaOnnxEngine
 import com.ziyou.ime.voice.SpeechRecognizerEngine
 
@@ -22,8 +22,8 @@ import com.ziyou.ime.voice.SpeechRecognizerEngine
  * 而非直接引用 [RimeSession] 等单例；测试时可通过 [overrideRimeEngine] 注入 fake 实现。
  *
  * 装配职责：
- * - [RimeSession.deploySteps]：引擎启动前的部署步骤（资源部署 → 扩展词库注入），
- *   使 daemon 层不直接依赖 config / dict 业务模块（依赖方向经此反转）。
+ * - 经 [RimeSdk.init] 装配引擎启动前的部署步骤（SDK 通用资源部署 →
+ *   predict.db 回盖 → 扩展词库注入），SDK 内部不直接依赖业务模块（依赖反转）。
  * - [commitListeners]：编辑器路径上屏后的横切监听（等级计分），
  *   使输入热路径（InputLogicController）不硬编码业务单例。
  * - [commitTextObservers]：编辑器路径上屏后的文本观察者（LLM 智能续写），
@@ -39,19 +39,27 @@ object AppContainer {
     @Volatile
     private var speechEngineOverride: SpeechRecognizerEngine? = null
 
-    /** 生产引擎：首次访问时完成部署步骤装配（懒装配，线程安全由 lazy 保证）。 */
+    /** 生产引擎：首次访问时经 [RimeSdk.init] 完成部署步骤装配（懒装配，线程安全由 lazy 保证）。 */
     private val defaultEngine: RimeEngine by lazy {
-        RimeSession.deploySteps = listOf(
-            // 第一步：部署资源文件（首次安装/升级时从 assets 复制到内部存储）
-            RimeDeployStep { context -> AssetDeployer.deployIfNeeded(context) },
-            // 第二步：恢复已安装的 predict.db 联想子库（升版 assets 覆盖后重新盖回，
-            // 须在 AssetDeployer 之后；未安装时静默早返回）
-            RimeDeployStep { context -> PredictDbManager.reapplyIfInstalled(context) },
-            // 第三步：注入已启用的扩展词库到主词库文件
-            // （AssetDeployer 可能覆盖了 luna_pinyin.dict.yaml，需重新追加扩展词库引用）
-            RimeDeployStep { context -> DictManager.regenerateMainDict(context) }
+        val context = ZiyouApplication.instance.applicationContext
+        RimeSdk.init(
+            context,
+            RimeSdkConfig(
+                // 显式传入宿主 versionCode 作为部署版本（SDK 版本与宿主解耦，
+                // 值与旧路径 AssetDeployer 自读 versionCode 完全一致）
+                deployVersion = context.packageManager
+                    .getPackageInfo(context.packageName, 0).longVersionCode,
+                preDeploySteps = listOf(
+                    // 恢复已安装的 predict.db 联想子库（升版 assets 覆盖后重新盖回，
+                    // 须在资源部署之后；未安装时静默早返回）
+                    RimeDeployStep { ctx -> PredictDbManager.reapplyIfInstalled(ctx) },
+                    // 注入已启用的扩展词库到主词库文件
+                    // （资源部署可能覆盖了 luna_pinyin.dict.yaml，需重新追加扩展词库引用）
+                    RimeDeployStep { ctx -> DictManager.regenerateMainDict(ctx) }
+                )
+            )
         )
-        RimeSession
+        RimeSdk.engine
     }
 
     /** Rime 引擎（默认生产实现为 [RimeSession]，可被测试覆盖）。 */
