@@ -7,8 +7,8 @@
 
 字由输入法按 **本仓 `:app` 单模块 + 隔壁独立 SDK 工程** 组织（SDK 拆分蓝图与迁移记录见
 [docs/SDK模块拆分重构方案.md](docs/SDK模块拆分重构方案.md)）：`:app`（Android 应用：UI + 业务域）
-经坐标 `com.ziyou:ime-sdk` 依赖隔壁工程 `ziyou-ime-sdk`（`settings.gradle.kts` 的 mavenLocal
-（限 `com.ziyou` 组）解析 AAR；源码联调可临时改回 `includeBuild` composite；对外交付 AAR），依赖方向**单向、由编译器强制**。
+以本地文件 AAR 消费隔壁工程 `ziyou-ime-sdk` 的产物（`app/libs/ime-sdk-release.aar` 随仓入库，
+`implementation(files(...))` 引入，零外部仓库依赖；升级时在 ziyou-ime-sdk 执行 `assembleRelease` 后覆盖），依赖方向**单向、由编译器强制**。
 五层引擎栈（UI → IME → Core → JNI → Engine）中 Core/JNI/Engine 三层与通用输入管线位于 SDK 工程；
 `:app` 内按 UI 层 / IME 层 / 业务域组织：
 
@@ -41,7 +41,7 @@
 │  core/ 业务纯逻辑(level/skill/skin/voice/rag/floating/clipboard/…)      │
 │  data/ 侧栏符号/剪贴板历史/工具栏配置/联想开关                            │
 └────────────────────────────────────────────────────────────────────────┘
-                                 │ 依赖（单向，AAR 坐标消费）
+                                 │ 依赖（单向，本地文件 AAR 消费）
                                  ▼
 ┌─────────────────────── ziyou-ime-sdk（com.ziyou:ime-sdk）─────────────┐
 │  Core 层   RimeApi · SimpleRimeImpl · RimeDispatcher · RimeNative        │

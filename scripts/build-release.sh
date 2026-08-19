@@ -81,7 +81,7 @@ echo ">> 签名密钥库: ${STORE_FILE}"
 
 # ---------------------------------------------------------------------------
 # 1. Native 预编译库（可选重建；工具链 librime-prebuilt/ 已随 SDK 工程迁移，
-#    librime.a 静态链入 librime_jni.so，app 经 mavenLocal AAR 坐标消费）
+#    librime.a 静态链入 librime_jni.so，app 经 app/libs/ime-sdk-release.aar 本地文件消费）
 # ---------------------------------------------------------------------------
 SDK_DIR="${ROOT_DIR}/../ziyou-ime-sdk"
 if [ "${REBUILD_NATIVE}" -eq 1 ]; then
@@ -122,15 +122,16 @@ sum_test_results() {
 
 if [ "${SKIP_TESTS}" -eq 0 ]; then
   echo ">> 运行全量单元测试 ..."
-  # SDK 已独立为隔壁工程 ziyou-ime-sdk（主工程经 AAR 消费），其测试需在
-  # 工程目录内单独触发
+  # SDK 已独立为隔壁工程 ziyou-ime-sdk（主工程经 app/libs/ 本地文件 AAR 消费），
+  # 其测试需在工程目录内单独触发
   if [ ! -d "${SDK_DIR}" ]; then
-    echo "错误: 未找到 SDK 独立工程 ${SDK_DIR}（app 经 mavenLocal 消费其 AAR，需本地存在并 publish）。" >&2
+    echo "错误: 未找到 SDK 独立工程 ${SDK_DIR}（app/libs/ime-sdk-release.aar 的源头，升级 SDK 时需要）。" >&2
     exit 1
   fi
-  # 测试 + 刷新 mavenLocal AAR（主工程经坐标 com.ziyou:ime-sdk 解析，
-  # 必须先 publish 才能拿到 SDK 最新源码的产物）
-  ( cd "${SDK_DIR}" && ./gradlew testDebugUnitTest publishToMavenLocal )
+  # 测试 + 重编 AAR 并同步覆盖 app/libs/ime-sdk-release.aar（主工程以本地
+  # 文件 AAR 消费，必须与 SDK 源码保持一致）
+  ( cd "${SDK_DIR}" && ./gradlew testDebugUnitTest assembleRelease )
+  cp "${SDK_DIR}/build/outputs/aar/ime-sdk-release.aar" "${ROOT_DIR}/app/libs/ime-sdk-release.aar"
   ./gradlew :app:testDebugUnitTest
 
   if [ ! -f "${BASELINE_FILE}" ]; then

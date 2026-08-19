@@ -11,6 +11,8 @@
 
 # sherpa-onnx 预编译 AAR（语音识别，经 scripts/fetch-sherpa-onnx.sh 下载）
 /app/libs/*.aar
+# 例外：ime-sdk AAR 随仓入库（零网络离线构建目标，见 settings.gradle.kts 注释）
+!/app/libs/ime-sdk-release.aar
 
 # 发布签名（严禁入库）
 /keystore.properties

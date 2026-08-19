@@ -17,14 +17,6 @@ plugins {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        // ime-sdk AAR 本地 Maven 坐标依赖（先在 ziyou-ime-sdk 工程执行
-        // ./gradlew publishToMavenLocal 发布；正式发布可替换为私有仓库 URL）。
-        // 限定 com.ziyou 组，避免 mavenLocal 遮蔽 google/mavenCentral 同名坐标
-        mavenLocal {
-            content {
-                includeGroup("com.ziyou")
-            }
-        }
         google()
         mavenCentral()
     }
@@ -33,6 +25,7 @@ dependencyResolutionManagement {
 rootProject.name = "ziyou-ime"
 include(":app")
 
-// 底层 SDK 以 AAR 坐标依赖引入（com.ziyou:ime-sdk，见 app/build.gradle.kts），
-// 不再使用 composite build 源码级联编；SDK 变更后需重新 publishToMavenLocal
-// 才能被主工程感知。如需源码联调，临时改回 includeBuild("../ziyou-ime-sdk") 即可。
+// 底层 SDK 以本地文件 AAR 引入（app/libs/ime-sdk-release.aar，与 sherpa-onnx
+// 同模式，零外部仓库依赖）：克隆本仓后无需网络/无需构建 SDK 源码即可编译。
+// SDK 升级流程：在 ziyou-ime-sdk 工程执行 ./gradlew assembleRelease，
+// 将 build/outputs/aar/ime-sdk-release.aar 拷贝覆盖 app/libs/ 下同名文件。

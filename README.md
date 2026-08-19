@@ -8,7 +8,7 @@
 - **输入引擎**：librime（源码交叉编译合并为单个静态库 `librime.a`，已启用 predict / witogram 插件）
 - **界面**：键盘/候选区/功能面板使用纯 Canvas 绘制（传统 View）；设置内的等级页、词库页、技能页、皮肤页等使用 Jetpack Compose (Material3)
 - **语言**：Kotlin 2.2 + Kotlin 协程，JNI 层 C++17（RAII 资源管理）
-- **架构**：本仓 `:app` 单模块 + 隔壁独立 SDK 工程 `ziyou-ime-sdk`（坐标 `com.ziyou:ime-sdk`，以 AAR 坐标依赖消费，经 mavenLocal/私有仓库解析）；引擎经 `RimeEngine` 接口 + 轻量 DI 容器（`AppContainer`）解耦，纯逻辑覆盖 JVM 单元测试
+- **架构**：本仓 `:app` 单模块 + 隔壁独立 SDK 工程 `ziyou-ime-sdk`（坐标 `com.ziyou:ime-sdk`，本仓以本地文件 AAR 消费：`app/libs/ime-sdk-release.aar` 随仓入库，零外部仓库依赖）；引擎经 `RimeEngine` 接口 + 轻量 DI 容器（`AppContainer`）解耦，纯逻辑覆盖 JVM 单元测试
 
 ## 特性一览
 
@@ -62,7 +62,18 @@
 - **NDK** r26+（用于编译 JNI 层，推荐 r26c）
 - **CMake** 3.22.1
 - **Kotlin / AGP / Compose**：Kotlin 2.2.10、Android Gradle Plugin 9.3.1、Compose BOM 2026.06.01（Material3）、Coroutines 1.11.0（版本集中在 [`gradle/libs.versions.toml`](gradle/libs.versions.toml)）
-- **Gradle 模块**：本仓仅 `:app`；底层 SDK 为隔壁独立工程 `ziyou-ime-sdk`（`com.android.library` 形态，经 maven-publish 打包 AAR），主工程经 `settings.gradle.kts` 的 mavenLocal（限 `com.ziyou` 组）以 AAR 坐标消费，**无源码级联编**；如需源码联调临时改回 `includeBuild("../ziyou-ime-sdk")`
+- **Gradle 模块**：本仓仅 `:app`；底层 SDK 为隔壁独立工程 `ziyou-ime-sdk`（`com.android.library` 形态），其 release AAR 产物以**本地文件**形式置于 `app/libs/ime-sdk-release.aar`（与 sherpa-onnx 同模式，随仓入库），`implementation(files(...))` 引入——**克隆本仓后无需网络、无需构建 SDK 源码、无需配置 Maven 仓库，直接 `./gradlew :app:assembleDebug` 即可**
+
+#### 更新 app/libs 内的 SDK AAR（开发者）
+
+```bash
+# 在 ziyou-ime-sdk 工程内重新编译并覆盖（scripts/build-release.sh 会自动执行此同步）
+cd ../ziyou-ime-sdk && ./gradlew assembleRelease
+cp build/outputs/aar/ime-sdk-release.aar ../ziyou-ime/app/libs/ime-sdk-release.aar
+```
+
+> AAR 内含 `jni/arm64-v8a/librime_jni.so`（librime.a 已静态链入）与 consumer
+> ProGuard 规则（自动应用）；`files()` 为直接文件依赖，无需 flatDir/仓库解析。
 
 #### SDK AAR 获取（第三方集成）
 
@@ -281,7 +292,7 @@ ziyou-ime/
 └── build.gradle.kts / settings.gradle.kts / gradle.properties
 
 ../ziyou-ime-sdk/                      # 隔壁独立 SDK 工程（坐标 com.ziyou:ime-sdk，交付 AAR，
-│                                      #  主工程经 mavenLocal AAR 坐标消费）
+│                                      #  主工程以本地文件 AAR 消费（app/libs/ime-sdk-release.aar））
 ├── librime-prebuilt/                  # librime 源码编译链（build.sh / superbuild / 插件子模块）
 ├── libs/                              # 产物：<abi>/librime.a + include + LIBRIME_MANIFEST.txt
 └── src/{main,test}/
@@ -301,7 +312,7 @@ ziyou-ime/
 | 依赖 | 用途 |
 |------|------|
 | librime（预编译静态库） | Rime 输入引擎（已静态链入 SDK 的 librime_jni.so，含 predict/witogram 插件） |
-| `com.ziyou:ime-sdk`（隔壁工程 AAR，mavenLocal/私有仓库） | 引擎交互 + 通用输入能力：T9 映射 / 九宫格状态机 / 输入管线 / 状态服务 |
+| `com.ziyou:ime-sdk`（本地文件 AAR：`app/libs/ime-sdk-release.aar`） | 引擎交互 + 通用输入能力：T9 映射 / 九宫格状态机 / 输入管线 / 状态服务 |
 | sherpa-onnx 1.13.3（本地 AAR） | 本地流式语音识别引擎 |
 | Kotlin Coroutines 1.11 | 异步与单线程 Dispatcher |
 | Jetpack Compose (Material3) | 等级/词库/技能/皮肤等设置页面 |
