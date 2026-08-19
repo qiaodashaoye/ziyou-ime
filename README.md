@@ -90,7 +90,8 @@ ziyou-ime-sdk/libs/
 adb install app/build/outputs/apk/debug/app-debug.apk
 
 # 运行单元测试（SDK 模块 + App）
-./gradlew :ime-sdk:testDebugUnitTest :app:testDebugUnitTest
+# composite build 下 included build 的任务需在 SDK 工程目录内触发
+(cd ../ziyou-ime-sdk && ./gradlew testDebugUnitTest) && ./gradlew :app:testDebugUnitTest
 ```
 
 ### 4. 启用输入法
@@ -188,15 +189,15 @@ android {
 
 项目按 Gradle 多模块组织，依赖方向单向向下（`:app → :ime-sdk`，由编译器强制边界）：
 
-- `:app`：Android 应用，包含 IME 服务、UI 与业务域持久化，依赖 `:ime-sdk`
-- `:ime-sdk`：底层 SDK（`com.android.library` 形态），承载五层引擎栈的 Core/JNI/Engine 层与通用输入管线（InputSession/状态服务/RimeSdk 门面），含 T9 状态机与 prediction 纯逻辑，可打包 AAR 独立集成（见 docs/SDK模块拆分重构方案.md）
+- `:app`：Android 应用，包含 IME 服务、UI 与业务域持久化，经坐标 `com.ziyou:ime-sdk` 依赖 SDK（composite 自动替换为源码）
+- `ziyou-ime-sdk`：隔壁独立 SDK 工程（`com.android.library` 形态，坐标 `com.ziyou:ime-sdk`），承载五层引擎栈的 Core/JNI/Engine 层与通用输入管线（InputSession/状态服务/RimeSdk 门面），含 librime-prebuilt 编译链，可打包 AAR 独立集成（见 docs/SDK模块拆分重构方案.md）
 
 ```bash
-# 仅编译/测试 SDK 模块
-./gradlew :ime-sdk:testDebugUnitTest
+# 仅编译/测试 SDK（composite build 下 included build 任务需在其工程目录内触发）
+(cd ../ziyou-ime-sdk && ./gradlew testDebugUnitTest)
 
 # 编译并测试整个工程
-./gradlew :ime-sdk:testDebugUnitTest :app:testDebugUnitTest
+(cd ../ziyou-ime-sdk && ./gradlew testDebugUnitTest) && ./gradlew :app:testDebugUnitTest
 ```
 
 > 首次同步会拉取 `com.android.library` 插件 marker；离线环境请先在联网时同步一次。
@@ -251,53 +252,50 @@ schema_list:
 
 ```
 ziyou-ime/
-├── app/                               # 应用模块（Android application + JNI/引擎集成 + UI）
+├── app/                               # 应用模块（UI + 业务域，消费 ime-sdk）
 │   └── src/main/
-│       ├── assets/rime/               # Rime 配置（方案 + 词库 + opencc 数据）
+│       ├── assets/rime/               # Rime 内容（方案 + 词库 + opencc + grammar 模型）
 │       ├── java/com/ziyou/ime/
-│       │   ├── ZiyouApplication.kt        # Application 入口
-│       │   ├── core/                       # 核心层：Rime 引擎交互
-│       │   │   ├── RimeNative.kt          # JNI native 方法声明（20 个 external 函数）
-│       │   │   ├── RimeApi.kt / SimpleRimeImpl.kt  # 引擎 suspend API 接口与实现
-│       │   │   ├── RimeDispatcher.kt      # 单线程协程调度器
-│       │   │   ├── ProtoTypes.kt          # 数据传输对象（data class）
-│       │   │   ├── RimeMessage.kt         # 消息类型 + SharedFlow 广播
-│       │   │   └── RimeConfig.kt          # 配置文件 JNI 接口
-│       │   ├── daemon/                     # 引擎生命周期
-│       │   │   ├── RimeEngine.kt          # 引擎抽象接口（解耦/可测试）
-│       │   │   └── RimeSession.kt         # 接口实现单例（初始化/重部署/销毁）
-│       │   ├── di/AppContainer.kt          # 轻量 DI 容器（组合根，提供 RimeEngine）
-│       │   ├── config/                     # 配置层：RimeConfigManager / ThemeManager / AssetDeployer
+│       │   ├── ZiyouApplication.kt        # Application 入口（引擎预热）
+│       │   ├── di/AppContainer.kt          # 组合根：经 RimeSdk.init 装配部署步骤、暴露 RimeEngine
 │       │   ├── ime/                        # 输入法服务层
 │       │   │   ├── ZiYouInputMethodService.kt  # IME 服务主类（生命周期 + 视图装配）
-│       │   │   ├── InputLogicController.kt # 输入逻辑控制器（Rime 交互/上屏/刷新 UI）
+│       │   │   ├── InputLogicController.kt # 业务薄层（CommitTarget 路由/上屏监听/图片上屏）
 │       │   │   ├── KeyboardLayoutManager.kt # 键盘视图装载器（复合布局组装）
-│       │   │   ├── PinyinHintProvider.kt   # 九宫格拼音提示/预览纯逻辑
+│       │   │   ├── PinyinHintProvider.kt   # 九宫格拼音提示/预览（内容层约定）
 │       │   │   ├── BaseKeyboardView.kt    # 键盘视图基类（Canvas 绘制/触摸/主题）
 │       │   │   ├── QwertyKeyboardView.kt  # QWERTY 全键盘
 │       │   │   ├── NineGridKeyboardView.kt # 九宫格 T9 键盘 + 全宽底栏
 │       │   │   ├── PinyinSideBarView.kt   # 九宫格拼音/符号侧栏
 │       │   │   ├── SimpleCandidatesView.kt # 候选词横条
 │       │   │   ├── PreeditOverlayView.kt  # 编码区（与候选词分离）
-│       │   │   ├── KeyboardType.kt
-│       │   ├── data/SideSymbol.kt          # 侧栏符号仓库（SharedPreferences）
-│       │   ├── dict/                       # 扩展词库：DictManager / DictDownloader / DictModels
+│       │   │   └── KeyboardType.kt
+│       │   ├── config/                     # SchemaPreference / DisplayModeManager
+│       │   ├── core/                       # 业务纯逻辑（原 :core-logic 分流：level/skill/skin/voice/rag/floating 等）
+│       │   ├── data/                       # 侧栏符号/剪贴板/工具栏配置持久化
+│       │   ├── dict/                       # 扩展词库：DictManager / DictDownloader / PredictDbManager
 │       │   ├── level/                      # 等级持久化：LevelRepository / LevelStats / LevelState
+│       │   ├── skill/ · skin/ · ai/ · voice/ · update/   # 其余业务域
 │       │   └── ui/                         # SettingsActivity / LevelActivity / DictManagerActivity(+VM)
 │       └── res/                           # Android 资源（含 input_method.xml）
-├── ime-sdk/                          # 底层 SDK 模块（librime 交互 + 通用输入能力，交付 AAR）
-│   └── src/{main,test}/
-│       ├── jni/librime_jni/               # C++/JNI 层（rime_jni.cc / config.cc / CMakeLists.txt）
-│       └── java/com/ziyou/ime/
-│           ├── core/                       # RimeNative / RimeApi / Proto / Dispatcher + t9 + prediction
-│           ├── daemon/                     # RimeEngine / RimeSession / RimeDeployStep
-│           ├── config/                     # AssetDeployer / RimeConfigManager
-│           ├── sdk/                        # RimeSdk 门面 + input/InputSession + state 状态服务
-│           └── util/T9PinYinUtils.kt      # T9 ↔ 拼音双向映射
-├── dicts-repo/                        # 扩展词库源仓库（catalog.json + dicts/*.dict.yaml）
-├── docs/                              # 设计文档（如 等级体系可行性方案）
+├── scripts/                           # 发布/测试门禁脚本（build-release.sh 等）
+├── docs/                              # 设计文档（含 SDK模块拆分重构方案）
 ├── ARCHITECTURE.md                    # 架构设计文档
 ├── build.gradle.kts / settings.gradle.kts / gradle.properties
+
+../ziyou-ime-sdk/                      # 隔壁独立 SDK 工程（坐标 com.ziyou:ime-sdk，交付 AAR，
+│                                      #  经 settings.gradle.kts includeBuild composite 消费）
+├── librime-prebuilt/                  # librime 源码编译链（build.sh / superbuild / 子模块）
+├── libs/                              # 产物：<abi>/librime.a + include + LIBRIME_MANIFEST.txt
+├── scripts/verify_librime.sh          # 能力契约校验（WITH_* 开关 + 符号）
+└── src/{main,test}/
+    ├── jni/librime_jni/               # C++/JNI 层（rime_jni.cc / config.cc / CMakeLists.txt）
+    └── java/com/ziyou/ime/
+        ├── core/                      # RimeNative / RimeApi / Proto / Dispatcher + t9 + prediction
+        ├── daemon/                    # RimeEngine / RimeDeployStep（RimeSession 已 internal）
+        ├── config/                    # AssetDeployer / RimeConfigManager
+        ├── sdk/                       # RimeSdk 门面 + input/InputSession + state 状态服务
+        └── util/T9PinYinUtils.kt      # T9 ↔ 拼音双向映射
 ```
 
 更完整的架构说明、模块交互与数据流详见 [ARCHITECTURE.md](ARCHITECTURE.md)。
@@ -306,8 +304,8 @@ ziyou-ime/
 
 | 依赖 | 用途 |
 |------|------|
-| librime（预编译静态库） | Rime 输入引擎 |
-| `:core-logic`（内部模块） | 纯逻辑：T9 映射 / 九宫格状态机 / 等级计分（可独立单测） |
+| librime（预编译静态库） | Rime 输入引擎（已静态链入 SDK 的 librime_jni.so） |
+| `com.ziyou:ime-sdk`（隔壁独立工程，composite/AAR） | 引擎交互 + 通用输入能力：T9 映射 / 九宫格状态机 / 输入管线 / 状态服务 |
 | Kotlin Coroutines | 异步与单线程 Dispatcher |
 | Jetpack Compose (Material3) | 等级页、扩展词库页 |
 | AndroidX AppCompat / Lifecycle / ViewModel | 设置页与 ViewModel |
@@ -330,7 +328,7 @@ ziyou-ime/
 ### 代码规范
 
 - Kotlin 代码遵循 [Kotlin 官方编码规范](https://kotlinlang.org/docs/coding-conventions.html)
-- 纯逻辑（无 Android/JNI 依赖）应置于 `:core-logic` 模块，禁止反向依赖 `:app`
+- 按「能力 vs 业务」分流：输入法通用能力（引擎交互、T9、候选/编码语义）归 ziyou-ime-sdk，业务纯逻辑（计分、技能校验等）置于 `:app`，禁止反向依赖
 - C++ 代码遵循项目 `.clang-format` 配置（C++17 标准）
 - 所有 Rime 调用必须通过 `RimeDispatcher` 调度（librime 非线程安全）
 - JNI 层使用 RAII 管理资源，避免内存泄漏
@@ -342,11 +340,11 @@ ziyou-ime/
 # 编译检查
 ./gradlew :app:assembleDebug
 
-# 单元测试（core-logic 纯逻辑 + app）
-./gradlew :core-logic:testDebugUnitTest :app:testDebugUnitTest
+# 单元测试（SDK 纯逻辑/引擎层 + app；composite 下 SDK 测试需在其工程目录内触发）
+(cd ../ziyou-ime-sdk && ./gradlew testDebugUnitTest) && ./gradlew :app:testDebugUnitTest
 
-# 代码格式化（JNI 层）
-clang-format -i app/src/main/jni/librime_jni/*.cc app/src/main/jni/librime_jni/*.h
+# 代码格式化（JNI 层，源码位于 SDK 工程）
+clang-format -i ../ziyou-ime-sdk/src/main/jni/librime_jni/*.cc ../ziyou-ime-sdk/src/main/jni/librime_jni/*.h
 ```
 
 ## 许可证

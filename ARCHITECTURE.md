@@ -523,7 +523,7 @@ JNI 回调经 `SharedFlow.tryEmit()` 线程安全传递；引擎初始化的资�
 | `:app` | `LevelEngineTest` | 11 | 分段计分/封顶、签到奖励、等级判定与进度、权益解锁 |
 | `:app` | `PinyinHintProviderTest` | 13 | 数字段还原拼音、回退 comment、预览优先高亮候选、空上下文 |
 
-运行：`./gradlew :ime-sdk:testDebugUnitTest :app:testDebugUnitTest`（用例总数以 `scripts/unit-test-baseline.txt` 为准，发布脚本会比对实测值，低于基线即失败）。
+运行：`(cd ../ziyou-ime-sdk && ./gradlew testDebugUnitTest) && ./gradlew :app:testDebugUnitTest`（composite build 下 included build 的任务需在其工程目录内触发；用例总数以 `scripts/unit-test-baseline.txt` 为准，发布脚本会比对实测值，低于基线即失败）。
 引擎接口化后，涉及引擎的逻辑可通过 `AppContainer.overrideRimeEngine()` 注入 fake 实现进行测试。
 
 ## 关键设计决策
@@ -565,7 +565,7 @@ Rime 只组织光标之前的编码片段。若把选定拼音追加到编码串
 ## 如何扩展
 
 ### 添加新的 JNI 函数
-1. 在 `ime-sdk/src/main/jni/librime_jni/rime_jni.cc` 添加 `Java_com_ziyou_ime_core_RimeNative_yourNewMethod` 导出函数
+1. 在隔壁 SDK 工程 `ziyou-ime-sdk/src/main/jni/librime_jni/rime_jni.cc` 添加 `Java_com_ziyou_ime_core_RimeNative_yourNewMethod` 导出函数
 2. 在 `RimeNative.kt` 声明对应 `@JvmStatic external fun`
 3. 在 `RimeApi.kt` 增接口方法，`SimpleRimeImpl.kt` 中经 `dispatcher.dispatch` 实现
 
